@@ -5,6 +5,7 @@
   "description": "Lead intake, dedupe, source tagging and event-type routing for website, Google Ads and bridal-fair leads.",
   "scripts": {
     "test": "node test/run.js",
+    "bundle": "node tools/bundle.js",
     "login": "clasp login",
     "push": "clasp push",
     "pull": "clasp pull",

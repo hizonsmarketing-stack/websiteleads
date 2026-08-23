@@ -8,21 +8,26 @@ The script lives inside the Google Sheet the sales team already works in.
 
 1. Open the sales worksheet in Google Sheets.
 2. **Extensions → Apps Script**. An editor opens with an empty `Code.gs`.
-3. Copy each file from `src/` into the editor as a file of the same name
-   (the `+` next to *Files* → *Script* for `.gs` files, → *HTML* for
-   `FairImport.html`). Delete the empty `Code.gs`.
-4. Click the gear (*Project Settings*) and tick **Show "appsscript.json"
-   manifest file in editor**, then paste in the contents of
-   `src/appsscript.json`.
-5. **Save**.
+3. Select everything in `Code.gs` and replace it with the contents of
+   **`dist/Code.gs`** from this repository. (That one file is every file in
+   `src/` concatenated — Apps Script joins them at runtime anyway.)
+4. Click **+** next to *Files* → **HTML**, name it exactly `FairImport`
+   (the editor adds the `.html`), and replace its contents with
+   **`dist/FairImport.html`**.
+5. Click the gear (*Project Settings*) and tick **Show "appsscript.json"
+   manifest file in editor**. Back in *Editor*, open `appsscript.json` and
+   replace it with **`dist/appsscript.json`**.
+6. Rename the project (click *Untitled project* at the top) to
+   `Website Leads Automation`, and **Save**.
 
-The script must be **bound to the spreadsheet** (created via *Extensions → Apps
-Script* from inside it). If you instead created a standalone script project,
-add a script property `SPREADSHEET_ID` with the sales worksheet's id — the part
-of its URL between `/d/` and `/edit` — under *Project Settings → Script
-Properties*.
+The script must be **bound to the spreadsheet** — created via *Extensions →
+Apps Script* from inside it, as above. If you instead made a standalone script
+project, add a script property `SPREADSHEET_ID` with the sales worksheet's id
+(the part of its URL between `/d/` and `/edit`) under *Project Settings →
+Script Properties*.
 
-Prefer the command line? Use [clasp](https://github.com/google/clasp) instead:
+Prefer the command line? Use [clasp](https://github.com/google/clasp) instead,
+which pushes the individual `src/` files:
 
 ```bash
 npm install
