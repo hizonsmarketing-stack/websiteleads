@@ -75,7 +75,7 @@ function doGet(e) {
     status: 'ok',
     service: 'Website Leads Automation',
     time: nowStamp_(),
-    tabs: teamTabNames_()
+    tabs: leadTabNames_()
   });
 }
 

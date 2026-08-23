@@ -11,9 +11,13 @@ The script lives inside the Google Sheet the sales team already works in.
 3. Select everything in `Code.gs` and replace it with the contents of
    **`dist/Code.gs`** from this repository. (That one file is every file in
    `src/` concatenated — Apps Script joins them at runtime anyway.)
-4. Click **+** next to *Files* → **HTML**, name it exactly `FairImport`
-   (the editor adds the `.html`), and replace its contents with
-   **`dist/FairImport.html`**.
+4. Add the two dialogs. For each, click **+** next to *Files* → **HTML**, give
+   it the exact name below (the editor adds the `.html` itself), and replace
+   its contents:
+   - `FairImport` ← **`dist/FairImport.html`**
+   - `Migrate` ← **`dist/Migrate.html`**
+
+   The names matter — the dialogs are loaded by them.
 5. Click the gear (*Project Settings*) and tick **Show "appsscript.json"
    manifest file in editor**. Back in *Editor*, open `appsscript.json` and
    replace it with **`dist/appsscript.json`**.
@@ -49,11 +53,44 @@ Website Leads Automation (unsafe)*. The scopes it asks for are in
 `appsscript.json` — the spreadsheet, outbound requests, and sending mail for
 new-lead notifications.
 
-When it finishes you have the team tabs, `All Leads`, `Duplicates`,
-`_Settings`, `_Sources`, a `Dashboard`, and the hidden machinery tabs.
+When it finishes you have the shared event-type tabs, `All Leads`,
+`Duplicates`, `_Settings`, `_Sources`, `_Team`, a `Dashboard`, and the hidden
+machinery tabs. Setup also reports any existing tabs it thinks are
+salespeople's.
 
 This menu item is safe to run again at any time — it repairs missing tabs and
 columns without touching existing data. Run it after adding a new event type.
+
+## 2b. Fill in the team roster
+
+Leads are handed to a person, not just to a team, so the automation needs to
+know who covers what.
+
+1. **Leads → Open team roster** (or open the `_Team` tab).
+2. Setup has already listed every tab that isn't one of its own — one row per
+   salesperson. For each:
+   - **Event Types** — comma-separated, spelled exactly as the labels:
+     `Corporate`, `Wedding`, `Social / Debut / Birthday`, `Private Event`.
+     Someone covering three of them gets all three, comma separated. `*` means
+     everything.
+   - **Email** — optional, for new-lead alerts.
+   - **Active** — `yes` for anyone currently taking leads.
+3. Leave **Assigned Count** and **Last Assigned At** alone — that's the
+   rotation's memory.
+
+Anyone left inactive, or an event type nobody covers, falls back to the shared
+event-type tab with no owner. Nothing is ever lost because the roster is
+incomplete.
+
+## 2c. Import the leads you already have
+
+If your salespeople's tabs already hold leads, import them now so they take
+part in duplicate matching — otherwise a client who inquired last month will be
+treated as a new lead and dealt to whoever's turn it is.
+
+**Leads → Import existing leads from a tab…**, once per tab. There is a preview
+that writes nothing, and rows never move or get deleted. Full walkthrough in
+[EXISTING_LEADS.md](EXISTING_LEADS.md).
 
 ## 3. Deploy the webhook
 

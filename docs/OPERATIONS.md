@@ -6,6 +6,8 @@
 | --- | --- |
 | **Setup / repair tabs** | Creates anything missing and re-applies formatting. Safe on a live workbook; run it after adding an event type. |
 | **Import bridal fair worksheet…** | See [BRIDAL_FAIRS.md](BRIDAL_FAIRS.md). |
+| **Open team roster** | Jumps to `_Team`, where you say who covers what. |
+| **Import existing leads from a tab…** | One-time, per salesperson tab. See [EXISTING_LEADS.md](EXISTING_LEADS.md). |
 | **Show webhook URL** | The URLs to give Wix and Google Ads. |
 | **Set webhook token…** | The shared secret website forms must send. |
 | **Set Google Ads key…** | Must match the Key on the Google Ads lead form. |
@@ -54,22 +56,58 @@ All in the `_Settings` tab. Changes take effect on the next submission.
 | `Promote Unassigned Leads` | `yes` | Move a lead out of Unassigned when a later form reveals its event type |
 | `Append Duplicate Notes` | `yes` | Add the repeat inquiry's text to the original lead's Message |
 | `Accept Test Leads` | `no` | Store Google Ads test leads instead of only acknowledging them |
-| `Round Robin Assignment` | `no` | Fill **Assigned To** from the Reps list for each tab |
+| `Round Robin Assignment` | `yes` | Share leads out across the `_Team` roster. `no` sends everything to the shared event-type tabs instead |
 | `Notify On New Lead` | `no` | Email the addresses in the Notify rows |
 | `Raw Payload Retention (rows)` | `2000` | How much of `_Raw` to keep |
 | `Log Retention (rows)` | `5000` | How much of `_Log` to keep |
-| `Reps - <Tab>` | blank | Comma-separated names, rotated in order |
-| `Notify - <Tab>` | blank | Comma-separated email addresses |
+| `Notify - <Tab>` | blank | Extra addresses copied on new leads of that event type, on top of the assignee |
 
-### Assigning leads to reps
+## The team roster
 
-Set `Round Robin Assignment` to `yes` and fill in, say,
-`Reps - Corporate` = `Ana, Ben, Cara`. New corporate leads then get **Assigned
-To** filled in, rotating through the list. The rotation position survives
-across submissions.
+`_Team` is who gets what. One row per salesperson:
 
-A lead that arrives with an owner already on it (a worksheet column called
-"Assigned To") keeps that owner.
+| Column | Use |
+| --- | --- |
+| **Salesperson** | Their name, written into **Assigned To** on each lead |
+| **Tab Name** | The tab their leads land in. Defaults to their name |
+| **Event Types** | Comma-separated, e.g. `Social / Debut / Birthday, Wedding, Private Event`. `*` means everything |
+| **Email** | Optional. Gets the new-lead alert when notifications are on |
+| **Active** | `yes` for anyone currently taking leads. Set to `no` for leave, and the rotation skips them |
+| **Assigned Count**, **Last Assigned At** | Maintained automatically — this is the rotation's memory |
+| **Notes** | Yours |
+
+Setup pre-fills this with every tab in the workbook that the automation doesn't
+own, inactive and with no event types, so nothing routes to a person until
+you've said who covers what.
+
+### How the split works
+
+Among everyone active who covers that event type, **the one with the fewest
+leads so far gets the next one**. Ties go to whoever was assigned longest ago,
+then alphabetically. That produces the same strict rotation as taking turns,
+but stays correct when you add someone, put someone on leave, or have one
+person covering three event types.
+
+To restart the rotation — a new quarter, a new hire who should catch up — clear
+the **Assigned Count** column.
+
+Two things deliberately bypass the rotation:
+
+- **A returning lead goes back to whoever owns it.** Deduplication merges the
+  new submission into the existing row, wherever it lives, so a rep never loses
+  a lead they've been working because the client filled in a second form.
+- **A lead that names an owner keeps them.** If an imported worksheet has an
+  "Assigned To" column with a name on the roster, that person gets it.
+
+### When nobody covers an event type
+
+The lead goes to the shared event-type tab (`Corporate`, `Wedding`, …) with
+**Assigned To** blank, for a manager to hand out. That's also what happens if
+you set `Round Robin Assignment` to `no`.
+
+Leads whose event type couldn't be worked out go to **Unassigned** with no
+owner — and are assigned automatically if a later submission reveals the event
+type.
 
 ### Email alerts
 
@@ -127,6 +165,13 @@ repair tabs** which hides them again afterwards). Every request is logged,
 including rejections. `invalid token` or `invalid google_key` means the secret
 doesn't match; `no contact details` means the payload had no name, email or
 phone.
+
+**A lead went to the wrong person.**
+Check `_Team`: are their **Event Types** spelled exactly as the event type
+labels, and is **Active** set to `yes`? A misspelled event type silently
+excludes that person from the rotation. **Leads → Run self-test** doesn't check
+the roster, but the Dashboard's *Leads by salesperson* block shows at a glance
+if someone is getting nothing.
 
 **A lead went to the wrong tab.**
 Look at **Event Type (Raw)** on the row — that's the wording the form sent. Add

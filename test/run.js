@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; } };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab };');
 
 const api = global.__api;
 
@@ -191,7 +191,8 @@ res = post({ formName: 'Contact Us', email: 'liza@example.com', name: 'Liza M' }
   { source: 'website', form: 'Contact Us' });
 check('dedupe works after a rebuild', res.action, 'merged');
 
-realLog('\n--- assignment, notification and auth ---');
+realLog('\n--- salesperson roster: routing to people, not just teams ---');
+silence(quiet);
 function setSetting(key, value) {
   const sheet = tab('_Settings');
   const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
@@ -200,23 +201,116 @@ function setSetting(key, value) {
   }
   throw new Error('no such setting: ' + key);
 }
-setSetting('Round Robin Assignment', 'yes');
+
+// Two teams, mirroring a tab-per-salesperson worksheet: five people covering
+// socials/weddings/private events, two covering corporate.
+const socials = 'Social / Debut / Birthday, Wedding, Private Event';
+[
+  ['Bea', 'Bea', socials, 'bea@example.com', 'yes', 0, '', ''],
+  ['Carlo', 'Carlo', socials, '', 'yes', 0, '', ''],
+  ['Dina', 'Dina', socials, '', 'yes', 0, '', ''],
+  ['Ella', 'Ella', socials, '', 'no', 0, '', 'on leave'],
+  ['Fred', 'Fred', socials, '', 'yes', 0, '', ''],
+  ['Gina', 'Gina', 'Corporate', '', 'yes', 0, '', ''],
+  ['Hector', 'Hector', 'Corporate', '', 'yes', 0, '', '']
+].forEach(row => tab('_Team').appendRow(row));
 setSetting('Notify On New Lead', 'yes');
-setSetting('Reps - Social', 'Bea, Carlo');
-setSetting('Notify - Social', 'sales@example.com');
 api.resetCaches();
 
-post({ formName: 'Debut Inquiry', name: 'Kim Santos', email: 'kim@example.com',
-  'Type of Event': 'Debut', 'Contact Number': '0917 222 3333' }, { source: 'website', form: 'Debut Inquiry' });
-api.resetCaches();
-post({ formName: 'Debut Inquiry', name: 'Lea Tan', email: 'lea@example.com',
-  'Type of Event': '18th Birthday', 'Contact Number': '0917 444 5555' }, { source: 'website', form: 'Debut Inquiry' });
-check('first social lead assigned', cellOf('Social', 2, 'Assigned To'), 'Bea');
-check('round robin advances', cellOf('Social', 3, 'Assigned To'), 'Carlo');
-check('team notified', global.__mails.length, 2);
-check('notification names the event type', /Social/.test(global.__mails[0].subject), 'true');
+function inquiry(name, email, phone, eventType, form) {
+  api.resetCaches();
+  return post({ formName: form || 'Homepage Inquiry', name: name, email: email,
+    'Contact Number': phone, 'Type of Event': eventType },
+    { source: 'website', form: form || 'Homepage Inquiry' });
+}
 
+const c1 = inquiry('Corp One', 'c1@example.com', '0917 000 0001', 'Corporate seminar');
+const c2 = inquiry('Corp Two', 'c2@example.com', '0917 000 0002', 'Corporate seminar');
+const c3 = inquiry('Corp Three', 'c3@example.com', '0917 000 0003', 'Corporate seminar');
+check('corporate lead goes to a person tab', c1.tab, 'Gina');
+check('second corporate lead goes to the other rep', c2.tab, 'Hector');
+check('third comes back around', c3.tab, 'Gina');
+check('assignee stamped on the row', cellOf('Gina', 2, 'Assigned To'), 'Gina');
+
+const s1 = inquiry('Soc One', 's1@example.com', '0917 111 0001', 'Debut');
+const s2 = inquiry('Soc Two', 's2@example.com', '0917 111 0002', 'Church Wedding');
+const s3 = inquiry('Soc Three', 's3@example.com', '0917 111 0003', 'Intimate family gathering');
+const s4 = inquiry('Soc Four', 's4@example.com', '0917 111 0004', 'Birthday');
+check('socials team covers debut', ['Bea', 'Carlo', 'Dina', 'Fred'].indexOf(s1.tab) > -1, 'true');
+check('same rotation covers weddings', ['Bea', 'Carlo', 'Dina', 'Fred'].indexOf(s2.tab) > -1, 'true');
+check('and private events', ['Bea', 'Carlo', 'Dina', 'Fred'].indexOf(s3.tab) > -1, 'true');
+const socialTabs = [s1.tab, s2.tab, s3.tab, s4.tab];
+check('four leads went to four different people', new Set(socialTabs).size, 4);
+check('inactive rep skipped', socialTabs.indexOf('Ella'), -1);
+check('roster counts kept', tab('_Team').getRange(2, 6).getValue(), 1);
+check('assignee emailed', global.__mails.some(m => m.to.indexOf('bea@example.com') > -1), 'true');
+
+api.resetCaches();
+const repeat = post({ formName: 'Wedding Package Inquiry', name: 'Soc One',
+  email: 's1@example.com', 'Type of Event': 'Wedding' },
+  { source: 'website', form: 'Wedding Package Inquiry' });
+check('a returning lead stays with the rep who owns it', repeat.tab, s1.tab);
+check('and is not re-dealt', repeat.action, 'merged');
+
+api.resetCaches();
+const noType = post({ formName: 'Footer Newsletter', name: 'Later Reveal',
+  email: 'later@example.com' }, { source: 'website', form: 'Footer Newsletter' });
+check('unknown event type stays unassigned', noType.tab, 'Unassigned');
+check('and gets no owner', cellOf('Unassigned', 2, 'Assigned To'), '');
+api.resetCaches();
+const revealed = post({ formName: 'Corporate Events Inquiry', name: 'Later Reveal',
+  email: 'later@example.com', 'Type of Event': 'Corporate' },
+  { source: 'website', form: 'Corporate Events Inquiry' });
+check('promotion hands it to a corporate rep', ['Gina', 'Hector'].indexOf(revealed.tab) > -1, 'true');
+check('promoted row carries the owner', cellOf(revealed.tab, 3, 'Assigned To'), revealed.tab);
+
+realLog('\n--- migrating a salesperson tab that already had leads ---');
+silence(quiet);
+const legacy = book.insertSheet('Iris');
+const legacyData = [
+  ['Client Name', 'Contact', 'Email Add', 'Type of Event', 'Date of Event', 'Status', 'Remarks'],
+  ['Rosa Lim', '0917 999 0001', 'rosa@example.com', 'Debut', '03/15/2027', 'Quoted', 'wants buffet'],
+  ['Ana Reyes', '0917 123 4567', '', 'Corporate', '', 'Contacted', 'from the website last year'],
+  ['Ben Cruz', '0918 999 0002', 'ben@example.com', 'Wedding', '06/06/2027', '', '']
+];
+legacy.getRange(1, 1, legacyData.length, 7).setValues(legacyData);
+tab('_Team').appendRow(['Iris', 'Iris', socials, '', 'yes', 0, '', '']);
+api.resetCaches();
+
+const dry = api.migrateExistingTab({ tabName: 'Iris', dryRun: true });
+check('dry run reads every row', dry.migrated, 3);
+check('dry run writes nothing', tab('Iris').getLastColumn(), 7);
+check('dry run spots the cross-tab duplicate', dry.duplicatesFound, 1);
+
+const migrated = api.migrateExistingTab({ tabName: 'Iris', subSource: 'Pre-automation' });
+check('rows migrated', migrated.migrated, 3);
+check('rows stayed in Iris', rows('Iris'), 3);
+check('lead ids written', String(cellOf('Iris', 2, 'Lead ID')).slice(0, 3), 'LD-');
+check('owner stamped from the tab', cellOf('Iris', 2, 'Assigned To'), 'Iris');
+check('phone normalised in place', cellOf('Iris', 2, 'Phone'), '+639179990001');
+check('original phone kept', cellOf('Iris', 2, 'Phone (Raw)'), '0917 999 0001');
+check('legacy column untouched', cellOf('Iris', 2, 'Contact'), '0917 999 0001');
+check('existing status preserved', cellOf('Iris', 2, 'Status'), 'Quoted');
+check('event type read from the legacy column', cellOf('Iris', 2, 'Event Type'), 'Social / Debut / Birthday');
+check('event date parsed', cellOf('Iris', 2, 'Event Date'), '2027-03-15');
+check('tagged with the migration sub-source', cellOf('Iris', 2, 'Sub-Source'), 'Pre-automation');
+
+api.resetCaches();
+const returning = post({ formName: 'Contact Us', name: 'Rosa Lim', email: 'rosa@example.com',
+  'Type of Event': 'Debut' }, { source: 'website', form: 'Contact Us' });
+check('a migrated lead now dedupes against new inquiries', returning.action, 'merged');
+check('and stays in its own tab', returning.tab, 'Iris');
+check('touch counted on the historical row', cellOf('Iris', 2, 'Touches'), 2);
+
+api.resetCaches();
+const second = api.migrateExistingTab({ tabName: 'Iris' });
+check('re-running the migration is a no-op', second.migrated, 0);
+check('already-migrated rows are recognised', second.alreadyDone, 3);
+
+realLog('\n--- auth and payload shapes ---');
+silence(quiet);
 PropertiesService.getScriptProperties().setProperty('WEBHOOK_TOKEN', 's3cret');
+api.resetCaches();
 let denied = post({ formName: 'Contact Us', email: 'nope@example.com' }, { source: 'website' });
 check('bad token rejected', denied.status, 'error');
 let allowed = post({ formName: 'Contact Us', email: 'yes@example.com', name: 'Token Test',
@@ -224,13 +318,13 @@ let allowed = post({ formName: 'Contact Us', email: 'yes@example.com', name: 'To
 check('good token accepted', allowed.action, 'created');
 PropertiesService.getScriptProperties().deleteProperty('WEBHOOK_TOKEN');
 
+api.resetCaches();
 const formEncoded = api.doPost({
   postData: { contents: 'name=Form+Encoded&email=fe%40example.com' },
   parameter: { source: 'website', form: 'Legacy HTML Form', name: 'Form Encoded',
     email: 'fe@example.com', 'Type of Event': 'Corporate' }
 });
 check('form-encoded body accepted', JSON.parse(formEncoded.getContent()).action, 'created');
-check('form-encoded routed', JSON.parse(formEncoded.getContent()).tab, 'Corporate');
 
 realLog('\n--- totals ---');
 realLog('  All Leads:      ' + rows('All Leads'));

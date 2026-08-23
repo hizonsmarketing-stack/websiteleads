@@ -16,6 +16,7 @@
  *   src/10_Setup.gs
  *   src/11_Menu.gs
  *   src/12_Tests.gs
+ *   src/13_Migrate.gs
  */
 
 // ==========================================================================
@@ -37,6 +38,7 @@ const SHEETS = {
   duplicates: 'Duplicates',
   unassigned: 'Unassigned',
   settings: '_Settings',
+  team: '_Team',
   sources: '_Sources',
   index: '_Index',
   log: '_Log',
@@ -71,6 +73,21 @@ const LEAD_COLUMNS = [
   'Last Touch At',
   'All Sub-Sources',
   'Raw Ref'
+];
+
+/**
+ * The salesperson roster. Leads are routed to a person's own tab, chosen by
+ * round robin among whoever covers that event type.
+ */
+const TEAM_COLUMNS = [
+  'Salesperson',
+  'Tab Name',
+  'Event Types',
+  'Email',
+  'Active',
+  'Assigned Count',
+  'Last Assigned At',
+  'Notes'
 ];
 
 /** Extra columns only the Duplicates tab carries, appended after LEAD_COLUMNS. */
@@ -155,7 +172,7 @@ const DEFAULT_SETTINGS = {
   'Promote Unassigned Leads': 'yes',
   'Append Duplicate Notes': 'yes',
   'Accept Test Leads': 'no',
-  'Round Robin Assignment': 'no',
+  'Round Robin Assignment': 'yes',
   'Notify On New Lead': 'no',
   'Raw Payload Retention (rows)': '2000',
   'Log Retention (rows)': '5000'
@@ -682,9 +699,22 @@ function allEventTypes_() {
   return EVENT_TYPES.concat([FALLBACK_EVENT_TYPE]);
 }
 
-/** @return {!Array<string>} Every tab a routed lead can land in. */
+/** @return {!Array<string>} The shared tab for each event type. */
 function teamTabNames_() {
   return allEventTypes_().map(function (t) { return t.tab; });
+}
+
+/**
+ * Every tab a routed lead can land in: the shared event-type tabs plus each
+ * salesperson's own tab from the _Team roster.
+ * @return {!Array<string>}
+ */
+function leadTabNames_() {
+  const names = teamTabNames_();
+  loadTeam_().forEach(function (member) {
+    if (member.tab && names.indexOf(member.tab) === -1) names.push(member.tab);
+  });
+  return names;
 }
 
 // ==========================================================================
@@ -1345,7 +1375,7 @@ function rebuildIndex() {
     const seen = {};
     let leads = 0;
 
-    teamTabNames_().forEach(function (tabName) {
+    leadTabNames_().forEach(function (tabName) {
       const tab = getSpreadsheet_().getSheetByName(tabName);
       if (!tab || tab.getLastRow() < 2) return;
       const map = headerMap_(tab);
@@ -1386,58 +1416,162 @@ function rebuildIndex() {
  */
 
 /**
- * Writes a brand-new lead to its team tab and to the All Leads master log.
+ * Writes a brand-new lead to the tab of the salesperson who gets it, and to
+ * the All Leads master log.
+ *
+ * The destination is the assignee's own tab when someone on the roster covers
+ * this event type; otherwise the event type's shared team tab, so a lead is
+ * never lost because the roster is incomplete.
+ *
  * @param {!Object} lead
  * @return {{tab: string, row: number}}
  */
 function routeLead_(lead) {
-  const tabName = lead.eventTypeTab || FALLBACK_EVENT_TYPE.tab;
+  const assignment = pickAssignee_(lead);
+  const tabName = (assignment && assignment.tab) || lead.eventTypeTab || FALLBACK_EVENT_TYPE.tab;
   const teamSheet = getOrCreateSheet_(tabName, LEAD_COLUMNS);
 
-  if (!lead.assignedTo) lead.assignedTo = nextAssignee_(tabName);
+  if (assignment && !lead.assignedTo) lead.assignedTo = assignment.name;
 
   const row = appendLead_(teamSheet, lead);
   appendLead_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS), lead);
   indexLead_(lead, tabName, row);
 
-  notifyTeam_(lead, tabName);
+  if (assignment) recordAssignment_(assignment);
+  notifyTeam_(lead, tabName, assignment);
   return { tab: tabName, row: row };
 }
 
-/**
- * Round-robin owner for a team tab. Reps come from the _Settings row
- * "Reps - <Tab>" as a comma-separated list; the rotation position is kept in
- * script properties so it survives across executions.
- * @param {string} tabName
- * @return {string} A rep name, or '' when assignment is off or unconfigured.
- */
-function nextAssignee_(tabName) {
-  if (!settingIsOn_('Round Robin Assignment')) return '';
-  const reps = String(setting_('Reps - ' + tabName, ''))
-    .split(',')
-    .map(function (r) { return r.trim(); })
-    .filter(String);
-  if (!reps.length) return '';
+let TEAM_CACHE_ = null;
 
-  const props = PropertiesService.getScriptProperties();
-  const key = 'RR_' + squashKey_(tabName);
-  const position = Number(props.getProperty(key) || 0) % reps.length;
-  props.setProperty(key, String((position + 1) % reps.length));
-  return reps[position];
+/**
+ * Reads the _Team roster.
+ * @return {!Array<!Object>} One entry per row, in sheet order.
+ */
+function loadTeam_() {
+  if (TEAM_CACHE_) return TEAM_CACHE_;
+  const sheet = getOrCreateSheet_(SHEETS.team, TEAM_COLUMNS);
+  const members = [];
+
+  if (sheet.getLastRow() > 1) {
+    const map = headerMap_(sheet);
+    const width = sheet.getLastColumn();
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues();
+    const at = function (row, header) {
+      const col = map[squashKey_(header)];
+      return col ? row[col - 1] : '';
+    };
+
+    values.forEach(function (row, i) {
+      const name = cleanText_(at(row, 'Salesperson'));
+      const tab = cleanText_(at(row, 'Tab Name')) || name;
+      if (!name && !tab) return;
+      members.push({
+        name: name || tab,
+        tab: tab,
+        email: cleanText_(at(row, 'Email')),
+        eventTypes: String(at(row, 'Event Types') || '')
+          .split(',')
+          .map(function (e) { return e.trim(); })
+          .filter(String),
+        active: /^(yes|y|true|1|on)$/i.test(cleanText_(at(row, 'Active'))),
+        count: Number(at(row, 'Assigned Count')) || 0,
+        lastAt: cleanText_(at(row, 'Last Assigned At')),
+        row: i + 2
+      });
+    });
+  }
+  TEAM_CACHE_ = members;
+  return members;
+}
+
+/** @return {!Array<!Object>} Active roster members who cover an event type. */
+function membersFor_(eventTypeLabel) {
+  const wanted = squashKey_(eventTypeLabel);
+  return loadTeam_().filter(function (member) {
+    if (!member.active || !member.tab) return false;
+    return member.eventTypes.some(function (label) {
+      return label === '*' || squashKey_(label) === wanted;
+    });
+  });
 }
 
 /**
- * Emails the team tab's watchers about a new lead, when configured.
+ * Picks who gets a lead.
+ *
+ * Round robin is implemented as "fewest leads so far wins", which produces the
+ * same strict rotation as a pointer while staying correct when someone is
+ * added, deactivated, or covers more than one event type. Ties break on who
+ * was assigned longest ago, then alphabetically, so the outcome is
+ * reproducible and can be explained to whoever thinks they were skipped.
+ *
+ * A lead that already names an owner goes to that person if they are on the
+ * roster — an imported worksheet may carry its own "Assigned To" column.
+ *
+ * @param {!Object} lead
+ * @return {?Object} The roster entry, or null when nobody covers this type.
+ */
+function pickAssignee_(lead) {
+  const named = namedMember_(lead.assignedTo);
+  if (named) return named;
+  if (!settingIsOn_('Round Robin Assignment')) return null;
+
+  const candidates = membersFor_(lead.eventTypeLabel);
+  if (!candidates.length) return null;
+
+  candidates.sort(function (a, b) {
+    if (a.count !== b.count) return a.count - b.count;
+    if (a.lastAt !== b.lastAt) return a.lastAt < b.lastAt ? -1 : 1;
+    return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+  });
+  return candidates[0];
+}
+
+/** @return {?Object} The roster entry for a name, or null. */
+function namedMember_(name) {
+  const wanted = squashKey_(name);
+  if (!wanted) return null;
+  return loadTeam_().filter(function (member) {
+    return squashKey_(member.name) === wanted;
+  })[0] || null;
+}
+
+/**
+ * Records that a lead was handed to someone, in the sheet and in the cache, so
+ * a batch import spreads evenly instead of giving every row to one person.
+ * @param {!Object} member
+ */
+function recordAssignment_(member) {
+  member.count += 1;
+  member.lastAt = nowStamp_();
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.team);
+  if (!sheet || !member.row) return;
+  updateRowCells_(sheet, member.row, {
+    'Assigned Count': member.count,
+    'Last Assigned At': member.lastAt
+  });
+}
+
+/**
+ * Emails the new lead to whoever should act on it: the assignee, plus any
+ * watchers configured for the destination tab or the event type.
  * Failures are logged, never thrown — a mail quota must not lose a lead.
  * @param {!Object} lead
  * @param {string} tabName
+ * @param {?Object=} assignment The roster entry the lead went to, if any.
  */
-function notifyTeam_(lead, tabName) {
+function notifyTeam_(lead, tabName, assignment) {
   if (!settingIsOn_('Notify On New Lead')) return;
-  const recipients = String(setting_('Notify - ' + tabName, ''))
-    .split(/[,;]/)
-    .map(function (r) { return r.trim(); })
-    .filter(String);
+
+  const recipients = [];
+  if (assignment && assignment.email) recipients.push(assignment.email);
+  [tabName, lead.eventTypeTab].forEach(function (key) {
+    if (!key) return;
+    String(setting_('Notify - ' + key, '')).split(/[,;]/).forEach(function (address) {
+      const trimmed = address.trim();
+      if (trimmed && recipients.indexOf(trimmed) === -1) recipients.push(trimmed);
+    });
+  });
   if (!recipients.length) return;
 
   const lines = [
@@ -1607,27 +1741,33 @@ function maybePromote_(sheet, row, original, incoming, leadId) {
   if (sheet.getName() !== FALLBACK_EVENT_TYPE.tab) return null;
   if (!incoming.eventTypeKey || incoming.eventTypeKey === FALLBACK_EVENT_TYPE.key) return null;
 
-  const target = getOrCreateSheet_(incoming.eventTypeTab, LEAD_COLUMNS);
   const moved = readLeadRow_(sheet, row);
   moved.eventTypeLabel = incoming.eventTypeLabel;
+  moved.eventTypeTab = incoming.eventTypeTab;
   moved.eventTypeRaw = incoming.eventTypeRaw || moved.eventTypeRaw;
   moved.leadId = leadId;
-  if (!cleanText_(moved.assignedTo)) moved.assignedTo = nextAssignee_(incoming.eventTypeTab);
 
-  const newRow = appendLead_(target, moved);
+  // Now that we know the event type, the lead can be given to a person.
+  const assignment = pickAssignee_(moved);
+  const targetTab = (assignment && assignment.tab) || incoming.eventTypeTab;
+  if (assignment && !cleanText_(moved.assignedTo)) moved.assignedTo = assignment.name;
+
+  const newRow = appendLead_(getOrCreateSheet_(targetTab, LEAD_COLUMNS), moved);
   sheet.deleteRow(row);
   shiftIndexRowsAfterDelete_(sheet.getName(), row);
-  moveIndexEntries_(leadId, incoming.eventTypeTab, newRow);
+  moveIndexEntries_(leadId, targetTab, newRow);
   syncAllLeadsRow_(leadId, {
     'Event Type': incoming.eventTypeLabel,
     'Event Type (Raw)': incoming.eventTypeRaw || '',
     'Assigned To': moved.assignedTo
   });
+  if (assignment) recordAssignment_(assignment);
+  notifyTeam_(moved, targetTab, assignment);
 
   log_('INFO', 'router', 'Promoted lead out of ' + FALLBACK_EVENT_TYPE.tab, {
-    leadId: leadId, to: incoming.eventTypeTab
+    leadId: leadId, to: targetTab, assignedTo: moved.assignedTo
   });
-  return { tab: incoming.eventTypeTab, row: newRow };
+  return { tab: targetTab, row: newRow };
 }
 
 /** Keeps index row numbers correct after a row is deleted from a tab. */
@@ -1860,7 +2000,7 @@ function doGet(e) {
     status: 'ok',
     service: 'Website Leads Automation',
     time: nowStamp_(),
-    tabs: teamTabNames_()
+    tabs: leadTabNames_()
   });
 }
 
@@ -2225,18 +2365,27 @@ function setupWorkbook() {
     styleLeadSheet_(getOrCreateSheet_(SHEETS.duplicates, LEAD_COLUMNS.concat(DUPLICATE_EXTRA_COLUMNS)));
 
     getOrCreateSheet_(SHEETS.sources, SOURCES_COLUMNS);
+    const detected = seedTeamTab_();
     getOrCreateSheet_(SHEETS.index, INDEX_COLUMNS);
     getOrCreateSheet_(SHEETS.raw, RAW_COLUMNS);
     getOrCreateSheet_(SHEETS.log, ['Timestamp', 'Level', 'Context', 'Message', 'Details']);
 
     seedSettings_();
+    TEAM_CACHE_ = null;
     buildDashboard_();
     hideInternalTabs_();
     SETTINGS_CACHE_ = null;
 
-    const message = created.length
+    let message = created.length
       ? 'Setup complete. Created: ' + created.join(', ') + '.'
       : 'Setup complete. All tabs were already in place and have been checked.';
+    if (detected.length) {
+      message += '\n\nFound ' + detected.length + ' existing tab' +
+        (detected.length === 1 ? '' : 's') + ' that could be salespeople:\n  ' +
+        detected.join(', ') + '\n\nOpen the ' + SHEETS.team + ' tab, fill in each ' +
+        'person\'s Event Types, and set Active to yes. Until then, leads go to the ' +
+        'shared event-type tabs.';
+    }
     log_('INFO', 'setup', message);
     return message;
   });
@@ -2268,8 +2417,8 @@ function seedSettings_() {
     wanted.push([key, DEFAULT_SETTINGS[key], notes[key] || '']);
   });
   teamTabNames_().forEach(function (tab) {
-    wanted.push(['Reps - ' + tab, '', 'Comma-separated names for round-robin assignment on the ' + tab + ' tab.']);
-    wanted.push(['Notify - ' + tab, '', 'Comma-separated email addresses to alert for new ' + tab + ' leads.']);
+    wanted.push(['Notify - ' + tab, '',
+      'Comma-separated addresses to copy on new ' + tab + ' leads, on top of the assignee.']);
   });
 
   const existing = {};
@@ -2288,6 +2437,56 @@ function seedSettings_() {
   sheet.setColumnWidth(2, 220);
   sheet.setColumnWidth(3, 520);
   sheet.getRange(1, 3, sheet.getMaxRows(), 1).setFontColor('#666666');
+}
+
+/**
+ * Creates the _Team roster, and on first run pre-fills it with every tab that
+ * looks like a salesperson's — anything the automation does not own. Rows land
+ * inactive with no event types, so nothing is routed to a person until someone
+ * has said who covers what.
+ * @return {!Array<string>} Tab names newly added to the roster.
+ */
+function seedTeamTab_() {
+  const sheet = getOrCreateSheet_(SHEETS.team, TEAM_COLUMNS);
+  TEAM_CACHE_ = null;
+
+  const owned = {};
+  teamTabNames_().concat([
+    SHEETS.allLeads, SHEETS.duplicates, SHEETS.settings, SHEETS.team,
+    SHEETS.sources, SHEETS.index, SHEETS.raw, SHEETS.log, 'Dashboard'
+  ]).forEach(function (name) { owned[squashKey_(name)] = true; });
+
+  const listed = {};
+  loadTeam_().forEach(function (member) { listed[squashKey_(member.tab)] = true; });
+
+  const added = [];
+  getSpreadsheet_().getSheets().forEach(function (candidate) {
+    const name = candidate.getName();
+    const key = squashKey_(name);
+    if (owned[key] || listed[key]) return;
+    sheet.appendRow([name, name, '', '', 'no', 0, '', 'Detected during setup — fill in Event Types and set Active to yes.']);
+    added.push(name);
+  });
+
+  const eventLabels = allEventTypes_()
+    .filter(function (t) { return t.key !== FALLBACK_EVENT_TYPE.key; })
+    .map(function (t) { return t.label; });
+  sheet.getRange(1, 1, 1, TEAM_COLUMNS.length).setValues([TEAM_COLUMNS]);
+  formatHeaderRow_(sheet, TEAM_COLUMNS.length);
+  sheet.setColumnWidth(1, 180);
+  sheet.setColumnWidth(2, 180);
+  sheet.setColumnWidth(3, 320);
+  sheet.setColumnWidth(4, 240);
+  sheet.setColumnWidth(8, 380);
+  const activeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['yes', 'no'], true).setAllowInvalid(true).build();
+  sheet.getRange(2, 5, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(activeRule);
+
+  if (added.length) {
+    log_('INFO', 'setup', 'Added tabs to the roster', { tabs: added, eventTypes: eventLabels });
+  }
+  TEAM_CACHE_ = null;
+  return added;
 }
 
 /**
@@ -2343,14 +2542,24 @@ function buildDashboard_() {
   const sourceCol = columnLetter_('Source');
   const subSourceCol = columnLetter_('Sub-Source');
   const statusCol = columnLetter_('Status');
+  const eventTypeCol = columnLetter_('Event Type');
   const rows = [];
   rows.push(['Website Leads Automation', '', '']);
   rows.push(['Live counts from the ' + SHEETS.allLeads + ' tab.', '', '']);
   rows.push(['', '', '']);
-  rows.push(['Leads by team tab', 'Count', '']);
+  rows.push(['Leads by event type', 'Count', '']);
   teamTabNames_().forEach(function (tab) {
-    rows.push([tab, '=IFERROR(COUNTA(\'' + tab + '\'!A2:A),0)', '']);
+    rows.push([tab, '=IFERROR(COUNTIF(' + all + '!' + eventTypeCol + '2:' + eventTypeCol +
+      ',"' + eventTypeByTab_(tab).label + '"),0)', '']);
   });
+  rows.push(['', '', '']);
+  rows.push(['Leads by salesperson', 'Count', '']);
+  loadTeam_().forEach(function (member) {
+    rows.push([member.name + (member.active ? '' : ' (inactive)'),
+      '=IFERROR(COUNTA(\'' + member.tab + '\'!A2:A),0)', '']);
+  });
+  rows.push(['', '', '']);
+  rows.push(['Totals', 'Count', '']);
   rows.push(['Total (all leads)', '=IFERROR(COUNTA(' + all + '!A2:A),0)', '']);
   rows.push(['Duplicates caught', "=IFERROR(COUNTA('" + SHEETS.duplicates + "'!A2:A),0)", '']);
   rows.push(['', '', '']);
@@ -2377,7 +2586,8 @@ function buildDashboard_() {
   sheet.getRange('A1').setFontSize(16).setFontWeight('bold');
   sheet.getRange('A2').setFontColor('#666666');
   sheet.getRange(1, 1, rows.length, 1).setFontWeight('normal');
-  ['Leads by team tab', 'Leads by source', 'Leads by status', 'Leads by sub-source'].forEach(function (label) {
+  ['Leads by event type', 'Leads by salesperson', 'Totals', 'Leads by source',
+   'Leads by status', 'Leads by sub-source'].forEach(function (label) {
     for (let i = 0; i < rows.length; i++) {
       if (rows[i][0] === label) {
         sheet.getRange(i + 1, 1, 1, 2).setFontWeight('bold').setBackground('#eef3f7');
@@ -2432,6 +2642,9 @@ function onOpen() {
     .addItem('Setup / repair tabs', 'menuSetup')
     .addSeparator()
     .addItem('Import bridal fair worksheet…', 'showFairImportDialog')
+    .addSeparator()
+    .addItem('Open team roster', 'menuOpenTeamRoster')
+    .addItem('Import existing leads from a tab…', 'showMigrateDialog')
     .addSeparator()
     .addItem('Show webhook URL', 'menuShowWebhookUrl')
     .addItem('Set webhook token…', 'menuSetWebhookToken')
@@ -2519,6 +2732,64 @@ function menuRunTests() {
   SpreadsheetApp.getUi().alert('Self-test', results.summary + '\n\n' + results.detail, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
+/** Jumps to the _Team roster, creating it if this is the first time. */
+function menuOpenTeamRoster() {
+  const sheet = getOrCreateSheet_(SHEETS.team, TEAM_COLUMNS);
+  getSpreadsheet_().setActiveSheet(sheet);
+  const labels = allEventTypes_()
+    .filter(function (t) { return t.key !== FALLBACK_EVENT_TYPE.key; })
+    .map(function (t) { return t.label; });
+  SpreadsheetApp.getUi().alert(
+    'Team roster',
+    'One row per salesperson.\n\n' +
+    'Tab Name — the tab their leads go into.\n' +
+    'Event Types — comma-separated, from: ' + labels.join(', ') + '\n' +
+    '   (or * for everything)\n' +
+    'Active — yes for anyone currently taking leads.\n\n' +
+    'Leads are shared out evenly: whoever covers the event type and has the ' +
+    'fewest so far gets the next one. Clear the Assigned Count column to ' +
+    'restart the rotation.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/** Opens the migration dialog for pre-existing leads. */
+function showMigrateDialog() {
+  const html = HtmlService.createHtmlOutputFromFile('Migrate')
+    .setWidth(600)
+    .setHeight(660);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Import existing leads');
+}
+
+/**
+ * Data the migration dialog needs.
+ * @return {{tabs: !Array<string>, eventTypes: !Array<string>, sources: !Array<string>}}
+ */
+function getMigrateContext() {
+  const machinery = {};
+  [SHEETS.allLeads, SHEETS.duplicates, SHEETS.settings, SHEETS.team,
+   SHEETS.sources, SHEETS.index, SHEETS.raw, SHEETS.log, 'Dashboard']
+    .forEach(function (name) { machinery[name] = true; });
+
+  return {
+    tabs: getSpreadsheet_().getSheets()
+      .map(function (s) { return s.getName(); })
+      .filter(function (name) { return !machinery[name]; }),
+    eventTypes: allEventTypes_().map(function (t) { return t.label; }),
+    sources: [SOURCES.website, SOURCES.googleAds, SOURCES.exhibit]
+  };
+}
+
+/** Dry run for the migration dialog. */
+function previewMigration(form) {
+  return migrateExistingTab(Object.assign({}, form, { dryRun: true }));
+}
+
+/** The real thing. */
+function runMigration(form) {
+  return migrateExistingTab(Object.assign({}, form, { dryRun: false }));
+}
+
 /** Opens the bridal-fair import dialog. */
 function showFairImportDialog() {
   const html = HtmlService.createHtmlOutputFromFile('FairImport')
@@ -2533,8 +2804,8 @@ function showFairImportDialog() {
  */
 function getImportContext() {
   const owned = {};
-  teamTabNames_().concat([
-    SHEETS.allLeads, SHEETS.duplicates, SHEETS.settings,
+  leadTabNames_().concat([
+    SHEETS.allLeads, SHEETS.duplicates, SHEETS.settings, SHEETS.team,
     SHEETS.sources, SHEETS.index, SHEETS.raw, SHEETS.log, 'Dashboard'
   ]).forEach(function (name) { owned[name] = true; });
 
@@ -2727,4 +2998,209 @@ function runSelfTest() {
   const detail = results.map(function (r) { return r.line; }).join('\n');
   console.log(summary + '\n' + detail);
   return { summary: summary, detail: detail, failures: failures.length };
+}
+
+// ==========================================================================
+// src/13_Migrate.gs
+// ==========================================================================
+
+/**
+ * One-time migration of leads that already sit in a salesperson's tab.
+ *
+ * Rows stay exactly where they are — whoever owns a lead keeps it. What the
+ * migration adds is the canonical columns alongside the existing ones, filled
+ * in from whatever those rows already say, plus a Lead ID and an entry in the
+ * dedupe index. From then on a returning inquiry is recognised as the same
+ * person and merged into the historical row instead of being dealt out again.
+ *
+ * Nothing is deleted and no row moves. The only values overwritten are Email
+ * and Phone, which are rewritten in normalised form so they can be matched;
+ * the original phone text is preserved in Phone (Raw). Every other canonical
+ * column is filled only where it is blank.
+ */
+
+/**
+ * @param {!Object} options
+ * @param {string} options.tabName The salesperson tab to migrate.
+ * @param {string=} options.salesperson Owner to stamp on rows with no owner;
+ *     defaults to the tab name.
+ * @param {string=} options.source Defaults to Website.
+ * @param {string=} options.subSource Defaults to "Pre-automation".
+ * @param {string=} options.defaultEventType Used when a row does not say.
+ * @param {number=} options.headerRow 1-based; auto-detected when omitted.
+ * @param {boolean=} options.dryRun Report without writing anything.
+ * @return {!Object} Summary of what happened, or would happen.
+ */
+function migrateExistingTab(options) {
+  const opts = options || {};
+  const tabName = cleanText_(opts.tabName);
+  if (!tabName) throw new Error('Choose which tab to migrate.');
+
+  const sheet = getSpreadsheet_().getSheetByName(tabName);
+  if (!sheet) throw new Error('No tab named "' + tabName + '" in this spreadsheet.');
+  if (leadTabNames_().indexOf(tabName) === -1 && !confirmMigratable_(tabName)) {
+    throw new Error('"' + tabName + '" is one of the automation\'s own tabs and cannot be migrated.');
+  }
+
+  const table = readTable_(sheet, Number(opts.headerRow) || 0);
+  const summary = {
+    tab: tabName,
+    headerRow: table.headerRow,
+    rows: table.rows.length,
+    migrated: 0,
+    alreadyDone: 0,
+    empty: 0,
+    duplicatesFound: 0,
+    duplicates: [],
+    mapping: describeMapping_(table.headers),
+    dryRun: !!opts.dryRun
+  };
+  if (!table.rows.length) return summary;
+
+  const salesperson = cleanText_(opts.salesperson) || tabName;
+  const source = cleanText_(opts.source) || SOURCES.website;
+  const subSource = cleanText_(opts.subSource) || 'Pre-automation';
+  const headers = table.headers.slice();
+
+  const run = function () {
+    if (!opts.dryRun) ensureHeaders_(sheet, LEAD_COLUMNS);
+    const idCol = headerMap_(sheet)[squashKey_('Lead ID')];
+
+    table.rows.forEach(function (row, i) {
+      const rowNumber = table.headerRow + 1 + i;
+
+      const flat = {};
+      headers.forEach(function (header, c) {
+        const value = row[c];
+        if (!header || value === '' || value === null || value === undefined) return;
+        const key = flat[header] === undefined ? header : header + ' (' + (c + 1) + ')';
+        flat[key] = value;
+      });
+      if (!Object.keys(flat).length) {
+        summary.empty++;
+        return;
+      }
+
+      const existingId = idCol ? cleanText_(sheet.getRange(rowNumber, idCol).getValue()) : '';
+      if (existingId) {
+        summary.alreadyDone++;
+        return;
+      }
+
+      const mapped = mapRecord_(flat);
+      const lead = buildLead_({
+        fields: mapped.fields,
+        extras: mapped.extras,
+        source: source,
+        subSource: subSource,
+        receivedAt: normalizeDate_(mapped.fields.receivedAt) || '',
+        defaultEventType: opts.defaultEventType
+      });
+      if (!lead.email && !lead.phone && !lead.fullName) {
+        summary.empty++;
+        return;
+      }
+      if (!cleanText_(lead.assignedTo)) lead.assignedTo = salesperson;
+
+      const duplicate = findDuplicate_(lead);
+      if (duplicate) {
+        summary.duplicatesFound++;
+        summary.duplicates.push({
+          row: rowNumber,
+          name: lead.fullName || lead.email || lead.phone,
+          matchedOn: duplicate.matchedOn,
+          existsIn: duplicate.entry.tab
+        });
+      }
+
+      if (opts.dryRun) {
+        summary.migrated++;
+        return;
+      }
+
+      writeMigratedRow_(sheet, rowNumber, lead);
+      appendLead_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS), lead);
+      // Free keys still get indexed, so a row that duplicates another is at
+      // least findable by whichever contact detail is unique to it.
+      indexLead_(lead, tabName, rowNumber);
+      if (duplicate) {
+        recordDuplicate_(
+          Object.assign({}, lead, { status: 'Duplicate (pre-existing row)' }),
+          duplicate, duplicate.entry.leadId, duplicate.entry.tab
+        );
+      }
+      summary.migrated++;
+    });
+  };
+
+  if (opts.dryRun) run();
+  else withLock_(run, 120000);
+
+  log_('INFO', 'migrate', (opts.dryRun ? 'Previewed' : 'Migrated') + ' "' + tabName + '"', {
+    rows: summary.rows, migrated: summary.migrated,
+    alreadyDone: summary.alreadyDone, duplicatesFound: summary.duplicatesFound
+  });
+  return summary;
+}
+
+/** @return {boolean} True when a tab is a salesperson tab rather than machinery. */
+function confirmMigratable_(tabName) {
+  const owned = [
+    SHEETS.allLeads, SHEETS.duplicates, SHEETS.settings, SHEETS.team,
+    SHEETS.sources, SHEETS.index, SHEETS.raw, SHEETS.log, 'Dashboard'
+  ].map(squashKey_);
+  return owned.indexOf(squashKey_(tabName)) === -1;
+}
+
+/**
+ * Writes the canonical columns of one historical row.
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} rowNumber
+ * @param {!Object} lead
+ */
+function writeMigratedRow_(sheet, rowNumber, lead) {
+  const map = headerMap_(sheet);
+  const updates = {};
+
+  // Normalised contact details replace what is there — matching depends on them.
+  const overwrite = { 'Email': lead.email, 'Phone': lead.phone };
+  Object.keys(overwrite).forEach(function (header) {
+    if (cleanText_(overwrite[header])) updates[header] = overwrite[header];
+  });
+
+  const fillIfBlank = {
+    'Lead ID': lead.leadId,
+    'Received At': lead.receivedAt,
+    'Source': lead.source,
+    'Sub-Source': lead.subSource,
+    'Event Type': lead.eventTypeLabel,
+    'Event Type (Raw)': lead.eventTypeRaw,
+    'Full Name': lead.fullName,
+    'First Name': lead.firstName,
+    'Last Name': lead.lastName,
+    'Phone (Raw)': lead.phoneRaw,
+    'Company': lead.company,
+    'Event Date': lead.eventDate,
+    'Guest Count': lead.guestCount,
+    'Venue / Location': lead.venue,
+    'Budget': lead.budget,
+    'Message': lead.message,
+    'Campaign': lead.campaign,
+    'Assigned To': lead.assignedTo,
+    'Status': lead.status,
+    'Touches': lead.touches,
+    'First Seen At': lead.firstSeenAt,
+    'Last Touch At': lead.lastTouchAt,
+    'All Sub-Sources': lead.allSubSources
+  };
+  Object.keys(fillIfBlank).forEach(function (header) {
+    const col = map[squashKey_(header)];
+    if (!col) return;
+    const value = fillIfBlank[header];
+    if (value === '' || value === null || value === undefined) return;
+    if (cleanText_(sheet.getRange(rowNumber, col).getValue())) return;
+    updates[header] = value;
+  });
+
+  updateRowCells_(sheet, rowNumber, updates);
 }

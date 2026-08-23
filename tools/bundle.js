@@ -37,11 +37,13 @@ const body = files.map(file => [
 ].join('\n')).join('\n');
 
 fs.writeFileSync(path.join(distDir, 'Code.gs'), banner + body + '\n');
-['FairImport.html', 'appsscript.json'].forEach(name => {
+// Everything that is not a .gs file is copied through as-is: the HTML dialogs
+// and the manifest are separate files in the Apps Script editor too.
+const assets = fs.readdirSync(srcDir).filter(f => !f.endsWith('.gs')).sort();
+assets.forEach(name => {
   fs.copyFileSync(path.join(srcDir, name), path.join(distDir, name));
 });
 
 const lines = (banner + body).split('\n').length;
 console.log('Wrote dist/Code.gs (' + files.length + ' files, ' + lines + ' lines)');
-console.log('Wrote dist/FairImport.html');
-console.log('Wrote dist/appsscript.json');
+assets.forEach(name => console.log('Wrote dist/' + name));

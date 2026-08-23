@@ -177,7 +177,7 @@ function rebuildIndex() {
     const seen = {};
     let leads = 0;
 
-    teamTabNames_().forEach(function (tabName) {
+    leadTabNames_().forEach(function (tabName) {
       const tab = getSpreadsheet_().getSheetByName(tabName);
       if (!tab || tab.getLastRow() < 2) return;
       const map = headerMap_(tab);

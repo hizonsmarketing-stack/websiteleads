@@ -208,7 +208,20 @@ function allEventTypes_() {
   return EVENT_TYPES.concat([FALLBACK_EVENT_TYPE]);
 }
 
-/** @return {!Array<string>} Every tab a routed lead can land in. */
+/** @return {!Array<string>} The shared tab for each event type. */
 function teamTabNames_() {
   return allEventTypes_().map(function (t) { return t.tab; });
+}
+
+/**
+ * Every tab a routed lead can land in: the shared event-type tabs plus each
+ * salesperson's own tab from the _Team roster.
+ * @return {!Array<string>}
+ */
+function leadTabNames_() {
+  const names = teamTabNames_();
+  loadTeam_().forEach(function (member) {
+    if (member.tab && names.indexOf(member.tab) === -1) names.push(member.tab);
+  });
+  return names;
 }

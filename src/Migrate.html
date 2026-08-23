@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body { font-family: "Google Sans", Roboto, Arial, sans-serif; font-size: 13px;
+             color: #202124; margin: 0; padding: 16px 18px 24px; }
+      h2 { font-size: 15px; margin: 0 0 4px; }
+      p.hint { color: #5f6368; margin: 0 0 14px; line-height: 1.45; }
+      label { display: block; font-weight: 500; margin: 12px 0 4px; }
+      input, select { width: 100%; box-sizing: border-box; padding: 7px 8px;
+                      border: 1px solid #dadce0; border-radius: 4px; font-size: 13px; }
+      .row { display: flex; gap: 12px; }
+      .row > div { flex: 1; }
+      .note { color: #5f6368; font-size: 11.5px; margin-top: 3px; }
+      .warn { background: #fef7e0; border: 1px solid #feefc3; border-radius: 4px;
+              padding: 10px 12px; margin: 14px 0 0; line-height: 1.5; }
+      .actions { margin-top: 18px; display: flex; gap: 8px; align-items: center; }
+      button { padding: 8px 16px; border-radius: 4px; border: 1px solid #dadce0;
+               background: #fff; font-size: 13px; cursor: pointer; }
+      button.primary { background: #1a73e8; border-color: #1a73e8; color: #fff; }
+      button[disabled] { opacity: .5; cursor: default; }
+      #output { margin-top: 16px; padding: 12px; border-radius: 4px; background: #f1f3f4;
+                display: none; max-height: 240px; overflow: auto; font-size: 12px; line-height: 1.5; }
+      #output.error { background: #fce8e6; color: #b3261e; }
+      table.map { border-collapse: collapse; width: 100%; font-size: 12px; }
+      table.map td { padding: 2px 6px 2px 0; vertical-align: top; }
+      table.map td.to { color: #1a73e8; }
+      table.map td.ignored { color: #9aa0a6; }
+    </style>
+  </head>
+  <body>
+    <h2>Import existing leads from a tab</h2>
+    <p class="hint">
+      Reads the leads already sitting in a salesperson's tab so they take part in
+      duplicate matching. <strong>Rows stay where they are and keep their owner</strong> —
+      this adds the automation's columns alongside what is already there.
+    </p>
+
+    <label for="tabName">Tab to import</label>
+    <select id="tabName"></select>
+
+    <div class="row">
+      <div>
+        <label for="salesperson">Owner for rows with no owner</label>
+        <input id="salesperson" placeholder="Defaults to the tab name">
+      </div>
+      <div>
+        <label for="defaultEventType">Event type when the row doesn't say</label>
+        <select id="defaultEventType"></select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="source">Source to tag these with</label>
+        <select id="source"></select>
+      </div>
+      <div>
+        <label for="subSource">Sub-source</label>
+        <input id="subSource" value="Pre-automation">
+      </div>
+    </div>
+
+    <div class="warn">
+      Email and phone are rewritten in normalised form (<code>0917 123 4567</code> →
+      <code>+639171234567</code>) so they can be matched across sources. The original
+      phone text is kept in <strong>Phone (Raw)</strong>. Every other column is filled
+      only where it is empty, and no row is moved or deleted.
+    </div>
+
+    <div class="actions">
+      <button id="previewBtn" onclick="preview()">Preview</button>
+      <button id="importBtn" class="primary" onclick="runIt()">Import</button>
+      <span id="status" class="note"></span>
+    </div>
+
+    <div id="output"></div>
+
+    <script>
+      var out = document.getElementById('output');
+      var statusEl = document.getElementById('status');
+
+      google.script.run.withSuccessHandler(function (ctx) {
+        fill('tabName', ctx.tabs);
+        fill('defaultEventType', ctx.eventTypes);
+        fill('source', ctx.sources);
+      }).getMigrateContext();
+
+      function fill(id, values) {
+        var select = document.getElementById(id);
+        values.forEach(function (value) {
+          var option = document.createElement('option');
+          option.value = value;
+          option.textContent = value;
+          select.appendChild(option);
+        });
+      }
+
+      function form() {
+        return {
+          tabName: document.getElementById('tabName').value,
+          salesperson: document.getElementById('salesperson').value.trim(),
+          defaultEventType: document.getElementById('defaultEventType').value,
+          source: document.getElementById('source').value,
+          subSource: document.getElementById('subSource').value.trim()
+        };
+      }
+
+      function busy(on, message) {
+        document.getElementById('previewBtn').disabled = on;
+        document.getElementById('importBtn').disabled = on;
+        statusEl.textContent = on ? message : '';
+      }
+
+      function show(html, isError) {
+        out.style.display = 'block';
+        out.className = isError ? 'error' : '';
+        out.innerHTML = html;
+      }
+
+      function escapeHtml(text) {
+        return String(text).replace(/[&<>]/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+        });
+      }
+
+      function onError(err) { busy(false); show(escapeHtml(err.message || err), true); }
+
+      function report(result) {
+        var lines = [
+          '<strong>' + escapeHtml(result.tab) + '</strong> — header on row ' + result.headerRow +
+            ', ' + result.rows + ' data rows.',
+          (result.dryRun ? 'Would import: ' : 'Imported: ') + result.migrated,
+          result.alreadyDone ? 'Already imported, skipped: ' + result.alreadyDone : '',
+          result.empty ? 'Blank or unusable rows skipped: ' + result.empty : '',
+          result.duplicatesFound
+            ? '<strong>' + result.duplicatesFound + ' row(s) match a lead elsewhere</strong> — ' +
+              'they stay put; review them in the Duplicates tab.'
+            : 'No cross-tab duplicates found.'
+        ].filter(Boolean);
+
+        var dupes = (result.duplicates || []).slice(0, 12).map(function (d) {
+          return '<tr><td>row ' + d.row + '</td><td>' + escapeHtml(d.name) +
+            '</td><td class="ignored">' + escapeHtml(d.matchedOn) + ' &rarr; ' +
+            escapeHtml(d.existsIn) + '</td></tr>';
+        }).join('');
+
+        var mapping = Object.keys(result.mapping).map(function (header) {
+          var target = result.mapping[header];
+          var cls = target === '(ignored)' ? 'ignored' : 'to';
+          return '<tr><td>' + escapeHtml(header) + '</td><td class="' + cls + '">&rarr; ' +
+            escapeHtml(target) + '</td></tr>';
+        }).join('');
+
+        show(lines.join('<br>') +
+          (dupes ? '<br><br><strong>Matches found</strong><table class="map">' + dupes + '</table>' : '') +
+          '<br><strong>Columns read</strong><table class="map">' + mapping + '</table>' +
+          'Columns marked <em>(notes)</em> are copied into the Message column.');
+      }
+
+      function preview() {
+        busy(true, 'Reading…');
+        google.script.run.withSuccessHandler(function (r) { busy(false); report(r); })
+          .withFailureHandler(onError).previewMigration(form());
+      }
+
+      function runIt() {
+        busy(true, 'Importing…');
+        google.script.run.withSuccessHandler(function (r) { busy(false); report(r); })
+          .withFailureHandler(onError).runMigration(form());
+      }
+    </script>
+  </body>
+</html>

@@ -4,58 +4,162 @@
  */
 
 /**
- * Writes a brand-new lead to its team tab and to the All Leads master log.
+ * Writes a brand-new lead to the tab of the salesperson who gets it, and to
+ * the All Leads master log.
+ *
+ * The destination is the assignee's own tab when someone on the roster covers
+ * this event type; otherwise the event type's shared team tab, so a lead is
+ * never lost because the roster is incomplete.
+ *
  * @param {!Object} lead
  * @return {{tab: string, row: number}}
  */
 function routeLead_(lead) {
-  const tabName = lead.eventTypeTab || FALLBACK_EVENT_TYPE.tab;
+  const assignment = pickAssignee_(lead);
+  const tabName = (assignment && assignment.tab) || lead.eventTypeTab || FALLBACK_EVENT_TYPE.tab;
   const teamSheet = getOrCreateSheet_(tabName, LEAD_COLUMNS);
 
-  if (!lead.assignedTo) lead.assignedTo = nextAssignee_(tabName);
+  if (assignment && !lead.assignedTo) lead.assignedTo = assignment.name;
 
   const row = appendLead_(teamSheet, lead);
   appendLead_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS), lead);
   indexLead_(lead, tabName, row);
 
-  notifyTeam_(lead, tabName);
+  if (assignment) recordAssignment_(assignment);
+  notifyTeam_(lead, tabName, assignment);
   return { tab: tabName, row: row };
 }
 
-/**
- * Round-robin owner for a team tab. Reps come from the _Settings row
- * "Reps - <Tab>" as a comma-separated list; the rotation position is kept in
- * script properties so it survives across executions.
- * @param {string} tabName
- * @return {string} A rep name, or '' when assignment is off or unconfigured.
- */
-function nextAssignee_(tabName) {
-  if (!settingIsOn_('Round Robin Assignment')) return '';
-  const reps = String(setting_('Reps - ' + tabName, ''))
-    .split(',')
-    .map(function (r) { return r.trim(); })
-    .filter(String);
-  if (!reps.length) return '';
+let TEAM_CACHE_ = null;
 
-  const props = PropertiesService.getScriptProperties();
-  const key = 'RR_' + squashKey_(tabName);
-  const position = Number(props.getProperty(key) || 0) % reps.length;
-  props.setProperty(key, String((position + 1) % reps.length));
-  return reps[position];
+/**
+ * Reads the _Team roster.
+ * @return {!Array<!Object>} One entry per row, in sheet order.
+ */
+function loadTeam_() {
+  if (TEAM_CACHE_) return TEAM_CACHE_;
+  const sheet = getOrCreateSheet_(SHEETS.team, TEAM_COLUMNS);
+  const members = [];
+
+  if (sheet.getLastRow() > 1) {
+    const map = headerMap_(sheet);
+    const width = sheet.getLastColumn();
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues();
+    const at = function (row, header) {
+      const col = map[squashKey_(header)];
+      return col ? row[col - 1] : '';
+    };
+
+    values.forEach(function (row, i) {
+      const name = cleanText_(at(row, 'Salesperson'));
+      const tab = cleanText_(at(row, 'Tab Name')) || name;
+      if (!name && !tab) return;
+      members.push({
+        name: name || tab,
+        tab: tab,
+        email: cleanText_(at(row, 'Email')),
+        eventTypes: String(at(row, 'Event Types') || '')
+          .split(',')
+          .map(function (e) { return e.trim(); })
+          .filter(String),
+        active: /^(yes|y|true|1|on)$/i.test(cleanText_(at(row, 'Active'))),
+        count: Number(at(row, 'Assigned Count')) || 0,
+        lastAt: cleanText_(at(row, 'Last Assigned At')),
+        row: i + 2
+      });
+    });
+  }
+  TEAM_CACHE_ = members;
+  return members;
+}
+
+/** @return {!Array<!Object>} Active roster members who cover an event type. */
+function membersFor_(eventTypeLabel) {
+  const wanted = squashKey_(eventTypeLabel);
+  return loadTeam_().filter(function (member) {
+    if (!member.active || !member.tab) return false;
+    return member.eventTypes.some(function (label) {
+      return label === '*' || squashKey_(label) === wanted;
+    });
+  });
 }
 
 /**
- * Emails the team tab's watchers about a new lead, when configured.
+ * Picks who gets a lead.
+ *
+ * Round robin is implemented as "fewest leads so far wins", which produces the
+ * same strict rotation as a pointer while staying correct when someone is
+ * added, deactivated, or covers more than one event type. Ties break on who
+ * was assigned longest ago, then alphabetically, so the outcome is
+ * reproducible and can be explained to whoever thinks they were skipped.
+ *
+ * A lead that already names an owner goes to that person if they are on the
+ * roster — an imported worksheet may carry its own "Assigned To" column.
+ *
+ * @param {!Object} lead
+ * @return {?Object} The roster entry, or null when nobody covers this type.
+ */
+function pickAssignee_(lead) {
+  const named = namedMember_(lead.assignedTo);
+  if (named) return named;
+  if (!settingIsOn_('Round Robin Assignment')) return null;
+
+  const candidates = membersFor_(lead.eventTypeLabel);
+  if (!candidates.length) return null;
+
+  candidates.sort(function (a, b) {
+    if (a.count !== b.count) return a.count - b.count;
+    if (a.lastAt !== b.lastAt) return a.lastAt < b.lastAt ? -1 : 1;
+    return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+  });
+  return candidates[0];
+}
+
+/** @return {?Object} The roster entry for a name, or null. */
+function namedMember_(name) {
+  const wanted = squashKey_(name);
+  if (!wanted) return null;
+  return loadTeam_().filter(function (member) {
+    return squashKey_(member.name) === wanted;
+  })[0] || null;
+}
+
+/**
+ * Records that a lead was handed to someone, in the sheet and in the cache, so
+ * a batch import spreads evenly instead of giving every row to one person.
+ * @param {!Object} member
+ */
+function recordAssignment_(member) {
+  member.count += 1;
+  member.lastAt = nowStamp_();
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.team);
+  if (!sheet || !member.row) return;
+  updateRowCells_(sheet, member.row, {
+    'Assigned Count': member.count,
+    'Last Assigned At': member.lastAt
+  });
+}
+
+/**
+ * Emails the new lead to whoever should act on it: the assignee, plus any
+ * watchers configured for the destination tab or the event type.
  * Failures are logged, never thrown — a mail quota must not lose a lead.
  * @param {!Object} lead
  * @param {string} tabName
+ * @param {?Object=} assignment The roster entry the lead went to, if any.
  */
-function notifyTeam_(lead, tabName) {
+function notifyTeam_(lead, tabName, assignment) {
   if (!settingIsOn_('Notify On New Lead')) return;
-  const recipients = String(setting_('Notify - ' + tabName, ''))
-    .split(/[,;]/)
-    .map(function (r) { return r.trim(); })
-    .filter(String);
+
+  const recipients = [];
+  if (assignment && assignment.email) recipients.push(assignment.email);
+  [tabName, lead.eventTypeTab].forEach(function (key) {
+    if (!key) return;
+    String(setting_('Notify - ' + key, '')).split(/[,;]/).forEach(function (address) {
+      const trimmed = address.trim();
+      if (trimmed && recipients.indexOf(trimmed) === -1) recipients.push(trimmed);
+    });
+  });
   if (!recipients.length) return;
 
   const lines = [
@@ -225,27 +329,33 @@ function maybePromote_(sheet, row, original, incoming, leadId) {
   if (sheet.getName() !== FALLBACK_EVENT_TYPE.tab) return null;
   if (!incoming.eventTypeKey || incoming.eventTypeKey === FALLBACK_EVENT_TYPE.key) return null;
 
-  const target = getOrCreateSheet_(incoming.eventTypeTab, LEAD_COLUMNS);
   const moved = readLeadRow_(sheet, row);
   moved.eventTypeLabel = incoming.eventTypeLabel;
+  moved.eventTypeTab = incoming.eventTypeTab;
   moved.eventTypeRaw = incoming.eventTypeRaw || moved.eventTypeRaw;
   moved.leadId = leadId;
-  if (!cleanText_(moved.assignedTo)) moved.assignedTo = nextAssignee_(incoming.eventTypeTab);
 
-  const newRow = appendLead_(target, moved);
+  // Now that we know the event type, the lead can be given to a person.
+  const assignment = pickAssignee_(moved);
+  const targetTab = (assignment && assignment.tab) || incoming.eventTypeTab;
+  if (assignment && !cleanText_(moved.assignedTo)) moved.assignedTo = assignment.name;
+
+  const newRow = appendLead_(getOrCreateSheet_(targetTab, LEAD_COLUMNS), moved);
   sheet.deleteRow(row);
   shiftIndexRowsAfterDelete_(sheet.getName(), row);
-  moveIndexEntries_(leadId, incoming.eventTypeTab, newRow);
+  moveIndexEntries_(leadId, targetTab, newRow);
   syncAllLeadsRow_(leadId, {
     'Event Type': incoming.eventTypeLabel,
     'Event Type (Raw)': incoming.eventTypeRaw || '',
     'Assigned To': moved.assignedTo
   });
+  if (assignment) recordAssignment_(assignment);
+  notifyTeam_(moved, targetTab, assignment);
 
   log_('INFO', 'router', 'Promoted lead out of ' + FALLBACK_EVENT_TYPE.tab, {
-    leadId: leadId, to: incoming.eventTypeTab
+    leadId: leadId, to: targetTab, assignedTo: moved.assignedTo
   });
-  return { tab: incoming.eventTypeTab, row: newRow };
+  return { tab: targetTab, row: newRow };
 }
 
 /** Keeps index row numbers correct after a row is deleted from a tab. */

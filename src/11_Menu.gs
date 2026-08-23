@@ -10,6 +10,9 @@ function onOpen() {
     .addSeparator()
     .addItem('Import bridal fair worksheet…', 'showFairImportDialog')
     .addSeparator()
+    .addItem('Open team roster', 'menuOpenTeamRoster')
+    .addItem('Import existing leads from a tab…', 'showMigrateDialog')
+    .addSeparator()
     .addItem('Show webhook URL', 'menuShowWebhookUrl')
     .addItem('Set webhook token…', 'menuSetWebhookToken')
     .addItem('Set Google Ads key…', 'menuSetGoogleAdsKey')
@@ -96,6 +99,64 @@ function menuRunTests() {
   SpreadsheetApp.getUi().alert('Self-test', results.summary + '\n\n' + results.detail, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
+/** Jumps to the _Team roster, creating it if this is the first time. */
+function menuOpenTeamRoster() {
+  const sheet = getOrCreateSheet_(SHEETS.team, TEAM_COLUMNS);
+  getSpreadsheet_().setActiveSheet(sheet);
+  const labels = allEventTypes_()
+    .filter(function (t) { return t.key !== FALLBACK_EVENT_TYPE.key; })
+    .map(function (t) { return t.label; });
+  SpreadsheetApp.getUi().alert(
+    'Team roster',
+    'One row per salesperson.\n\n' +
+    'Tab Name — the tab their leads go into.\n' +
+    'Event Types — comma-separated, from: ' + labels.join(', ') + '\n' +
+    '   (or * for everything)\n' +
+    'Active — yes for anyone currently taking leads.\n\n' +
+    'Leads are shared out evenly: whoever covers the event type and has the ' +
+    'fewest so far gets the next one. Clear the Assigned Count column to ' +
+    'restart the rotation.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/** Opens the migration dialog for pre-existing leads. */
+function showMigrateDialog() {
+  const html = HtmlService.createHtmlOutputFromFile('Migrate')
+    .setWidth(600)
+    .setHeight(660);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Import existing leads');
+}
+
+/**
+ * Data the migration dialog needs.
+ * @return {{tabs: !Array<string>, eventTypes: !Array<string>, sources: !Array<string>}}
+ */
+function getMigrateContext() {
+  const machinery = {};
+  [SHEETS.allLeads, SHEETS.duplicates, SHEETS.settings, SHEETS.team,
+   SHEETS.sources, SHEETS.index, SHEETS.raw, SHEETS.log, 'Dashboard']
+    .forEach(function (name) { machinery[name] = true; });
+
+  return {
+    tabs: getSpreadsheet_().getSheets()
+      .map(function (s) { return s.getName(); })
+      .filter(function (name) { return !machinery[name]; }),
+    eventTypes: allEventTypes_().map(function (t) { return t.label; }),
+    sources: [SOURCES.website, SOURCES.googleAds, SOURCES.exhibit]
+  };
+}
+
+/** Dry run for the migration dialog. */
+function previewMigration(form) {
+  return migrateExistingTab(Object.assign({}, form, { dryRun: true }));
+}
+
+/** The real thing. */
+function runMigration(form) {
+  return migrateExistingTab(Object.assign({}, form, { dryRun: false }));
+}
+
 /** Opens the bridal-fair import dialog. */
 function showFairImportDialog() {
   const html = HtmlService.createHtmlOutputFromFile('FairImport')
@@ -110,8 +171,8 @@ function showFairImportDialog() {
  */
 function getImportContext() {
   const owned = {};
-  teamTabNames_().concat([
-    SHEETS.allLeads, SHEETS.duplicates, SHEETS.settings,
+  leadTabNames_().concat([
+    SHEETS.allLeads, SHEETS.duplicates, SHEETS.settings, SHEETS.team,
     SHEETS.sources, SHEETS.index, SHEETS.raw, SHEETS.log, 'Dashboard'
   ]).forEach(function (name) { owned[name] = true; });
 

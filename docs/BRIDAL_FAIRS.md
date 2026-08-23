@@ -44,7 +44,8 @@ last month and visited your booth this month stays **one** lead.
 
 ## What happens to each row
 
-- **New contact** → a new lead in the team tab for its event type.
+- **New contact** → a new lead, handed to the next salesperson in the rotation
+  for its event type and placed in their tab.
 - **Already in the system** (same email or phone as any existing lead) → merged
   into the original: touch count goes up, blanks are filled in, the fair is
   added to the lead's sub-source list, and the row is filed in **Duplicates**.

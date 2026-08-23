@@ -31,18 +31,27 @@ function setupWorkbook() {
     styleLeadSheet_(getOrCreateSheet_(SHEETS.duplicates, LEAD_COLUMNS.concat(DUPLICATE_EXTRA_COLUMNS)));
 
     getOrCreateSheet_(SHEETS.sources, SOURCES_COLUMNS);
+    const detected = seedTeamTab_();
     getOrCreateSheet_(SHEETS.index, INDEX_COLUMNS);
     getOrCreateSheet_(SHEETS.raw, RAW_COLUMNS);
     getOrCreateSheet_(SHEETS.log, ['Timestamp', 'Level', 'Context', 'Message', 'Details']);
 
     seedSettings_();
+    TEAM_CACHE_ = null;
     buildDashboard_();
     hideInternalTabs_();
     SETTINGS_CACHE_ = null;
 
-    const message = created.length
+    let message = created.length
       ? 'Setup complete. Created: ' + created.join(', ') + '.'
       : 'Setup complete. All tabs were already in place and have been checked.';
+    if (detected.length) {
+      message += '\n\nFound ' + detected.length + ' existing tab' +
+        (detected.length === 1 ? '' : 's') + ' that could be salespeople:\n  ' +
+        detected.join(', ') + '\n\nOpen the ' + SHEETS.team + ' tab, fill in each ' +
+        'person\'s Event Types, and set Active to yes. Until then, leads go to the ' +
+        'shared event-type tabs.';
+    }
     log_('INFO', 'setup', message);
     return message;
   });
@@ -74,8 +83,8 @@ function seedSettings_() {
     wanted.push([key, DEFAULT_SETTINGS[key], notes[key] || '']);
   });
   teamTabNames_().forEach(function (tab) {
-    wanted.push(['Reps - ' + tab, '', 'Comma-separated names for round-robin assignment on the ' + tab + ' tab.']);
-    wanted.push(['Notify - ' + tab, '', 'Comma-separated email addresses to alert for new ' + tab + ' leads.']);
+    wanted.push(['Notify - ' + tab, '',
+      'Comma-separated addresses to copy on new ' + tab + ' leads, on top of the assignee.']);
   });
 
   const existing = {};
@@ -94,6 +103,56 @@ function seedSettings_() {
   sheet.setColumnWidth(2, 220);
   sheet.setColumnWidth(3, 520);
   sheet.getRange(1, 3, sheet.getMaxRows(), 1).setFontColor('#666666');
+}
+
+/**
+ * Creates the _Team roster, and on first run pre-fills it with every tab that
+ * looks like a salesperson's — anything the automation does not own. Rows land
+ * inactive with no event types, so nothing is routed to a person until someone
+ * has said who covers what.
+ * @return {!Array<string>} Tab names newly added to the roster.
+ */
+function seedTeamTab_() {
+  const sheet = getOrCreateSheet_(SHEETS.team, TEAM_COLUMNS);
+  TEAM_CACHE_ = null;
+
+  const owned = {};
+  teamTabNames_().concat([
+    SHEETS.allLeads, SHEETS.duplicates, SHEETS.settings, SHEETS.team,
+    SHEETS.sources, SHEETS.index, SHEETS.raw, SHEETS.log, 'Dashboard'
+  ]).forEach(function (name) { owned[squashKey_(name)] = true; });
+
+  const listed = {};
+  loadTeam_().forEach(function (member) { listed[squashKey_(member.tab)] = true; });
+
+  const added = [];
+  getSpreadsheet_().getSheets().forEach(function (candidate) {
+    const name = candidate.getName();
+    const key = squashKey_(name);
+    if (owned[key] || listed[key]) return;
+    sheet.appendRow([name, name, '', '', 'no', 0, '', 'Detected during setup — fill in Event Types and set Active to yes.']);
+    added.push(name);
+  });
+
+  const eventLabels = allEventTypes_()
+    .filter(function (t) { return t.key !== FALLBACK_EVENT_TYPE.key; })
+    .map(function (t) { return t.label; });
+  sheet.getRange(1, 1, 1, TEAM_COLUMNS.length).setValues([TEAM_COLUMNS]);
+  formatHeaderRow_(sheet, TEAM_COLUMNS.length);
+  sheet.setColumnWidth(1, 180);
+  sheet.setColumnWidth(2, 180);
+  sheet.setColumnWidth(3, 320);
+  sheet.setColumnWidth(4, 240);
+  sheet.setColumnWidth(8, 380);
+  const activeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['yes', 'no'], true).setAllowInvalid(true).build();
+  sheet.getRange(2, 5, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(activeRule);
+
+  if (added.length) {
+    log_('INFO', 'setup', 'Added tabs to the roster', { tabs: added, eventTypes: eventLabels });
+  }
+  TEAM_CACHE_ = null;
+  return added;
 }
 
 /**
@@ -149,14 +208,24 @@ function buildDashboard_() {
   const sourceCol = columnLetter_('Source');
   const subSourceCol = columnLetter_('Sub-Source');
   const statusCol = columnLetter_('Status');
+  const eventTypeCol = columnLetter_('Event Type');
   const rows = [];
   rows.push(['Website Leads Automation', '', '']);
   rows.push(['Live counts from the ' + SHEETS.allLeads + ' tab.', '', '']);
   rows.push(['', '', '']);
-  rows.push(['Leads by team tab', 'Count', '']);
+  rows.push(['Leads by event type', 'Count', '']);
   teamTabNames_().forEach(function (tab) {
-    rows.push([tab, '=IFERROR(COUNTA(\'' + tab + '\'!A2:A),0)', '']);
+    rows.push([tab, '=IFERROR(COUNTIF(' + all + '!' + eventTypeCol + '2:' + eventTypeCol +
+      ',"' + eventTypeByTab_(tab).label + '"),0)', '']);
   });
+  rows.push(['', '', '']);
+  rows.push(['Leads by salesperson', 'Count', '']);
+  loadTeam_().forEach(function (member) {
+    rows.push([member.name + (member.active ? '' : ' (inactive)'),
+      '=IFERROR(COUNTA(\'' + member.tab + '\'!A2:A),0)', '']);
+  });
+  rows.push(['', '', '']);
+  rows.push(['Totals', 'Count', '']);
   rows.push(['Total (all leads)', '=IFERROR(COUNTA(' + all + '!A2:A),0)', '']);
   rows.push(['Duplicates caught', "=IFERROR(COUNTA('" + SHEETS.duplicates + "'!A2:A),0)", '']);
   rows.push(['', '', '']);
@@ -183,7 +252,8 @@ function buildDashboard_() {
   sheet.getRange('A1').setFontSize(16).setFontWeight('bold');
   sheet.getRange('A2').setFontColor('#666666');
   sheet.getRange(1, 1, rows.length, 1).setFontWeight('normal');
-  ['Leads by team tab', 'Leads by source', 'Leads by status', 'Leads by sub-source'].forEach(function (label) {
+  ['Leads by event type', 'Leads by salesperson', 'Totals', 'Leads by source',
+   'Leads by status', 'Leads by sub-source'].forEach(function (label) {
     for (let i = 0; i < rows.length; i++) {
       if (rows[i][0] === label) {
         sheet.getRange(i + 1, 1, 1, 2).setFontWeight('bold').setBackground('#eef3f7');

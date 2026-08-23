@@ -13,6 +13,7 @@ const SHEETS = {
   duplicates: 'Duplicates',
   unassigned: 'Unassigned',
   settings: '_Settings',
+  team: '_Team',
   sources: '_Sources',
   index: '_Index',
   log: '_Log',
@@ -47,6 +48,21 @@ const LEAD_COLUMNS = [
   'Last Touch At',
   'All Sub-Sources',
   'Raw Ref'
+];
+
+/**
+ * The salesperson roster. Leads are routed to a person's own tab, chosen by
+ * round robin among whoever covers that event type.
+ */
+const TEAM_COLUMNS = [
+  'Salesperson',
+  'Tab Name',
+  'Event Types',
+  'Email',
+  'Active',
+  'Assigned Count',
+  'Last Assigned At',
+  'Notes'
 ];
 
 /** Extra columns only the Duplicates tab carries, appended after LEAD_COLUMNS. */
@@ -131,7 +147,7 @@ const DEFAULT_SETTINGS = {
   'Promote Unassigned Leads': 'yes',
   'Append Duplicate Notes': 'yes',
   'Accept Test Leads': 'no',
-  'Round Robin Assignment': 'no',
+  'Round Robin Assignment': 'yes',
   'Notify On New Lead': 'no',
   'Raw Payload Retention (rows)': '2000',
   'Log Retention (rows)': '5000'
