@@ -70,7 +70,7 @@ know who covers what.
 2. Setup has already listed every tab that isn't one of its own — one row per
    salesperson. For each:
    - **Event Types** — comma-separated, spelled exactly as the labels:
-     `Corporate`, `Wedding`, `Social / Debut / Birthday`, `Private Event`.
+     `Wedding`, `Debut`, `Kid's Party`, `Private Event`, `Corporate`.
      Someone covering three of them gets all three, comma separated. `*` means
      everything.
    - **Email** — optional, for new-lead alerts.

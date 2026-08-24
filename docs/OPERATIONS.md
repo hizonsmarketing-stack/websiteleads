@@ -70,7 +70,7 @@ All in the `_Settings` tab. Changes take effect on the next submission.
 | --- | --- |
 | **Salesperson** | Their name, written into **Assigned To** on each lead |
 | **Tab Name** | The tab their leads land in. Defaults to their name |
-| **Event Types** | Comma-separated, e.g. `Social / Debut / Birthday, Wedding, Private Event`. `*` means everything |
+| **Event Types** | Comma-separated, e.g. `Wedding, Debut, Kid's Party, Private Event`. `*` means everything |
 | **Email** | Optional. Gets the new-lead alert when notifications are on |
 | **Active** | `yes` for anyone currently taking leads. Set to `no` for leave, and the rotation skips them |
 | **Assigned Count**, **Last Assigned At** | Maintained automatically — this is the rotation's memory |

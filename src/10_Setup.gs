@@ -204,7 +204,7 @@ function buildDashboard_() {
   const sheet = getOrCreateSheet_('Dashboard', ['Website Leads Automation']);
   sheet.clear();
 
-  const all = "'" + SHEETS.allLeads + "'";
+  const all = a1SheetRef_(SHEETS.allLeads);
   const sourceCol = columnLetter_('Source');
   const subSourceCol = columnLetter_('Sub-Source');
   const statusCol = columnLetter_('Status');
@@ -222,12 +222,13 @@ function buildDashboard_() {
   rows.push(['Leads by salesperson', 'Count', '']);
   loadTeam_().forEach(function (member) {
     rows.push([member.name + (member.active ? '' : ' (inactive)'),
-      '=IFERROR(COUNTA(\'' + member.tab + '\'!A2:A),0)', '']);
+      '=IFERROR(COUNTA(' + a1SheetRef_(member.tab) + '!A2:A),0)', '']);
   });
   rows.push(['', '', '']);
   rows.push(['Totals', 'Count', '']);
   rows.push(['Total (all leads)', '=IFERROR(COUNTA(' + all + '!A2:A),0)', '']);
-  rows.push(['Duplicates caught', "=IFERROR(COUNTA('" + SHEETS.duplicates + "'!A2:A),0)", '']);
+  rows.push(['Duplicates caught',
+    '=IFERROR(COUNTA(' + a1SheetRef_(SHEETS.duplicates) + '!A2:A),0)', '']);
   rows.push(['', '', '']);
   rows.push(['Leads by source', 'Count', '']);
   Object.keys(SOURCES).forEach(function (key) {
@@ -265,6 +266,17 @@ function buildDashboard_() {
   sheet.setFrozenRows(2);
   getSpreadsheet_().setActiveSheet(sheet);
   getSpreadsheet_().moveActiveSheet(1);
+}
+
+/**
+ * Quotes a sheet name for use inside a formula. Apostrophes are doubled, so a
+ * tab called Kid's Party becomes 'Kid''s Party' rather than breaking the
+ * formula at the apostrophe.
+ * @param {string} name
+ * @return {string}
+ */
+function a1SheetRef_(name) {
+  return "'" + String(name).replace(/'/g, "''") + "'";
 }
 
 /**

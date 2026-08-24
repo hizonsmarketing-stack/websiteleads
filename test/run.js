@@ -55,8 +55,9 @@ if (unit.failures) { realLog(unit.detail); failures += unit.failures; }
 realLog('\n--- setup ---');
 silence(quiet);
 api.setupWorkbook();
-['Wedding', 'Corporate', 'Social', 'Private Event', 'Unassigned', 'All Leads', 'Duplicates',
- '_Settings', '_Sources', '_Index', '_Raw', '_Log', 'Dashboard'].forEach(name => {
+['Wedding', 'Debut', "Kid's Party", 'Private Event', 'Corporate', 'Unassigned',
+ 'All Leads', 'Duplicates', '_Settings', '_Team', '_Sources', '_Index', '_Raw',
+ '_Log', 'Dashboard'].forEach(name => {
   check('tab exists: ' + name, !!tab(name), 'true');
 });
 check('settings seeded', tab('_Settings').getLastRow() > 10, 'true');
@@ -204,7 +205,7 @@ function setSetting(key, value) {
 
 // Two teams, mirroring a tab-per-salesperson worksheet: five people covering
 // socials/weddings/private events, two covering corporate.
-const socials = 'Social / Debut / Birthday, Wedding, Private Event';
+const socials = "Wedding, Debut, Kid's Party, Private Event";
 [
   ['Bea', 'Bea', socials, 'bea@example.com', 'yes', 0, '', ''],
   ['Carlo', 'Carlo', socials, '', 'yes', 0, '', ''],
@@ -234,11 +235,12 @@ check('assignee stamped on the row', cellOf('Gina', 2, 'Assigned To'), 'Gina');
 
 const s1 = inquiry('Soc One', 's1@example.com', '0917 111 0001', 'Debut');
 const s2 = inquiry('Soc Two', 's2@example.com', '0917 111 0002', 'Church Wedding');
-const s3 = inquiry('Soc Three', 's3@example.com', '0917 111 0003', 'Intimate family gathering');
-const s4 = inquiry('Soc Four', 's4@example.com', '0917 111 0004', 'Birthday');
+const s3 = inquiry('Soc Three', 's3@example.com', '0917 111 0003', 'Kiddie Party');
+const s4 = inquiry('Soc Four', 's4@example.com', '0917 111 0004', 'Intimate family gathering');
 check('socials team covers debut', ['Bea', 'Carlo', 'Dina', 'Fred'].indexOf(s1.tab) > -1, 'true');
 check('same rotation covers weddings', ['Bea', 'Carlo', 'Dina', 'Fred'].indexOf(s2.tab) > -1, 'true');
-check('and private events', ['Bea', 'Carlo', 'Dina', 'Fred'].indexOf(s3.tab) > -1, 'true');
+check("and kid's parties", ['Bea', 'Carlo', 'Dina', 'Fred'].indexOf(s3.tab) > -1, 'true');
+check('and private events', ['Bea', 'Carlo', 'Dina', 'Fred'].indexOf(s4.tab) > -1, 'true');
 const socialTabs = [s1.tab, s2.tab, s3.tab, s4.tab];
 check('four leads went to four different people', new Set(socialTabs).size, 4);
 check('inactive rep skipped', socialTabs.indexOf('Ella'), -1);
@@ -291,7 +293,7 @@ check('phone normalised in place', cellOf('Iris', 2, 'Phone'), '+639179990001');
 check('original phone kept', cellOf('Iris', 2, 'Phone (Raw)'), '0917 999 0001');
 check('legacy column untouched', cellOf('Iris', 2, 'Contact'), '0917 999 0001');
 check('existing status preserved', cellOf('Iris', 2, 'Status'), 'Quoted');
-check('event type read from the legacy column', cellOf('Iris', 2, 'Event Type'), 'Social / Debut / Birthday');
+check('event type read from the legacy column', cellOf('Iris', 2, 'Event Type'), 'Debut');
 check('event date parsed', cellOf('Iris', 2, 'Event Date'), '2027-03-15');
 check('tagged with the migration sub-source', cellOf('Iris', 2, 'Sub-Source'), 'Pre-automation');
 
@@ -329,9 +331,10 @@ check('form-encoded body accepted', JSON.parse(formEncoded.getContent()).action,
 realLog('\n--- totals ---');
 realLog('  All Leads:      ' + rows('All Leads'));
 realLog('  Wedding:        ' + rows('Wedding'));
-realLog('  Corporate:      ' + rows('Corporate'));
-realLog('  Social:         ' + rows('Social'));
+realLog('  Debut:          ' + rows('Debut'));
+realLog("  Kid's Party:    " + rows("Kid's Party"));
 realLog('  Private Event:  ' + rows('Private Event'));
+realLog('  Corporate:      ' + rows('Corporate'));
 realLog('  Unassigned:     ' + rows('Unassigned'));
 realLog('  Duplicates:     ' + rows('Duplicates'));
 realLog('  _Sources:       ' + rows('_Sources'));

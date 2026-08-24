@@ -94,12 +94,19 @@ const TEAM_COLUMNS = [
 const DUPLICATE_EXTRA_COLUMNS = ['Matched On', 'Original Lead ID', 'Original Tab'];
 
 /**
- * Event types and the team tab each one routes to.
+ * Event types, and the shared tab each one falls back to when nobody on the
+ * _Team roster covers it.
  *
  * `keywords` are matched against whatever the form or worksheet supplied. The
- * longest matching keyword wins, so "corporate wedding expo" lands on the
- * keyword that is most specific rather than whichever appears first.
- * Add a type by adding an entry here, then run Leads > Setup / Repair Tabs.
+ * longest matching keyword wins, so the most specific reading is used: "18th
+ * birthday" is a Debut rather than a generic birthday, "kiddie party" is a
+ * Kid's Party, "corporate anniversary" is Corporate rather than an anniversary.
+ *
+ * A plain "birthday" with nothing else to go on is treated as a Private Event —
+ * an adult's birthday party. Move the word to another type's list if that is
+ * the wrong default for your enquiries.
+ *
+ * Add a type by adding an entry here, then run Leads > Setup / repair tabs.
  */
 const EVENT_TYPES = [
   {
@@ -109,7 +116,41 @@ const EVENT_TYPES = [
     keywords: [
       'wedding', 'bridal', 'bride', 'groom', 'engagement', 'nuptial',
       'church wedding', 'civil wedding', 'garden wedding', 'destination wedding',
-      'prenup', 'pre-nup', 'reception', 'kasal'
+      'prenup', 'pre-nup', 'wedding reception', 'kasal', 'renewal of vows',
+      'wedding anniversary party'
+    ]
+  },
+  {
+    key: 'debut',
+    label: 'Debut',
+    tab: 'Debut',
+    keywords: [
+      'debut', 'debutante', 'cotillion', '18th birthday', '18th bday',
+      '18th bday party', 'eighteenth birthday', '18 birthday', 'sweet 16',
+      '16th birthday'
+    ]
+  },
+  {
+    key: 'kids',
+    label: "Kid's Party",
+    tab: "Kid's Party",
+    keywords: [
+      'kiddie party', 'kids party', "kid's party", 'kids birthday',
+      "children's party", 'childrens party', 'children party', 'kiddie',
+      '1st birthday', 'first birthday', '7th birthday', 'christening',
+      'baptism', 'binyag', 'baby shower', 'gender reveal', 'kids event'
+    ]
+  },
+  {
+    key: 'private',
+    label: 'Private Event',
+    tab: 'Private Event',
+    keywords: [
+      'private', 'private event', 'intimate', 'intimate gathering',
+      'family gathering', 'dinner party', 'house party', 'get together',
+      'get-together', 'small gathering', 'birthday', 'bday', 'anniversary',
+      'reunion', 'graduation', 'despedida', 'homecoming', 'retirement',
+      'thanksgiving', 'funeral', 'memorial', 'wake'
     ]
   },
   {
@@ -120,30 +161,10 @@ const EVENT_TYPES = [
       'corporate', 'company', 'business', 'conference', 'seminar', 'convention',
       'meeting', 'team building', 'teambuilding', 'product launch', 'launch',
       'gala', 'awards night', 'awarding', 'christmas party', 'year end party',
-      'general assembly', 'training', 'workshop', 'summit', 'expo', 'grand opening',
-      'ribbon cutting', 'groundbreaking', 'inauguration'
-    ]
-  },
-  {
-    key: 'social',
-    label: 'Social / Debut / Birthday',
-    tab: 'Social',
-    keywords: [
-      'social', 'debut', 'debutante', '18th birthday', 'birthday', 'bday',
-      'kiddie party', 'christening', 'baptism', 'binyag', 'first birthday',
-      'anniversary', 'reunion', 'graduation', 'despedida', 'homecoming',
-      'baby shower', 'gender reveal', 'bridal shower', 'retirement',
-      'funeral', 'memorial', 'wake'
-    ]
-  },
-  {
-    key: 'private',
-    label: 'Private Event',
-    tab: 'Private Event',
-    keywords: [
-      'private', 'private event', 'intimate', 'intimate gathering',
-      'family gathering', 'dinner party', 'house party', 'get together',
-      'get-together', 'small gathering'
+      'general assembly', 'training', 'workshop', 'summit', 'expo',
+      'grand opening', 'ribbon cutting', 'groundbreaking', 'inauguration',
+      'corporate anniversary', 'company anniversary', 'annual meeting',
+      'stockholders meeting', 'client appreciation'
     ]
   }
 ];
@@ -2538,7 +2559,7 @@ function buildDashboard_() {
   const sheet = getOrCreateSheet_('Dashboard', ['Website Leads Automation']);
   sheet.clear();
 
-  const all = "'" + SHEETS.allLeads + "'";
+  const all = a1SheetRef_(SHEETS.allLeads);
   const sourceCol = columnLetter_('Source');
   const subSourceCol = columnLetter_('Sub-Source');
   const statusCol = columnLetter_('Status');
@@ -2556,12 +2577,13 @@ function buildDashboard_() {
   rows.push(['Leads by salesperson', 'Count', '']);
   loadTeam_().forEach(function (member) {
     rows.push([member.name + (member.active ? '' : ' (inactive)'),
-      '=IFERROR(COUNTA(\'' + member.tab + '\'!A2:A),0)', '']);
+      '=IFERROR(COUNTA(' + a1SheetRef_(member.tab) + '!A2:A),0)', '']);
   });
   rows.push(['', '', '']);
   rows.push(['Totals', 'Count', '']);
   rows.push(['Total (all leads)', '=IFERROR(COUNTA(' + all + '!A2:A),0)', '']);
-  rows.push(['Duplicates caught', "=IFERROR(COUNTA('" + SHEETS.duplicates + "'!A2:A),0)", '']);
+  rows.push(['Duplicates caught',
+    '=IFERROR(COUNTA(' + a1SheetRef_(SHEETS.duplicates) + '!A2:A),0)', '']);
   rows.push(['', '', '']);
   rows.push(['Leads by source', 'Count', '']);
   Object.keys(SOURCES).forEach(function (key) {
@@ -2599,6 +2621,17 @@ function buildDashboard_() {
   sheet.setFrozenRows(2);
   getSpreadsheet_().setActiveSheet(sheet);
   getSpreadsheet_().moveActiveSheet(1);
+}
+
+/**
+ * Quotes a sheet name for use inside a formula. Apostrophes are doubled, so a
+ * tab called Kid's Party becomes 'Kid''s Party' rather than breaking the
+ * formula at the apostrophe.
+ * @param {string} name
+ * @return {string}
+ */
+function a1SheetRef_(name) {
+  return "'" + String(name).replace(/'/g, "''") + "'";
 }
 
 /**
@@ -2918,7 +2951,16 @@ function runSelfTest() {
   check('route: exact label', resolveEventType_('Corporate').tab, 'Corporate');
   check('route: corporate wording', resolveEventType_('Company Christmas Party').tab, 'Corporate');
   check('route: wedding wording', resolveEventType_('Church Wedding Reception').tab, 'Wedding');
-  check('route: debut to social', resolveEventType_('Debut / 18th Birthday').tab, 'Social');
+  check('route: debut', resolveEventType_('Debut / 18th Birthday').tab, 'Debut');
+  check('route: 18th beats plain birthday', resolveEventType_('18th Birthday Party').tab, 'Debut');
+  check('route: kiddie party', resolveEventType_('Kiddie Party').tab, "Kid's Party");
+  check('route: christening', resolveEventType_('Christening / Baptism').tab, "Kid's Party");
+  check('route: 1st birthday is a kids party', resolveEventType_('1st Birthday').tab, "Kid's Party");
+  check('route: plain birthday is private', resolveEventType_('Birthday celebration').tab, 'Private Event');
+  check('route: corporate anniversary stays corporate',
+    resolveEventType_('Corporate Anniversary').tab, 'Corporate');
+  check('route: wedding anniversary is private',
+    resolveEventType_('Wedding Anniversary').tab, 'Private Event');
   check('route: private wording', resolveEventType_('Intimate family gathering').tab, 'Private Event');
   check('route: blank falls back', resolveEventType_('').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);
@@ -2973,7 +3015,7 @@ function runSelfTest() {
 
   const adsMapped = mapRecord_(ads);
   check('ads: routed by custom question',
-    resolveEventType_(adsMapped.fields.eventType).tab, 'Social');
+    resolveEventType_(adsMapped.fields.eventType).tab, 'Debut');
 
   // --- Header detection ----------------------------------------------------
   const worksheet = [

@@ -89,10 +89,19 @@ wording:
 | --- | --- | --- |
 | `Corporate` | Corporate | exact match on the type's name |
 | `Company Christmas Party` | Corporate | `christmas party` beats `party` |
+| `Corporate Anniversary` | Corporate | `corporate anniversary` beats `anniversary` |
 | `Church Wedding Reception` | Wedding | `church wedding` beats `wedding` |
-| `Debut / 18th Birthday` | Social | `18th birthday` beats `birthday` |
+| `Wedding Anniversary` | Private Event | `anniversary` beats `wedding` — it isn't a wedding |
+| `Debut / 18th Birthday` | Debut | `18th birthday` beats `birthday` |
+| `Kiddie Party` / `Christening` / `1st Birthday` | Kid's Party | the specific wording wins |
+| `Birthday celebration` | Private Event | a plain birthday, with nothing else to go on |
 | `Intimate family gathering` | Private Event | `family gathering` |
 | `Bar mitzvah` | Unassigned | nothing matched |
+
+**The plain-`birthday` default is a judgement call.** With no other wording, a
+birthday is treated as an adult's party — a Private Event. If most of your
+birthday enquiries are children's parties, move `birthday` and `bday` from the
+`private` keyword list to the `kids` list in `src/00_Config.gs`.
 
 If the event-type field is blank, the **sub-source name and the message body**
 are searched as weaker evidence — so a lead from a form called *Wedding Package

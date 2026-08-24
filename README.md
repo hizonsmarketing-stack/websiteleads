@@ -20,8 +20,9 @@ server to host and nothing to pay for.
   worksheet (.xlsx)  ─┴──►  import  ──┘         │             │            │
                                                 │             │            ▼
                                        phone/email/date   email or    Corporate
-                                       /name/event type   phone match   Wedding
-                                        made consistent       │         Social
+                                       /name/event type   phone match    Wedding
+                                        made consistent       │          Debut
+                                                              │       Kid's Party
                                                               │      Private Event
                                                               ▼       Unassigned
                                                      merged into the
@@ -33,7 +34,7 @@ server to host and nothing to pay for.
   team; the team's rotation picks who gets it, and the lead lands in that
   salesperson's own tab. Wording is matched, not just exact values: "Company
   Christmas Party" is corporate, "Church Wedding Reception" is a wedding, "18th
-  Birthday" is social.
+  Birthday" is a debut, "Kiddie Party" is a kid's party.
 - **Shared out evenly.** Whoever covers that event type and has the fewest leads
   so far gets the next one, so the split is even and explainable. Ties break on
   who was assigned longest ago. A returning inquiry always goes back to the rep
@@ -57,7 +58,7 @@ server to host and nothing to pay for.
 | --- | --- |
 | `Dashboard` | Live counts by team, source, status and sub-source |
 | One tab per salesperson | Where their leads land — your existing tabs, kept as they are |
-| `Corporate`, `Wedding`, `Social`, `Private Event` | Fallback queues for event types nobody is rostered for |
+| `Wedding`, `Debut`, `Kid's Party`, `Private Event`, `Corporate` | Fallback queues for event types nobody is rostered for |
 | `Unassigned` | Leads whose event type is unknown, awaiting a human or a follow-up form |
 | `All Leads` | Master log of every unique lead |
 | `Duplicates` | Every repeat submission, with what it matched on and which lead it belongs to |

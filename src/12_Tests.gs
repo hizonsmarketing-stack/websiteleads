@@ -51,7 +51,16 @@ function runSelfTest() {
   check('route: exact label', resolveEventType_('Corporate').tab, 'Corporate');
   check('route: corporate wording', resolveEventType_('Company Christmas Party').tab, 'Corporate');
   check('route: wedding wording', resolveEventType_('Church Wedding Reception').tab, 'Wedding');
-  check('route: debut to social', resolveEventType_('Debut / 18th Birthday').tab, 'Social');
+  check('route: debut', resolveEventType_('Debut / 18th Birthday').tab, 'Debut');
+  check('route: 18th beats plain birthday', resolveEventType_('18th Birthday Party').tab, 'Debut');
+  check('route: kiddie party', resolveEventType_('Kiddie Party').tab, "Kid's Party");
+  check('route: christening', resolveEventType_('Christening / Baptism').tab, "Kid's Party");
+  check('route: 1st birthday is a kids party', resolveEventType_('1st Birthday').tab, "Kid's Party");
+  check('route: plain birthday is private', resolveEventType_('Birthday celebration').tab, 'Private Event');
+  check('route: corporate anniversary stays corporate',
+    resolveEventType_('Corporate Anniversary').tab, 'Corporate');
+  check('route: wedding anniversary is private',
+    resolveEventType_('Wedding Anniversary').tab, 'Private Event');
   check('route: private wording', resolveEventType_('Intimate family gathering').tab, 'Private Event');
   check('route: blank falls back', resolveEventType_('').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);
@@ -106,7 +115,7 @@ function runSelfTest() {
 
   const adsMapped = mapRecord_(ads);
   check('ads: routed by custom question',
-    resolveEventType_(adsMapped.fields.eventType).tab, 'Social');
+    resolveEventType_(adsMapped.fields.eventType).tab, 'Debut');
 
   // --- Header detection ----------------------------------------------------
   const worksheet = [

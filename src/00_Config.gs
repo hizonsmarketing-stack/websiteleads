@@ -69,12 +69,19 @@ const TEAM_COLUMNS = [
 const DUPLICATE_EXTRA_COLUMNS = ['Matched On', 'Original Lead ID', 'Original Tab'];
 
 /**
- * Event types and the team tab each one routes to.
+ * Event types, and the shared tab each one falls back to when nobody on the
+ * _Team roster covers it.
  *
  * `keywords` are matched against whatever the form or worksheet supplied. The
- * longest matching keyword wins, so "corporate wedding expo" lands on the
- * keyword that is most specific rather than whichever appears first.
- * Add a type by adding an entry here, then run Leads > Setup / Repair Tabs.
+ * longest matching keyword wins, so the most specific reading is used: "18th
+ * birthday" is a Debut rather than a generic birthday, "kiddie party" is a
+ * Kid's Party, "corporate anniversary" is Corporate rather than an anniversary.
+ *
+ * A plain "birthday" with nothing else to go on is treated as a Private Event —
+ * an adult's birthday party. Move the word to another type's list if that is
+ * the wrong default for your enquiries.
+ *
+ * Add a type by adding an entry here, then run Leads > Setup / repair tabs.
  */
 const EVENT_TYPES = [
   {
@@ -84,7 +91,41 @@ const EVENT_TYPES = [
     keywords: [
       'wedding', 'bridal', 'bride', 'groom', 'engagement', 'nuptial',
       'church wedding', 'civil wedding', 'garden wedding', 'destination wedding',
-      'prenup', 'pre-nup', 'reception', 'kasal'
+      'prenup', 'pre-nup', 'wedding reception', 'kasal', 'renewal of vows',
+      'wedding anniversary party'
+    ]
+  },
+  {
+    key: 'debut',
+    label: 'Debut',
+    tab: 'Debut',
+    keywords: [
+      'debut', 'debutante', 'cotillion', '18th birthday', '18th bday',
+      '18th bday party', 'eighteenth birthday', '18 birthday', 'sweet 16',
+      '16th birthday'
+    ]
+  },
+  {
+    key: 'kids',
+    label: "Kid's Party",
+    tab: "Kid's Party",
+    keywords: [
+      'kiddie party', 'kids party', "kid's party", 'kids birthday',
+      "children's party", 'childrens party', 'children party', 'kiddie',
+      '1st birthday', 'first birthday', '7th birthday', 'christening',
+      'baptism', 'binyag', 'baby shower', 'gender reveal', 'kids event'
+    ]
+  },
+  {
+    key: 'private',
+    label: 'Private Event',
+    tab: 'Private Event',
+    keywords: [
+      'private', 'private event', 'intimate', 'intimate gathering',
+      'family gathering', 'dinner party', 'house party', 'get together',
+      'get-together', 'small gathering', 'birthday', 'bday', 'anniversary',
+      'reunion', 'graduation', 'despedida', 'homecoming', 'retirement',
+      'thanksgiving', 'funeral', 'memorial', 'wake'
     ]
   },
   {
@@ -95,30 +136,10 @@ const EVENT_TYPES = [
       'corporate', 'company', 'business', 'conference', 'seminar', 'convention',
       'meeting', 'team building', 'teambuilding', 'product launch', 'launch',
       'gala', 'awards night', 'awarding', 'christmas party', 'year end party',
-      'general assembly', 'training', 'workshop', 'summit', 'expo', 'grand opening',
-      'ribbon cutting', 'groundbreaking', 'inauguration'
-    ]
-  },
-  {
-    key: 'social',
-    label: 'Social / Debut / Birthday',
-    tab: 'Social',
-    keywords: [
-      'social', 'debut', 'debutante', '18th birthday', 'birthday', 'bday',
-      'kiddie party', 'christening', 'baptism', 'binyag', 'first birthday',
-      'anniversary', 'reunion', 'graduation', 'despedida', 'homecoming',
-      'baby shower', 'gender reveal', 'bridal shower', 'retirement',
-      'funeral', 'memorial', 'wake'
-    ]
-  },
-  {
-    key: 'private',
-    label: 'Private Event',
-    tab: 'Private Event',
-    keywords: [
-      'private', 'private event', 'intimate', 'intimate gathering',
-      'family gathering', 'dinner party', 'house party', 'get together',
-      'get-together', 'small gathering'
+      'general assembly', 'training', 'workshop', 'summit', 'expo',
+      'grand opening', 'ribbon cutting', 'groundbreaking', 'inauguration',
+      'corporate anniversary', 'company anniversary', 'annual meeting',
+      'stockholders meeting', 'client appreciation'
     ]
   }
 ];
