@@ -12,7 +12,7 @@
 | **Set webhook token…** | The shared secret website forms must send. |
 | **Set Google Ads key…** | Must match the Key on the Google Ads lead form. |
 | **Rebuild dedupe index** | Re-reads every team tab and rebuilds the matching index. Run it after bulk-editing, deleting or moving rows by hand. |
-| **Run self-test** | Checks the normalisation and routing logic. Writes nothing. |
+| **Run self-test** | Checks the normalisation and routing logic, then checks the `_Team` roster for misspelled event types, active people covering nothing, two people sharing a tab, and event types nobody covers. Writes nothing. |
 
 ## Adding a new website form
 
@@ -78,7 +78,9 @@ All in the `_Settings` tab. Changes take effect on the next submission.
 
 Setup pre-fills this with every tab in the workbook that the automation doesn't
 own, inactive and with no event types, so nothing routes to a person until
-you've said who covers what.
+you've said who covers what. When you've filled it in, run **Leads → Run
+self-test** — it reads the roster back and tells you if anything is misspelled
+or uncovered.
 
 ### How the split works
 
@@ -166,12 +168,17 @@ including rejections. `invalid token` or `invalid google_key` means the secret
 doesn't match; `no contact details` means the payload had no name, email or
 phone.
 
-**A lead went to the wrong person.**
-Check `_Team`: are their **Event Types** spelled exactly as the event type
-labels, and is **Active** set to `yes`? A misspelled event type silently
-excludes that person from the rotation. **Leads → Run self-test** doesn't check
-the roster, but the Dashboard's *Leads by salesperson* block shows at a glance
-if someone is getting nothing.
+**A lead went to the wrong person, or someone is getting nothing.**
+Run **Leads → Run self-test**. It reads the roster and names the problem — a
+misspelled event type, someone active with nothing to cover, two people writing
+to one tab, or an event type nobody active handles. A clean roster reports who
+covers what:
+
+```
+OK — 7 active of 8 on the roster.
+OK — Wedding: Bea, Carlo, Dina, Fred, Iris
+OK — Corporate: Gina, Hector
+```
 
 **A lead went to the wrong tab.**
 Look at **Event Type (Raw)** on the row — that's the wording the form sent. Add

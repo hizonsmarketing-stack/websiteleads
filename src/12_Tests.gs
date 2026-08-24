@@ -1,11 +1,14 @@
 /**
  * Self-test. Runs the pure logic — normalisation, field mapping, event-type
- * routing, payload parsing — against known inputs. It never writes a lead, so
- * it is safe to run on the live workbook (Leads > Run self-test).
+ * routing, payload parsing — against known inputs, then checks the _Team
+ * roster for the mistakes that would quietly stop leads reaching people.
+ * It never writes anything, so it is safe to run on the live workbook
+ * (Leads > Run self-test).
  */
 
 /**
- * @return {{summary: string, detail: string, failures: number}}
+ * @return {{summary: string, detail: string, failures: number,
+ *           roster: !Array<string>}}
  */
 function runSelfTest() {
   const results = [];
@@ -133,11 +136,91 @@ function runSelfTest() {
   check('dedupe: email and phone keys built', keys.length >= 2, 'true');
 
   const failures = results.filter(function (r) { return !r.pass; });
-  const summary = failures.length
+  const roster = rosterReport_();
+
+  let summary = failures.length
     ? failures.length + ' of ' + results.length + ' checks FAILED.'
     : 'All ' + results.length + ' checks passed.';
+  const problems = roster.filter(function (line) { return line.indexOf('OK') !== 0; });
+  summary += problems.length
+    ? '\n' + problems.length + ' thing' + (problems.length === 1 ? '' : 's') +
+      ' to fix on the ' + SHEETS.team + ' tab.'
+    : '';
 
-  const detail = results.map(function (r) { return r.line; }).join('\n');
+  const detail = results.map(function (r) { return r.line; }).join('\n') +
+    '\n\n--- ' + SHEETS.team + ' roster ---\n' + roster.join('\n');
   console.log(summary + '\n' + detail);
-  return { summary: summary, detail: detail, failures: failures.length };
+  return { summary: summary, detail: detail, failures: failures.length, roster: roster };
+}
+
+/**
+ * Checks the roster for the mistakes that are invisible in the spreadsheet but
+ * stop leads reaching people: an event type misspelled so nobody matches it, a
+ * salesperson marked active with nothing to cover, two people pointed at one
+ * tab, or an event type nobody active handles.
+ *
+ * Read-only. Lines that do not start with "OK" are things to fix.
+ * @return {!Array<string>}
+ */
+function rosterReport_() {
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.team);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return ['No roster yet — every lead goes to the shared event-type tabs, unassigned.'];
+  }
+
+  const known = {};
+  allEventTypes_().forEach(function (type) { known[squashKey_(type.label)] = type.label; });
+
+  const members = loadTeam_();
+  const active = members.filter(function (m) { return m.active; });
+  const lines = [];
+
+  members.forEach(function (member) {
+    const unknown = member.eventTypes.filter(function (label) {
+      return label !== '*' && !known[squashKey_(label)];
+    });
+    if (unknown.length) {
+      lines.push('"' + member.name + '" has an event type that matches nothing: ' +
+        unknown.join(', ') + '. Leads of that type will never reach them.');
+    }
+    if (member.active && !member.eventTypes.length) {
+      lines.push('"' + member.name + '" is active but covers no event types, so gets nothing.');
+    }
+  });
+
+  const tabs = {};
+  active.forEach(function (member) {
+    const key = squashKey_(member.tab);
+    if (tabs[key]) {
+      lines.push('"' + member.name + '" and "' + tabs[key] + '" both write to the "' +
+        member.tab + '" tab — their leads will be mixed together.');
+    } else {
+      tabs[key] = member.name;
+    }
+  });
+
+  EVENT_TYPES.forEach(function (type) {
+    const covered = active.some(function (member) {
+      return member.eventTypes.some(function (label) {
+        return label === '*' || squashKey_(label) === squashKey_(type.label);
+      });
+    });
+    if (!covered) {
+      lines.push('Nobody active covers ' + type.label + ' — those leads go to the "' +
+        type.tab + '" tab, unassigned.');
+    }
+  });
+
+  if (!lines.length) {
+    lines.push('OK — ' + active.length + ' active of ' + members.length + ' on the roster.');
+    EVENT_TYPES.forEach(function (type) {
+      const names = active.filter(function (member) {
+        return member.eventTypes.some(function (label) {
+          return label === '*' || squashKey_(label) === squashKey_(type.label);
+        });
+      }).map(function (member) { return member.name; });
+      lines.push('OK — ' + type.label + ': ' + names.join(', '));
+    });
+  }
+  return lines;
 }

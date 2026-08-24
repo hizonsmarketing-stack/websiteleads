@@ -62,7 +62,7 @@ server to host and nothing to pay for.
 | `Unassigned` | Leads whose event type is unknown, awaiting a human or a follow-up form |
 | `All Leads` | Master log of every unique lead |
 | `Duplicates` | Every repeat submission, with what it matched on and which lead it belongs to |
-| `_Team` | The roster: who covers which event types, which tab is theirs, how many they've had |
+| `_Team` | The roster: who covers which event types, which tab is theirs, how many they've had. *Leads → Run self-test* checks it for typos |
 | `_Settings` | Every knob: dedupe rules, notification addresses, retention |
 | `_Sources` | The source / sub-source registry — where new forms show up |
 | `_Index`, `_Raw`, `_Log` | Machinery: dedupe keys, raw payload archive, run log (hidden) |

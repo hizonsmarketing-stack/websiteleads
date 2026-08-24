@@ -78,6 +78,10 @@ know who covers what.
 3. Leave **Assigned Count** and **Last Assigned At** alone — that's the
    rotation's memory.
 
+4. **Leads → Run self-test.** It reads the roster back and reports who covers
+   what, or names anything wrong with it — a misspelled event type is otherwise
+   invisible, and silently drops that person from the rotation.
+
 Anyone left inactive, or an event type nobody covers, falls back to the shared
 event-type tab with no owner. Nothing is ever lost because the roster is
 incomplete.

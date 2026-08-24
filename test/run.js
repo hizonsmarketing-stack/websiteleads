@@ -248,6 +248,29 @@ check('roster counts kept', tab('_Team').getRange(2, 6).getValue(), 1);
 check('assignee emailed', global.__mails.some(m => m.to.indexOf('bea@example.com') > -1), 'true');
 
 api.resetCaches();
+const rosterOk = api.runSelfTest().roster;
+check('a complete roster reports clean',
+  rosterOk.every(line => line.indexOf('OK') === 0), 'true');
+check('and says who covers corporate',
+  rosterOk.some(line => /Corporate: Gina, Hector/.test(line)), 'true');
+check('inactive rep left out of the coverage list',
+  rosterOk.some(line => /Ella/.test(line)), 'false');
+
+tab('_Team').getRange(2, 3).setValue("Wedding, Debutt, Kid's Party, Private Event");
+api.resetCaches();
+check('a misspelled event type is caught',
+  api.runSelfTest().roster.some(line => /Debutt/.test(line)), 'true');
+
+// Rows 7 and 8 are the two corporate reps; stand them both down.
+tab('_Team').getRange(7, 5, 2, 1).setValues([['no'], ['no']]);
+tab('_Team').getRange(2, 3).setValue(socials);
+api.resetCaches();
+check('an event type nobody covers is caught',
+  api.runSelfTest().roster.some(line => /Nobody active covers Corporate/.test(line)), 'true');
+tab('_Team').getRange(7, 5, 2, 1).setValues([['yes'], ['yes']]);
+api.resetCaches();
+
+api.resetCaches();
 const repeat = post({ formName: 'Wedding Package Inquiry', name: 'Soc One',
   email: 's1@example.com', 'Type of Event': 'Wedding' },
   { source: 'website', form: 'Wedding Package Inquiry' });

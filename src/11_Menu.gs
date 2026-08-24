@@ -96,7 +96,13 @@ function menuRebuildIndex() {
 
 function menuRunTests() {
   const results = runSelfTest();
-  SpreadsheetApp.getUi().alert('Self-test', results.summary + '\n\n' + results.detail, SpreadsheetApp.getUi().ButtonSet.OK);
+  const problems = results.roster.filter(function (line) { return line.indexOf('OK') !== 0; });
+  const body = problems.length
+    ? 'Fix these on the ' + SHEETS.team + ' tab:\n\n  • ' + problems.join('\n  • ') +
+      '\n\nFull log in the ' + SHEETS.log + ' tab and the Apps Script execution log.'
+    : results.roster.join('\n') +
+      '\n\nFull log in the Apps Script execution log.';
+  SpreadsheetApp.getUi().alert('Self-test — ' + results.summary, body, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 /** Jumps to the _Team roster, creating it if this is the first time. */
