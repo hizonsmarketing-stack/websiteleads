@@ -46,6 +46,7 @@ function intakeRecord_(input) {
   const lead = buildLead_({
     fields: mapped.fields,
     extras: mapped.extras,
+    messages: mapped.messages,
     source: input.source,
     subSource: input.subSource,
     receivedAt: input.receivedAt,

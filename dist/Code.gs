@@ -256,6 +256,9 @@ const FIELD_ALIASES = {
   ],
   message: [
     'message', 'notes', 'note', 'remarks', 'comments', 'comment', 'inquiry',
+    'sales notes', 'client notes', 'internal notes', 'contact method',
+    'preferred contact method', 'preferred contact', 'contact preference',
+    'mode of contact', 'how to contact', 'best time to call',
     'inquiry details', 'details', 'additional info', 'additional information',
     'question', 'questions', 'how can we help', 'tell us more', 'other details',
     'requirements', 'special requests'
@@ -291,8 +294,13 @@ const FIELD_SUFFIX_RULES = [
 /** Keys carried by a Google Ads lead-form webhook payload. */
 const GOOGLE_ADS_MARKERS = ['user_column_data', 'google_key', 'lead_id'];
 
-/** Keys that never belong in the free-text Message column. */
+/**
+ * Keys dropped entirely: webhook plumbing, and internal columns the sales team
+ * has asked not to carry over. Everything else that matches no field is kept
+ * in the Message column rather than discarded.
+ */
 const NOISE_KEYS = [
+  'conso date',
   'google key', 'api version', 'is test', 'gcl id', 'lead id', 'form id',
   'submission id', 'recaptcha', 'captcha', 'token', 'ip address', 'user agent',
   'consent', 'terms', 'privacy policy', 'submit', 'g recaptcha response'
@@ -1017,13 +1025,24 @@ function matchField_(key) {
 
 /**
  * Maps a flat key/value record onto canonical fields.
+ *
+ * Two columns can legitimately want the same destination — a worksheet with
+ * both SALES NOTES and CLIENT NOTES, or two phone columns for a mobile and a
+ * landline. Nothing is dropped when that happens: notes columns are all kept
+ * and labelled, and for every other field the weaker match is demoted into the
+ * Message column rather than discarded.
+ *
  * @param {!Object<string,*>} flat Output of flatten_().
- * @return {{fields: !Object<string,string>, extras: !Array<{label: string, value: string}>}}
+ * @return {{fields: !Object<string,string>,
+ *           extras: !Array<{label: string, value: string}>,
+ *           messages: !Array<{label: string, value: string}>}}
  */
 function mapRecord_(flat) {
   const fields = {};
   const quality = {};
+  const labels = {};
   const extras = [];
+  const messages = [];
 
   Object.keys(flat).forEach(function (path) {
     const value = cleanText_(flat[path]);
@@ -1032,29 +1051,77 @@ function mapRecord_(flat) {
     const label = leafKey_(path);
     if (isNoiseKey_(label)) return;
 
+    const pretty = humanizeKey_(label);
     const match = matchField_(label);
+
     if (!match.field) {
-      extras.push({ label: humanizeKey_(label), value: value });
+      extras.push({ label: pretty, value: value });
       return;
     }
-    // Keep the strongest match; on a tie the first one wins.
-    if (quality[match.field] === undefined || match.quality > quality[match.field]) {
+
+    // Free text accumulates instead of competing for one slot.
+    if (match.field === 'message') {
+      messages.push({ label: pretty, value: value });
+      if (fields.message === undefined) fields.message = value;
+      return;
+    }
+
+    if (quality[match.field] === undefined) {
       fields[match.field] = value;
       quality[match.field] = match.quality;
+      labels[match.field] = pretty;
+    } else if (match.quality > quality[match.field]) {
+      extras.push({ label: labels[match.field], value: fields[match.field] });
+      fields[match.field] = value;
+      quality[match.field] = match.quality;
+      labels[match.field] = pretty;
+    } else {
+      extras.push({ label: pretty, value: value });
     }
   });
 
-  return { fields: fields, extras: extras };
+  return { fields: fields, extras: extras, messages: messages };
 }
 
-/** "eventDate" / "event_date" -> "Event Date". */
+/**
+ * Assembles the Message column.
+ *
+ * A single notes column reads as plain text, the way the person wrote it.
+ * Several get labelled with their own headers, so a rep can tell the client's
+ * words from an internal note. Anything that matched no field at all follows,
+ * labelled the same way — that is what "nothing is dropped" means in practice.
+ *
+ * @param {!Array<{label: string, value: string}>} notes
+ * @param {!Array<{label: string, value: string}>=} extras
+ * @return {string}
+ */
+function composeMessage_(notes, extras) {
+  const parts = (notes || []).length === 1
+    ? [notes[0].value]
+    : (notes || []).map(function (note) { return note.label + ': ' + note.value; });
+  (extras || []).forEach(function (extra) {
+    parts.push(extra.label + ': ' + extra.value);
+  });
+  return parts.join('\n');
+}
+
+/**
+ * Turns a key or header into a label for the Message column:
+ * "eventDate" and "event_date" both become "Event Date", and a shouted
+ * worksheet header like "SALES NOTES" becomes "Sales Notes" rather than
+ * shouting at the rep reading it. Mixed-case headers are left alone, so an
+ * acronym someone typed deliberately survives.
+ * @param {string} key
+ * @return {string}
+ */
 function humanizeKey_(key) {
-  return String(key)
+  const spaced = String(key)
     .replace(/[_\-.]+/g, ' ')
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\b[a-z]/g, function (c) { return c.toUpperCase(); });
+    .trim();
+  const text = /[a-z]/.test(spaced) ? spaced : spaced.toLowerCase();
+  return text.replace(/\b[a-z]/g, function (c) { return c.toUpperCase(); });
 }
 
 /**
@@ -1063,6 +1130,8 @@ function humanizeKey_(key) {
  * @param {!Object} input
  * @param {!Object<string,string>} input.fields Mapped canonical fields.
  * @param {!Array<{label: string, value: string}>=} input.extras Unmapped answers.
+ * @param {!Array<{label: string, value: string}>=} input.messages Every column
+ *     that mapped to free text, in the order it appeared.
  * @param {string} input.source One of SOURCES.
  * @param {string} input.subSource Form or fair name as received.
  * @param {string=} input.rawRef Pointer into the _Raw tab.
@@ -1070,14 +1139,23 @@ function humanizeKey_(key) {
  *     their own submission timestamps).
  * @param {string=} input.defaultEventType Event wording to fall back on when
  *     the record itself does not say — e.g. "Wedding" for a bridal fair.
+ * @param {boolean=} input.preferRecordSubSource Let a sub-source carried by the
+ *     record itself win over the caller's. Historical rows know their own
+ *     source; a fair worksheet does not, so the fair name wins there.
+ * @param {boolean=} input.preferRecordSource The same, for the source.
  * @return {!Object} A lead ready for dedupe and routing.
  */
 function buildLead_(input) {
   const fields = input.fields || {};
   const extras = input.extras || [];
 
-  const subSourceInfo = resolveSubSource_(
-    input.source, input.subSource || fields.subSource, input.defaultEventType);
+  const subSource = input.preferRecordSubSource
+    ? (fields.subSource || input.subSource)
+    : (input.subSource || fields.subSource);
+  const source = input.preferRecordSource
+    ? (cleanText_(fields.source) || input.source)
+    : input.source;
+  const subSourceInfo = resolveSubSource_(source, subSource, input.defaultEventType);
 
   let fullName = tidyName_(fields.fullName);
   let firstName = tidyName_(fields.firstName);
@@ -1090,12 +1168,8 @@ function buildLead_(input) {
     lastName = split.lastName;
   }
 
-  const messageParts = [];
-  if (fields.message) messageParts.push(fields.message);
-  extras.forEach(function (extra) {
-    messageParts.push(extra.label + ': ' + extra.value);
-  });
-  const message = messageParts.join('\n');
+  const notes = input.messages || (fields.message ? [{ label: '', value: fields.message }] : []);
+  const message = composeMessage_(notes, extras);
 
   const eventType = resolveEventType_(
     fields.eventType || subSourceInfo.defaultEventType || input.defaultEventType,
@@ -1854,6 +1928,7 @@ function intakeRecord_(input) {
   const lead = buildLead_({
     fields: mapped.fields,
     extras: mapped.extras,
+    messages: mapped.messages,
     source: input.source,
     subSource: input.subSource,
     receivedAt: input.receivedAt,
@@ -2994,6 +3069,49 @@ function runSelfTest() {
   check('map: name captured', mapped.fields.fullName, 'Ana Reyes');
   check('map: unknown answer kept as extra', mapped.extras.length, 1);
   check('map: extra label humanised', mapped.extras[0].label, 'How Did You Hear About Us');
+  check('map: shouted header stops shouting', humanizeKey_('SALES NOTES'), 'Sales Notes');
+  check('map: deliberate mixed case left alone', humanizeKey_('Preferred VIP Room'), 'Preferred VIP Room');
+
+  // --- Columns competing for one destination -------------------------------
+  const notesRecord = mapRecord_({
+    'Full name': 'Rosa Lim',
+    'Contact number': '0917 123 4567',
+    'CONTACT METHOD': 'Viber please',
+    'SALES NOTES': 'Called twice, no answer',
+    'CLIENT NOTES': 'Wants a garden setup',
+    'CONSO DATE': '2026-01-04',
+    'PRESENTER': 'Iris'
+  });
+  check('notes: contact method is free text, not a phone', matchField_('CONTACT METHOD').field, 'message');
+  check('notes: phone column still wins the phone slot', notesRecord.fields.phone, '0917 123 4567');
+  check('notes: every notes column kept', notesRecord.messages.length, 3);
+  check('notes: sales notes survived',
+    notesRecord.messages.some(function (m) { return m.value === 'Called twice, no answer'; }), 'true');
+  check('notes: client notes survived',
+    notesRecord.messages.some(function (m) { return m.value === 'Wants a garden setup'; }), 'true');
+  check('notes: labelled by their own headers', notesRecord.messages[0].label.length > 0, 'true');
+  check('conso date is dropped, not filed as an event date', isNoiseKey_('CONSO DATE'), 'true');
+  check('unknown column still reaches the notes',
+    notesRecord.extras.some(function (e) { return e.value === 'Iris'; }), 'true');
+
+  const twoPhones = mapRecord_({
+    'Contact No.': '0917 111 1111',
+    'Contact No. (2)': '0918 222 2222'
+  });
+  check('two phone columns: first wins the column', twoPhones.fields.phone, '0917 111 1111');
+  check('two phone columns: second is not lost', twoPhones.extras.length, 1);
+
+  check('a single notes column reads as plain text',
+    composeMessage_([{ label: 'Message', value: 'Just the one' }], []), 'Just the one');
+  check('several notes columns get labelled',
+    composeMessage_([
+      { label: 'Sales Notes', value: 'Called twice' },
+      { label: 'Client Notes', value: 'Garden setup' }
+    ], []),
+    'Sales Notes: Called twice\nClient Notes: Garden setup');
+  check('unmatched columns follow the notes',
+    composeMessage_([{ label: 'Message', value: 'Hello' }], [{ label: 'Presenter', value: 'Iris' }]),
+    'Hello\nPresenter: Iris');
 
   // --- Payload parsing -----------------------------------------------------
   const wix = flatten_({
@@ -3222,10 +3340,15 @@ function migrateExistingTab(options) {
       const lead = buildLead_({
         fields: mapped.fields,
         extras: mapped.extras,
+        messages: mapped.messages,
         source: source,
         subSource: subSource,
         receivedAt: normalizeDate_(mapped.fields.receivedAt) || '',
-        defaultEventType: opts.defaultEventType
+        defaultEventType: opts.defaultEventType,
+        // Historical rows often carry their own Source and Sub-Source columns,
+        // and those are more accurate than anything chosen in the dialog.
+        preferRecordSource: true,
+        preferRecordSubSource: true
       });
       if (!lead.email && !lead.phone && !lead.fullName) {
         summary.empty++;

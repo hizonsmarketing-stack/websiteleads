@@ -85,10 +85,15 @@ function migrateExistingTab(options) {
       const lead = buildLead_({
         fields: mapped.fields,
         extras: mapped.extras,
+        messages: mapped.messages,
         source: source,
         subSource: subSource,
         receivedAt: normalizeDate_(mapped.fields.receivedAt) || '',
-        defaultEventType: opts.defaultEventType
+        defaultEventType: opts.defaultEventType,
+        // Historical rows often carry their own Source and Sub-Source columns,
+        // and those are more accurate than anything chosen in the dialog.
+        preferRecordSource: true,
+        preferRecordSubSource: true
       });
       if (!lead.email && !lead.phone && !lead.fullName) {
         summary.empty++;

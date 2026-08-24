@@ -22,8 +22,29 @@ matched against an alias dictionary.
 5. **No match?** The answer is kept, labelled, in the lead's **Message**
    column — `How Did You Hear About Us: Instagram`. Nothing is discarded.
 
-Plumbing keys (`g-recaptcha-response`, `submission_id`, `is_test`, and friends)
-are dropped rather than written into Message.
+**Two columns wanting the same destination** is normal — a worksheet with both
+`SALES NOTES` and `CLIENT NOTES`, or two phone columns for a mobile and a
+landline. Nothing is dropped:
+
+- **Notes columns all survive.** One notes column reads as plain text, the way
+  the person wrote it. Several get labelled with their own headers, so a rep can
+  tell the client's words from an internal note:
+
+  ```
+  Contact Method: Viber please
+  Sales Notes: Called twice, no answer
+  Client Notes: Wants a garden setup
+  ```
+
+- **For every other field the stronger match wins the column**, and the weaker
+  one is written into Message rather than discarded. Two phone columns give you
+  the first as **Phone** and the second as `Contact No 2: 0918…` in the notes.
+
+Two kinds of key are dropped outright: webhook plumbing
+(`g-recaptcha-response`, `submission_id`, `is_test`) and internal columns the
+sales team has asked not to carry over. Both live in `NOISE_KEYS` in
+`src/00_Config.gs` — add a header there to stop it reaching the sales tabs at
+all.
 
 ## The canonical fields
 

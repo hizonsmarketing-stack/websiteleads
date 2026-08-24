@@ -22,7 +22,17 @@ your own legacy columns are left untouched — if you have a "Contact" column,
 it keeps its original contents.
 
 Every other column is filled **only where it is empty**. A row with a Status of
-`Quoted` keeps it; a row with no status gets `New`.
+`Quoted` keeps it; a row with no status gets `New`. If your tab already has a
+column the automation also uses — `Email`, `Venue`, `Event Date`, `SOURCE`,
+`SUB-SOURCE` — that column is reused rather than duplicated, and the values in
+it win over anything chosen in the dialog.
+
+**Dates in your own Event Date column are left exactly as typed.** They aren't
+reformatted, because `03/04/2027` is March 4th in some sheets and April 3rd in
+others, and guessing wrong would corrupt real data. New leads arriving from
+here on are written as `YYYY-MM-DD`, so an imported tab ends up with both
+formats in one column. If yours are consistent, say which order they're in and
+they can be converted in one pass.
 
 ## Doing it
 

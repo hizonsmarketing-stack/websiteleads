@@ -231,6 +231,9 @@ const FIELD_ALIASES = {
   ],
   message: [
     'message', 'notes', 'note', 'remarks', 'comments', 'comment', 'inquiry',
+    'sales notes', 'client notes', 'internal notes', 'contact method',
+    'preferred contact method', 'preferred contact', 'contact preference',
+    'mode of contact', 'how to contact', 'best time to call',
     'inquiry details', 'details', 'additional info', 'additional information',
     'question', 'questions', 'how can we help', 'tell us more', 'other details',
     'requirements', 'special requests'
@@ -266,8 +269,13 @@ const FIELD_SUFFIX_RULES = [
 /** Keys carried by a Google Ads lead-form webhook payload. */
 const GOOGLE_ADS_MARKERS = ['user_column_data', 'google_key', 'lead_id'];
 
-/** Keys that never belong in the free-text Message column. */
+/**
+ * Keys dropped entirely: webhook plumbing, and internal columns the sales team
+ * has asked not to carry over. Everything else that matches no field is kept
+ * in the Message column rather than discarded.
+ */
 const NOISE_KEYS = [
+  'conso date',
   'google key', 'api version', 'is test', 'gcl id', 'lead id', 'form id',
   'submission id', 'recaptcha', 'captcha', 'token', 'ip address', 'user agent',
   'consent', 'terms', 'privacy policy', 'submit', 'g recaptcha response'

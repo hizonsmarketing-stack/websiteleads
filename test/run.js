@@ -42,7 +42,10 @@ function rows(name) { const s = tab(name); return s ? Math.max(s.getLastRow() - 
 function cellOf(sheetName, row, header) {
   const s = tab(sheetName);
   const headers = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
-  return s.getRange(row, headers.indexOf(header) + 1).getValue();
+  const squash = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const col = headers.map(squash).indexOf(squash(header));
+  if (col === -1) throw new Error('no column "' + header + '" on ' + sheetName);
+  return s.getRange(row, col + 1).getValue();
 }
 
 realLog('--- self-test (pure logic) ---');
@@ -292,20 +295,30 @@ check('promoted row carries the owner', cellOf(revealed.tab, 3, 'Assigned To'), 
 realLog('\n--- migrating a salesperson tab that already had leads ---');
 silence(quiet);
 const legacy = book.insertSheet('Iris');
+// The real column set from a salesperson's tab, spelling and casing included.
 const legacyData = [
-  ['Client Name', 'Contact', 'Email Add', 'Type of Event', 'Date of Event', 'Status', 'Remarks'],
-  ['Rosa Lim', '0917 999 0001', 'rosa@example.com', 'Debut', '03/15/2027', 'Quoted', 'wants buffet'],
-  ['Ana Reyes', '0917 123 4567', '', 'Corporate', '', 'Contacted', 'from the website last year'],
-  ['Ben Cruz', '0918 999 0002', 'ben@example.com', 'Wedding', '06/06/2027', '', '']
+  ['Full name', 'Email', 'Contact number', 'CONTACT METHOD', 'Event', 'Event Date',
+   'CONSO DATE', 'Venue', 'Guests', 'PRESENTER', 'SALES NOTES', 'CLIENT NOTES',
+   'TIMESTAMP', 'SOURCE', 'SUB-SOURCE'],
+  ['Rosa Lim', 'rosa@example.com', '0917 999 0001', 'Viber please', 'Debut', '03/15/2027',
+   '2026-01-04', 'Quezon City', '120', 'Iris', 'Called twice, no answer',
+   'Wants a garden setup', '2026-05-02', 'Website', 'Homepage Inquiry'],
+  ['Ana Reyes', '', '0917 123 4567', 'Call', 'Corporate', '',
+   '2026-01-05', 'Makati', '80', 'Iris', '', '', '2026-04-11', 'Website', 'Contact Us'],
+  ['Ben Cruz', 'ben@example.com', '0918 999 0002', 'Text', 'Wedding', '06/06/2027',
+   '', 'Tagaytay', '200', 'Iris', '', '', '2026-06-01', 'Exhibit', 'Bridal Fair 2026']
 ];
-legacy.getRange(1, 1, legacyData.length, 7).setValues(legacyData);
+legacy.getRange(1, 1, legacyData.length, legacyData[0].length).setValues(legacyData);
 tab('_Team').appendRow(['Iris', 'Iris', socials, '', 'yes', 0, '', '']);
 api.resetCaches();
 
 const dry = api.migrateExistingTab({ tabName: 'Iris', dryRun: true });
 check('dry run reads every row', dry.migrated, 3);
-check('dry run writes nothing', tab('Iris').getLastColumn(), 7);
+check('dry run writes nothing', tab('Iris').getLastColumn(), 15);
 check('dry run spots the cross-tab duplicate', dry.duplicatesFound, 1);
+check('preview shows contact method as free text', dry.mapping['CONTACT METHOD'], 'Message');
+check('preview shows conso date as ignored', dry.mapping['CONSO DATE'], '(ignored)');
+check('preview shows presenter going to the notes', dry.mapping['PRESENTER'], '(notes)');
 
 const migrated = api.migrateExistingTab({ tabName: 'Iris', subSource: 'Pre-automation' });
 check('rows migrated', migrated.migrated, 3);
@@ -314,11 +327,28 @@ check('lead ids written', String(cellOf('Iris', 2, 'Lead ID')).slice(0, 3), 'LD-
 check('owner stamped from the tab', cellOf('Iris', 2, 'Assigned To'), 'Iris');
 check('phone normalised in place', cellOf('Iris', 2, 'Phone'), '+639179990001');
 check('original phone kept', cellOf('Iris', 2, 'Phone (Raw)'), '0917 999 0001');
-check('legacy column untouched', cellOf('Iris', 2, 'Contact'), '0917 999 0001');
-check('existing status preserved', cellOf('Iris', 2, 'Status'), 'Quoted');
-check('event type read from the legacy column', cellOf('Iris', 2, 'Event Type'), 'Debut');
-check('event date parsed', cellOf('Iris', 2, 'Event Date'), '2027-03-15');
-check('tagged with the migration sub-source', cellOf('Iris', 2, 'Sub-Source'), 'Pre-automation');
+check('their own column untouched', cellOf('Iris', 2, 'CONSO DATE'), '2026-01-04');
+check('event type read from their Event column', cellOf('Iris', 2, 'Event Type'), 'Debut');
+// Their own Event Date column already had a value, so it is left exactly as
+// typed — the migration rewrites only email and phone.
+check('their event date is left as they wrote it', cellOf('Iris', 2, 'Event Date'), '03/15/2027');
+check('conso date did not become the event date',
+  String(cellOf('Iris', 2, 'Event Date')).indexOf('2026-01'), -1);
+check('venue carried across', cellOf('Iris', 2, 'Venue / Location'), 'Quezon City');
+check('guests read as a count', cellOf('Iris', 2, 'Guest Count'), '120');
+check('timestamp used as received date',
+  String(cellOf('Iris', 2, 'Received At')).slice(0, 10), '2026-05-02');
+check('their own SOURCE wins over the dialog', cellOf('Iris', 2, 'Source'), 'Website');
+check('their own SUB-SOURCE wins over the dialog',
+  cellOf('Iris', 2, 'Sub-Source'), 'Homepage Inquiry');
+
+const rosaNotes = String(cellOf('Iris', 2, 'Message'));
+check('sales notes kept', /Sales Notes: Called twice, no answer/.test(rosaNotes), 'true');
+check('client notes kept alongside them', /Client Notes: Wants a garden setup/.test(rosaNotes), 'true');
+check('contact method landed in the notes', /Contact Method: Viber please/.test(rosaNotes), 'true');
+check('presenter landed in the notes', /Presenter: Iris/.test(rosaNotes), 'true');
+check('labels are not shouted back at the rep', /SALES NOTES/.test(rosaNotes), 'false');
+check('conso date is nowhere in the notes', /2026-01-04/.test(rosaNotes), 'false');
 
 api.resetCaches();
 const returning = post({ formName: 'Contact Us', name: 'Rosa Lim', email: 'rosa@example.com',

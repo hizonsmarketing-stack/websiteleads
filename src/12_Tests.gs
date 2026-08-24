@@ -88,6 +88,49 @@ function runSelfTest() {
   check('map: name captured', mapped.fields.fullName, 'Ana Reyes');
   check('map: unknown answer kept as extra', mapped.extras.length, 1);
   check('map: extra label humanised', mapped.extras[0].label, 'How Did You Hear About Us');
+  check('map: shouted header stops shouting', humanizeKey_('SALES NOTES'), 'Sales Notes');
+  check('map: deliberate mixed case left alone', humanizeKey_('Preferred VIP Room'), 'Preferred VIP Room');
+
+  // --- Columns competing for one destination -------------------------------
+  const notesRecord = mapRecord_({
+    'Full name': 'Rosa Lim',
+    'Contact number': '0917 123 4567',
+    'CONTACT METHOD': 'Viber please',
+    'SALES NOTES': 'Called twice, no answer',
+    'CLIENT NOTES': 'Wants a garden setup',
+    'CONSO DATE': '2026-01-04',
+    'PRESENTER': 'Iris'
+  });
+  check('notes: contact method is free text, not a phone', matchField_('CONTACT METHOD').field, 'message');
+  check('notes: phone column still wins the phone slot', notesRecord.fields.phone, '0917 123 4567');
+  check('notes: every notes column kept', notesRecord.messages.length, 3);
+  check('notes: sales notes survived',
+    notesRecord.messages.some(function (m) { return m.value === 'Called twice, no answer'; }), 'true');
+  check('notes: client notes survived',
+    notesRecord.messages.some(function (m) { return m.value === 'Wants a garden setup'; }), 'true');
+  check('notes: labelled by their own headers', notesRecord.messages[0].label.length > 0, 'true');
+  check('conso date is dropped, not filed as an event date', isNoiseKey_('CONSO DATE'), 'true');
+  check('unknown column still reaches the notes',
+    notesRecord.extras.some(function (e) { return e.value === 'Iris'; }), 'true');
+
+  const twoPhones = mapRecord_({
+    'Contact No.': '0917 111 1111',
+    'Contact No. (2)': '0918 222 2222'
+  });
+  check('two phone columns: first wins the column', twoPhones.fields.phone, '0917 111 1111');
+  check('two phone columns: second is not lost', twoPhones.extras.length, 1);
+
+  check('a single notes column reads as plain text',
+    composeMessage_([{ label: 'Message', value: 'Just the one' }], []), 'Just the one');
+  check('several notes columns get labelled',
+    composeMessage_([
+      { label: 'Sales Notes', value: 'Called twice' },
+      { label: 'Client Notes', value: 'Garden setup' }
+    ], []),
+    'Sales Notes: Called twice\nClient Notes: Garden setup');
+  check('unmatched columns follow the notes',
+    composeMessage_([{ label: 'Message', value: 'Hello' }], [{ label: 'Presenter', value: 'Iris' }]),
+    'Hello\nPresenter: Iris');
 
   // --- Payload parsing -----------------------------------------------------
   const wix = flatten_({
