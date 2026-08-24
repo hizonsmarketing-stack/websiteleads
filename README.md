@@ -134,6 +134,11 @@ After changing anything in `src/`, rebuild the single-file install bundle:
 npm run bundle
 ```
 
+What it cannot cover: the OAuth scopes in `appsscript.json`, the authorisation
+flow, and web-app deployment. Those only fail on the real thing — if a menu
+item reports insufficient permissions, the scope it names has to be added to
+the manifest and the script re-authorised.
+
 To push changes to the live script:
 
 ```bash

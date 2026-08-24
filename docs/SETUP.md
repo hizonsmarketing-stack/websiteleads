@@ -49,9 +49,15 @@ Reload the spreadsheet. A **Leads** menu appears next to *Help*.
 
 Google will ask you to authorise the script the first time. It is your own
 script, so the "unverified app" warning is expected: *Advanced → Go to
-Website Leads Automation (unsafe)*. The scopes it asks for are in
-`appsscript.json` — the spreadsheet, outbound requests, and sending mail for
-new-lead notifications.
+Website Leads Automation (unsafe)*. The four scopes in `appsscript.json` are:
+the spreadsheet itself, showing the import dialogs, sending mail for new-lead
+alerts, and reading the script's own deployment URL. It asks for nothing else —
+not your other Drive files, not your email address, no outbound requests.
+
+**If a menu item later reports "Specified permissions are not sufficient"**, the
+manifest is out of date in your copy: re-paste `appsscript.json`, save, run the
+menu item again, and accept the fresh authorisation prompt. A scope change
+always needs re-authorising.
 
 When it finishes you have the shared event-type tabs, `All Leads`,
 `Duplicates`, `_Settings`, `_Sources`, `_Team`, a `Dashboard`, and the hidden
