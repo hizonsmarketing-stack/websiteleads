@@ -20,6 +20,7 @@ const COLUMN_TO_FIELD = {
   'Phone (Raw)': 'phoneRaw',
   'Company': 'company',
   'Event Date': 'eventDate',
+  'Event Date (Raw)': 'eventDateRaw',
   'Guest Count': 'guestCount',
   'Venue / Location': 'venue',
   'Budget': 'budget',

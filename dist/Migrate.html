@@ -64,9 +64,10 @@
 
     <div class="warn">
       Email and phone are rewritten in normalised form (<code>0917 123 4567</code> →
-      <code>+639171234567</code>) so they can be matched across sources. The original
-      phone text is kept in <strong>Phone (Raw)</strong>. Every other column is filled
-      only where it is empty, and no row is moved or deleted.
+      <code>+639171234567</code>) so they can be matched across sources, and event dates
+      are rewritten <em>only where there is one way to read them</em>. The originals are
+      kept in <strong>Phone (Raw)</strong> and <strong>Event Date (Raw)</strong>. Every
+      other column is filled only where it is empty, and no row is moved or deleted.
     </div>
 
     <div class="actions">
@@ -137,8 +138,17 @@
           result.duplicatesFound
             ? '<strong>' + result.duplicatesFound + ' row(s) match a lead elsewhere</strong> — ' +
               'they stay put; review them in the Duplicates tab.'
-            : 'No cross-tab duplicates found.'
+            : 'No cross-tab duplicates found.',
+          (result.ambiguousDates || []).length
+            ? '<strong>' + result.ambiguousDates.length + ' date(s) could be read two ways</strong> — ' +
+              'left exactly as typed, listed below for a human to settle.'
+            : ''
         ].filter(Boolean);
+
+        var dates = (result.ambiguousDates || []).slice(0, 15).map(function (d) {
+          return '<tr><td>row ' + d.row + '</td><td>' + escapeHtml(d.name) +
+            '</td><td class="ignored">' + escapeHtml(d.value) + '</td></tr>';
+        }).join('');
 
         var dupes = (result.duplicates || []).slice(0, 12).map(function (d) {
           return '<tr><td>row ' + d.row + '</td><td>' + escapeHtml(d.name) +
@@ -154,6 +164,7 @@
         }).join('');
 
         show(lines.join('<br>') +
+          (dates ? '<br><br><strong>Dates to settle by hand</strong><table class="map">' + dates + '</table>' : '') +
           (dupes ? '<br><br><strong>Matches found</strong><table class="map">' + dupes + '</table>' : '') +
           '<br><strong>Columns read</strong><table class="map">' + mapping + '</table>' +
           'Columns marked <em>(notes)</em> are copied into the Message column.');

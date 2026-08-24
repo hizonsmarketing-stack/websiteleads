@@ -247,6 +247,7 @@ function buildLead_(input) {
     phoneRaw: cleanText_(fields.phone),
     company: cleanText_(fields.company),
     eventDate: normalizeDate_(fields.eventDate),
+    eventDateRaw: cleanText_(fields.eventDate),
     guestCount: normalizeGuestCount_(fields.guestCount),
     venue: cleanText_(fields.venue),
     budget: cleanText_(fields.budget),

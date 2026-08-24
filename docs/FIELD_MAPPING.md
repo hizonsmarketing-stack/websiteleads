@@ -93,6 +93,7 @@ checked out.
 | `maria+expo@gmail.com` | stored as typed; matched as `maria@gmail.com` | Tagged addresses are the same inbox (toggle: *Dedupe Ignore Plus Tags*) |
 | `MARIA CRUZ` | `Maria Cruz` | All-caps worksheets are common |
 | `12/14/2026`, `14/12/2026`, `2026-12-14` | `2026-12-14` | Month-first is assumed; day-first is used when the first number is over 12 |
+| `03/04/2027` in a historical tab | left as typed, and reported | Could be read either way; see [EXISTING_LEADS.md](EXISTING_LEADS.md#dates) |
 | `sometime next year` | kept as written | Better an odd date than a lost one |
 | `around 150 pax` | `150` |  |
 | `100 - 150` | `100-150` | Ranges are preserved |

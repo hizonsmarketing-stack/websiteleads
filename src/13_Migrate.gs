@@ -7,10 +7,14 @@
  * dedupe index. From then on a returning inquiry is recognised as the same
  * person and merged into the historical row instead of being dealt out again.
  *
- * Nothing is deleted and no row moves. The only values overwritten are Email
- * and Phone, which are rewritten in normalised form so they can be matched;
- * the original phone text is preserved in Phone (Raw). Every other canonical
+ * Nothing is deleted and no row moves. The values overwritten are Email, Phone
+ * and — only where it can be read with certainty — Event Date; the originals
+ * are preserved in Phone (Raw) and Event Date (Raw). Every other canonical
  * column is filled only where it is blank.
+ *
+ * A date like "03/04/2027" that could be read either way round is left exactly
+ * as typed and reported, because several people have typed into these columns
+ * over the years and guessing would move real bookings by weeks.
  */
 
 /**
@@ -46,6 +50,7 @@ function migrateExistingTab(options) {
     empty: 0,
     duplicatesFound: 0,
     duplicates: [],
+    ambiguousDates: [],
     mapping: describeMapping_(table.headers),
     dryRun: !!opts.dryRun
   };
@@ -101,6 +106,15 @@ function migrateExistingTab(options) {
       }
       if (!cleanText_(lead.assignedTo)) lead.assignedTo = salesperson;
 
+      const dateInfo = classifyDate_(mapped.fields.eventDate);
+      if (dateInfo.status === 'ambiguous') {
+        summary.ambiguousDates.push({
+          row: rowNumber,
+          name: lead.fullName || lead.email || lead.phone,
+          value: dateInfo.original
+        });
+      }
+
       const duplicate = findDuplicate_(lead);
       if (duplicate) {
         summary.duplicatesFound++;
@@ -117,7 +131,7 @@ function migrateExistingTab(options) {
         return;
       }
 
-      writeMigratedRow_(sheet, rowNumber, lead);
+      writeMigratedRow_(sheet, rowNumber, lead, dateInfo);
       appendLead_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS), lead);
       // Free keys still get indexed, so a row that duplicates another is at
       // least findable by whichever contact detail is unique to it.
@@ -137,7 +151,8 @@ function migrateExistingTab(options) {
 
   log_('INFO', 'migrate', (opts.dryRun ? 'Previewed' : 'Migrated') + ' "' + tabName + '"', {
     rows: summary.rows, migrated: summary.migrated,
-    alreadyDone: summary.alreadyDone, duplicatesFound: summary.duplicatesFound
+    alreadyDone: summary.alreadyDone, duplicatesFound: summary.duplicatesFound,
+    ambiguousDates: summary.ambiguousDates.length
   });
   return summary;
 }
@@ -156,13 +171,20 @@ function confirmMigratable_(tabName) {
  * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
  * @param {number} rowNumber
  * @param {!Object} lead
+ * @param {{status: string, value: string, original: string}} dateInfo
  */
-function writeMigratedRow_(sheet, rowNumber, lead) {
+function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
   const map = headerMap_(sheet);
   const updates = {};
 
   // Normalised contact details replace what is there — matching depends on them.
   const overwrite = { 'Email': lead.email, 'Phone': lead.phone };
+
+  // A date only gets rewritten when there is one way to read it. An ambiguous
+  // one stays exactly as typed, and stands out against the normalised rows
+  // around it — which is the point.
+  if (dateInfo && dateInfo.status === 'iso') overwrite['Event Date'] = dateInfo.value;
+
   Object.keys(overwrite).forEach(function (header) {
     if (cleanText_(overwrite[header])) updates[header] = overwrite[header];
   });
@@ -179,7 +201,7 @@ function writeMigratedRow_(sheet, rowNumber, lead) {
     'Last Name': lead.lastName,
     'Phone (Raw)': lead.phoneRaw,
     'Company': lead.company,
-    'Event Date': lead.eventDate,
+    'Event Date (Raw)': dateInfo ? dateInfo.original : '',
     'Guest Count': lead.guestCount,
     'Venue / Location': lead.venue,
     'Budget': lead.budget,

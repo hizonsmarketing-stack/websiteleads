@@ -306,14 +306,16 @@ const legacyData = [
   ['Ana Reyes', '', '0917 123 4567', 'Call', 'Corporate', '',
    '2026-01-05', 'Makati', '80', 'Iris', '', '', '2026-04-11', 'Website', 'Contact Us'],
   ['Ben Cruz', 'ben@example.com', '0918 999 0002', 'Text', 'Wedding', '06/06/2027',
-   '', 'Tagaytay', '200', 'Iris', '', '', '2026-06-01', 'Exhibit', 'Bridal Fair 2026']
+   '', 'Tagaytay', '200', 'Iris', '', '', '2026-06-01', 'Exhibit', 'Bridal Fair 2026'],
+  ['Cely Ong', 'cely@example.com', '0917 777 0003', 'Call', 'Kiddie Party', '03/04/2027',
+   '', 'Pasig', '40', 'Iris', '', '', '2026-07-04', 'Website', 'Contact Us']
 ];
 legacy.getRange(1, 1, legacyData.length, legacyData[0].length).setValues(legacyData);
 tab('_Team').appendRow(['Iris', 'Iris', socials, '', 'yes', 0, '', '']);
 api.resetCaches();
 
 const dry = api.migrateExistingTab({ tabName: 'Iris', dryRun: true });
-check('dry run reads every row', dry.migrated, 3);
+check('dry run reads every row', dry.migrated, 4);
 check('dry run writes nothing', tab('Iris').getLastColumn(), 15);
 check('dry run spots the cross-tab duplicate', dry.duplicatesFound, 1);
 check('preview shows contact method as free text', dry.mapping['CONTACT METHOD'], 'Message');
@@ -321,19 +323,25 @@ check('preview shows conso date as ignored', dry.mapping['CONSO DATE'], '(ignore
 check('preview shows presenter going to the notes', dry.mapping['PRESENTER'], '(notes)');
 
 const migrated = api.migrateExistingTab({ tabName: 'Iris', subSource: 'Pre-automation' });
-check('rows migrated', migrated.migrated, 3);
-check('rows stayed in Iris', rows('Iris'), 3);
+check('rows migrated', migrated.migrated, 4);
+check('rows stayed in Iris', rows('Iris'), 4);
 check('lead ids written', String(cellOf('Iris', 2, 'Lead ID')).slice(0, 3), 'LD-');
 check('owner stamped from the tab', cellOf('Iris', 2, 'Assigned To'), 'Iris');
 check('phone normalised in place', cellOf('Iris', 2, 'Phone'), '+639179990001');
 check('original phone kept', cellOf('Iris', 2, 'Phone (Raw)'), '0917 999 0001');
 check('their own column untouched', cellOf('Iris', 2, 'CONSO DATE'), '2026-01-04');
 check('event type read from their Event column', cellOf('Iris', 2, 'Event Type'), 'Debut');
-// Their own Event Date column already had a value, so it is left exactly as
-// typed — the migration rewrites only email and phone.
-check('their event date is left as they wrote it', cellOf('Iris', 2, 'Event Date'), '03/15/2027');
+// 03/15/2027 can only be read one way, so it is normalised and the original
+// kept alongside. 03/04/2027 on Cely's row cannot, so it is left untouched.
+check('an unambiguous date is normalised', cellOf('Iris', 2, 'Event Date'), '2027-03-15');
+check('the original is kept beside it', cellOf('Iris', 2, 'Event Date (Raw)'), '03/15/2027');
 check('conso date did not become the event date',
   String(cellOf('Iris', 2, 'Event Date')).indexOf('2026-01'), -1);
+check('an ambiguous date is left exactly as typed', cellOf('Iris', 5, 'Event Date'), '03/04/2027');
+check('and is reported for a human to settle', migrated.ambiguousDates.length, 1);
+check('the report names the row', migrated.ambiguousDates[0].row, 5);
+check('the report names the person', migrated.ambiguousDates[0].name, 'Cely Ong');
+check('the preview flags it too, before writing anything', dry.ambiguousDates.length, 1);
 check('venue carried across', cellOf('Iris', 2, 'Venue / Location'), 'Quezon City');
 check('guests read as a count', cellOf('Iris', 2, 'Guest Count'), '120');
 check('timestamp used as received date',
@@ -360,7 +368,7 @@ check('touch counted on the historical row', cellOf('Iris', 2, 'Touches'), 2);
 api.resetCaches();
 const second = api.migrateExistingTab({ tabName: 'Iris' });
 check('re-running the migration is a no-op', second.migrated, 0);
-check('already-migrated rows are recognised', second.alreadyDone, 3);
+check('already-migrated rows are recognised', second.alreadyDone, 4);
 
 realLog('\n--- auth and payload shapes ---');
 silence(quiet);

@@ -27,12 +27,26 @@ column the automation also uses — `Email`, `Venue`, `Event Date`, `SOURCE`,
 `SUB-SOURCE` — that column is reused rather than duplicated, and the values in
 it win over anything chosen in the dialog.
 
-**Dates in your own Event Date column are left exactly as typed.** They aren't
-reformatted, because `03/04/2027` is March 4th in some sheets and April 3rd in
-others, and guessing wrong would corrupt real data. New leads arriving from
-here on are written as `YYYY-MM-DD`, so an imported tab ends up with both
-formats in one column. If yours are consistent, say which order they're in and
-they can be converted in one pass.
+### Dates
+
+Several people have typed into these columns over the years, so the import
+reads each date on its own merits rather than assuming one format:
+
+| Written as | Read as | Why |
+| --- | --- | --- |
+| `03/15/2027` | `2027-03-15` | There is no 15th month, so it can only be March 15th |
+| `15/03/2027` | `2027-03-15` | Same date, written the other way round — still only one reading |
+| `06/06/2027` | `2027-06-06` | The sixth of June whichever way it was meant |
+| `2027-03-15`, `March 15, 2027` | `2027-03-15` | Already unambiguous |
+| **`03/04/2027`** | **left exactly as typed** | March 4th or April 3rd — guessing would move a real booking by weeks |
+
+The original is always kept in a new **Event Date (Raw)** column, the same way
+the original phone text is kept in **Phone (Raw)**.
+
+Dates that can't be settled are **listed in the preview and the import summary**,
+by row number and client name, so you can check them against the actual booking
+and correct them by hand. They also stand out visually — they're the ones still
+in slash format among the normalised rows.
 
 ## Doing it
 

@@ -47,6 +47,19 @@ function runSelfTest() {
   check('date: US slash', normalizeDate_('12/14/2026'), '2026-12-14');
   check('date: day-first when unambiguous', normalizeDate_('14/12/2026'), '2026-12-14');
   check('date: unparseable kept', normalizeDate_('sometime next year'), 'sometime next year');
+  check('date: month-first is certain when the day is over 12',
+    classifyDate_('03/15/2027').status + ' ' + classifyDate_('03/15/2027').value, 'iso 2027-03-15');
+  check('date: day-first is certain when the day is over 12',
+    classifyDate_('15/03/2027').status + ' ' + classifyDate_('15/03/2027').value, 'iso 2027-03-15');
+  check('date: both under 12 is ambiguous', classifyDate_('03/04/2027').status, 'ambiguous');
+  check('date: same day and month reads the same either way',
+    classifyDate_('06/06/2027').status + ' ' + classifyDate_('06/06/2027').value, 'iso 2027-06-06');
+  check('date: ambiguous yields no value', classifyDate_('03/04/2027').value, '');
+  check('date: ISO is certain', classifyDate_('2027-03-15').status, 'iso');
+  check('date: a month name settles it', classifyDate_('March 15, 2027').status, 'iso');
+  check('date: prose is unreadable', classifyDate_('sometime next year').status, 'unreadable');
+  check('date: original always preserved', classifyDate_('03/04/2027').original, '03/04/2027');
+
   check('guests: prose', normalizeGuestCount_('around 150 pax'), '150');
   check('guests: range', normalizeGuestCount_('100 - 150'), '100-150');
 

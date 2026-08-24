@@ -115,6 +115,67 @@ function normalizeDate_(raw) {
   return text;
 }
 
+/**
+ * Decides whether a date written by a human can be read with certainty.
+ *
+ * "03/15/2027" can only be March 15th; "15/03/2027" can only be the same day
+ * written the other way round; but "03/04/2027" is March 4th in one person's
+ * sheet and April 3rd in another's. Where several people have typed into the
+ * same column over the years, the only honest answer for that third case is
+ * "ask a human" — guessing moves real bookings by weeks.
+ *
+ * @param {*} raw
+ * @return {{status: string, value: string, original: string}}
+ *     status is 'iso' (value holds yyyy-MM-dd), 'ambiguous' (day and month
+ *     could swap), or 'unreadable' (not a date at all).
+ */
+function classifyDate_(raw) {
+  const original = cleanText_(raw);
+  if (raw instanceof Date && !isNaN(raw.getTime())) {
+    return { status: 'iso', value: formatDate_(raw), original: original };
+  }
+  if (!original) return { status: 'unreadable', value: '', original: '' };
+
+  const iso = original.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    const built = buildDate_(+iso[1], +iso[2], +iso[3], '');
+    return built
+      ? { status: 'iso', value: built, original: original }
+      : { status: 'unreadable', value: '', original: original };
+  }
+
+  const parts = original.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s*$/);
+  if (parts) {
+    let a = +parts[1], b = +parts[2], year = +parts[3];
+    if (year < 100) year += 2000;
+    if (a > 12 && b > 12) return { status: 'unreadable', value: '', original: original };
+    // 06/06/2027 is the sixth of June whichever way round it was meant.
+    if (a === b) {
+      const same = buildDate_(year, a, b, '');
+      return same ? { status: 'iso', value: same, original: original }
+                  : { status: 'unreadable', value: '', original: original };
+    }
+    if (a > 12) {
+      const built = buildDate_(year, b, a, '');
+      return built ? { status: 'iso', value: built, original: original }
+                   : { status: 'unreadable', value: '', original: original };
+    }
+    if (b > 12) {
+      const built = buildDate_(year, a, b, '');
+      return built ? { status: 'iso', value: built, original: original }
+                   : { status: 'unreadable', value: '', original: original };
+    }
+    return { status: 'ambiguous', value: '', original: original };
+  }
+
+  // Anything with a month name or a full timestamp reads only one way.
+  const parsed = new Date(original);
+  if (!isNaN(parsed.getTime()) && /\d{4}/.test(original) && /[A-Za-z]/.test(original)) {
+    return { status: 'iso', value: formatDate_(parsed), original: original };
+  }
+  return { status: 'unreadable', value: '', original: original };
+}
+
 /** @return {string} yyyy-MM-dd, or the fallback text when the parts are invalid. */
 function buildDate_(year, month, day, fallback) {
   if (!year || !month || !day || month > 12 || day > 31) return fallback;

@@ -36,6 +36,7 @@ const LEAD_COLUMNS = [
   'Phone (Raw)',
   'Company',
   'Event Date',
+  'Event Date (Raw)',
   'Guest Count',
   'Venue / Location',
   'Budget',

@@ -166,7 +166,7 @@ function styleLeadSheet_(sheet) {
     'Lead ID': 150, 'Received At': 140, 'Source': 100, 'Sub-Source': 190,
     'Event Type': 150, 'Event Type (Raw)': 150, 'Full Name': 180,
     'First Name': 120, 'Last Name': 130, 'Email': 230, 'Phone': 140,
-    'Phone (Raw)': 130, 'Company': 170, 'Event Date': 110, 'Guest Count': 100,
+    'Phone (Raw)': 130, 'Company': 170, 'Event Date': 110, 'Event Date (Raw)': 120, 'Guest Count': 100,
     'Venue / Location': 170, 'Budget': 120, 'Message': 320, 'Campaign': 130,
     'Assigned To': 130, 'Status': 130, 'Touches': 80, 'First Seen At': 140,
     'Last Touch At': 140, 'All Sub-Sources': 220, 'Raw Ref': 110,

@@ -61,6 +61,7 @@ const LEAD_COLUMNS = [
   'Phone (Raw)',
   'Company',
   'Event Date',
+  'Event Date (Raw)',
   'Guest Count',
   'Venue / Location',
   'Budget',
@@ -540,6 +541,7 @@ const COLUMN_TO_FIELD = {
   'Phone (Raw)': 'phoneRaw',
   'Company': 'company',
   'Event Date': 'eventDate',
+  'Event Date (Raw)': 'eventDateRaw',
   'Guest Count': 'guestCount',
   'Venue / Location': 'venue',
   'Budget': 'budget',
@@ -865,6 +867,67 @@ function normalizeDate_(raw) {
   const parsed = new Date(text);
   if (!isNaN(parsed.getTime()) && /\d{4}/.test(text)) return formatDate_(parsed);
   return text;
+}
+
+/**
+ * Decides whether a date written by a human can be read with certainty.
+ *
+ * "03/15/2027" can only be March 15th; "15/03/2027" can only be the same day
+ * written the other way round; but "03/04/2027" is March 4th in one person's
+ * sheet and April 3rd in another's. Where several people have typed into the
+ * same column over the years, the only honest answer for that third case is
+ * "ask a human" — guessing moves real bookings by weeks.
+ *
+ * @param {*} raw
+ * @return {{status: string, value: string, original: string}}
+ *     status is 'iso' (value holds yyyy-MM-dd), 'ambiguous' (day and month
+ *     could swap), or 'unreadable' (not a date at all).
+ */
+function classifyDate_(raw) {
+  const original = cleanText_(raw);
+  if (raw instanceof Date && !isNaN(raw.getTime())) {
+    return { status: 'iso', value: formatDate_(raw), original: original };
+  }
+  if (!original) return { status: 'unreadable', value: '', original: '' };
+
+  const iso = original.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    const built = buildDate_(+iso[1], +iso[2], +iso[3], '');
+    return built
+      ? { status: 'iso', value: built, original: original }
+      : { status: 'unreadable', value: '', original: original };
+  }
+
+  const parts = original.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s*$/);
+  if (parts) {
+    let a = +parts[1], b = +parts[2], year = +parts[3];
+    if (year < 100) year += 2000;
+    if (a > 12 && b > 12) return { status: 'unreadable', value: '', original: original };
+    // 06/06/2027 is the sixth of June whichever way round it was meant.
+    if (a === b) {
+      const same = buildDate_(year, a, b, '');
+      return same ? { status: 'iso', value: same, original: original }
+                  : { status: 'unreadable', value: '', original: original };
+    }
+    if (a > 12) {
+      const built = buildDate_(year, b, a, '');
+      return built ? { status: 'iso', value: built, original: original }
+                   : { status: 'unreadable', value: '', original: original };
+    }
+    if (b > 12) {
+      const built = buildDate_(year, a, b, '');
+      return built ? { status: 'iso', value: built, original: original }
+                   : { status: 'unreadable', value: '', original: original };
+    }
+    return { status: 'ambiguous', value: '', original: original };
+  }
+
+  // Anything with a month name or a full timestamp reads only one way.
+  const parsed = new Date(original);
+  if (!isNaN(parsed.getTime()) && /\d{4}/.test(original) && /[A-Za-z]/.test(original)) {
+    return { status: 'iso', value: formatDate_(parsed), original: original };
+  }
+  return { status: 'unreadable', value: '', original: original };
 }
 
 /** @return {string} yyyy-MM-dd, or the fallback text when the parts are invalid. */
@@ -1197,6 +1260,7 @@ function buildLead_(input) {
     phoneRaw: cleanText_(fields.phone),
     company: cleanText_(fields.company),
     eventDate: normalizeDate_(fields.eventDate),
+    eventDateRaw: cleanText_(fields.eventDate),
     guestCount: normalizeGuestCount_(fields.guestCount),
     venue: cleanText_(fields.venue),
     budget: cleanText_(fields.budget),
@@ -2596,7 +2660,7 @@ function styleLeadSheet_(sheet) {
     'Lead ID': 150, 'Received At': 140, 'Source': 100, 'Sub-Source': 190,
     'Event Type': 150, 'Event Type (Raw)': 150, 'Full Name': 180,
     'First Name': 120, 'Last Name': 130, 'Email': 230, 'Phone': 140,
-    'Phone (Raw)': 130, 'Company': 170, 'Event Date': 110, 'Guest Count': 100,
+    'Phone (Raw)': 130, 'Company': 170, 'Event Date': 110, 'Event Date (Raw)': 120, 'Guest Count': 100,
     'Venue / Location': 170, 'Budget': 120, 'Message': 320, 'Campaign': 130,
     'Assigned To': 130, 'Status': 130, 'Touches': 80, 'First Seen At': 140,
     'Last Touch At': 140, 'All Sub-Sources': 220, 'Raw Ref': 110,
@@ -3028,6 +3092,19 @@ function runSelfTest() {
   check('date: US slash', normalizeDate_('12/14/2026'), '2026-12-14');
   check('date: day-first when unambiguous', normalizeDate_('14/12/2026'), '2026-12-14');
   check('date: unparseable kept', normalizeDate_('sometime next year'), 'sometime next year');
+  check('date: month-first is certain when the day is over 12',
+    classifyDate_('03/15/2027').status + ' ' + classifyDate_('03/15/2027').value, 'iso 2027-03-15');
+  check('date: day-first is certain when the day is over 12',
+    classifyDate_('15/03/2027').status + ' ' + classifyDate_('15/03/2027').value, 'iso 2027-03-15');
+  check('date: both under 12 is ambiguous', classifyDate_('03/04/2027').status, 'ambiguous');
+  check('date: same day and month reads the same either way',
+    classifyDate_('06/06/2027').status + ' ' + classifyDate_('06/06/2027').value, 'iso 2027-06-06');
+  check('date: ambiguous yields no value', classifyDate_('03/04/2027').value, '');
+  check('date: ISO is certain', classifyDate_('2027-03-15').status, 'iso');
+  check('date: a month name settles it', classifyDate_('March 15, 2027').status, 'iso');
+  check('date: prose is unreadable', classifyDate_('sometime next year').status, 'unreadable');
+  check('date: original always preserved', classifyDate_('03/04/2027').original, '03/04/2027');
+
   check('guests: prose', normalizeGuestCount_('around 150 pax'), '150');
   check('guests: range', normalizeGuestCount_('100 - 150'), '100-150');
 
@@ -3262,10 +3339,14 @@ function rosterReport_() {
  * dedupe index. From then on a returning inquiry is recognised as the same
  * person and merged into the historical row instead of being dealt out again.
  *
- * Nothing is deleted and no row moves. The only values overwritten are Email
- * and Phone, which are rewritten in normalised form so they can be matched;
- * the original phone text is preserved in Phone (Raw). Every other canonical
+ * Nothing is deleted and no row moves. The values overwritten are Email, Phone
+ * and — only where it can be read with certainty — Event Date; the originals
+ * are preserved in Phone (Raw) and Event Date (Raw). Every other canonical
  * column is filled only where it is blank.
+ *
+ * A date like "03/04/2027" that could be read either way round is left exactly
+ * as typed and reported, because several people have typed into these columns
+ * over the years and guessing would move real bookings by weeks.
  */
 
 /**
@@ -3301,6 +3382,7 @@ function migrateExistingTab(options) {
     empty: 0,
     duplicatesFound: 0,
     duplicates: [],
+    ambiguousDates: [],
     mapping: describeMapping_(table.headers),
     dryRun: !!opts.dryRun
   };
@@ -3356,6 +3438,15 @@ function migrateExistingTab(options) {
       }
       if (!cleanText_(lead.assignedTo)) lead.assignedTo = salesperson;
 
+      const dateInfo = classifyDate_(mapped.fields.eventDate);
+      if (dateInfo.status === 'ambiguous') {
+        summary.ambiguousDates.push({
+          row: rowNumber,
+          name: lead.fullName || lead.email || lead.phone,
+          value: dateInfo.original
+        });
+      }
+
       const duplicate = findDuplicate_(lead);
       if (duplicate) {
         summary.duplicatesFound++;
@@ -3372,7 +3463,7 @@ function migrateExistingTab(options) {
         return;
       }
 
-      writeMigratedRow_(sheet, rowNumber, lead);
+      writeMigratedRow_(sheet, rowNumber, lead, dateInfo);
       appendLead_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS), lead);
       // Free keys still get indexed, so a row that duplicates another is at
       // least findable by whichever contact detail is unique to it.
@@ -3392,7 +3483,8 @@ function migrateExistingTab(options) {
 
   log_('INFO', 'migrate', (opts.dryRun ? 'Previewed' : 'Migrated') + ' "' + tabName + '"', {
     rows: summary.rows, migrated: summary.migrated,
-    alreadyDone: summary.alreadyDone, duplicatesFound: summary.duplicatesFound
+    alreadyDone: summary.alreadyDone, duplicatesFound: summary.duplicatesFound,
+    ambiguousDates: summary.ambiguousDates.length
   });
   return summary;
 }
@@ -3411,13 +3503,20 @@ function confirmMigratable_(tabName) {
  * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
  * @param {number} rowNumber
  * @param {!Object} lead
+ * @param {{status: string, value: string, original: string}} dateInfo
  */
-function writeMigratedRow_(sheet, rowNumber, lead) {
+function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
   const map = headerMap_(sheet);
   const updates = {};
 
   // Normalised contact details replace what is there — matching depends on them.
   const overwrite = { 'Email': lead.email, 'Phone': lead.phone };
+
+  // A date only gets rewritten when there is one way to read it. An ambiguous
+  // one stays exactly as typed, and stands out against the normalised rows
+  // around it — which is the point.
+  if (dateInfo && dateInfo.status === 'iso') overwrite['Event Date'] = dateInfo.value;
+
   Object.keys(overwrite).forEach(function (header) {
     if (cleanText_(overwrite[header])) updates[header] = overwrite[header];
   });
@@ -3434,7 +3533,7 @@ function writeMigratedRow_(sheet, rowNumber, lead) {
     'Last Name': lead.lastName,
     'Phone (Raw)': lead.phoneRaw,
     'Company': lead.company,
-    'Event Date': lead.eventDate,
+    'Event Date (Raw)': dateInfo ? dateInfo.original : '',
     'Guest Count': lead.guestCount,
     'Venue / Location': lead.venue,
     'Budget': lead.budget,
