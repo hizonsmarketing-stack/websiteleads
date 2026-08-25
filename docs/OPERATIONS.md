@@ -8,7 +8,8 @@
 | **Import bridal fair worksheet…** | See [BRIDAL_FAIRS.md](BRIDAL_FAIRS.md). |
 | **Open team roster** | Jumps to `_Team`, where you say who covers what. |
 | **Import existing leads from a tab…** | One-time, per salesperson tab. See [EXISTING_LEADS.md](EXISTING_LEADS.md). |
-| **Show webhook URL** | The URLs to give Wix and Google Ads. |
+| **Set web app URL…** | Store the deployed address once, so the menu can print finished URLs. |
+| **Show webhook URL** | The URLs to give Wix and Google Ads, ready to paste. |
 | **Show last received payload** | Prints the most recent request exactly as it arrived. The first thing to check when a form submits but a field lands in the wrong place. |
 | **Set webhook token…** | The shared secret website forms must send. |
 | **Set Google Ads key…** | Must match the Key on the Google Ads lead form. |

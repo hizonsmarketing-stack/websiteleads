@@ -127,6 +127,23 @@ function runSelfTest() {
   check('webhook: /dev with a query string is still the test one',
     isTestWebhookUrl_('https://script.google.com/macros/s/ABC/dev?source=website'), 'true');
 
+  check('url: a clean exec address is accepted',
+    checkWebAppUrl_('https://script.google.com/macros/s/AKfy123/exec').ok, 'true');
+  check('url: the dev address is refused',
+    checkWebAppUrl_('https://script.google.com/macros/s/AKfy123/dev').ok, 'false');
+  check('url: an address with a query string is refused',
+    checkWebAppUrl_('https://script.google.com/macros/s/AKfy123/exec?source=website').ok, 'false');
+  check('url: but the good part is kept',
+    checkWebAppUrl_('https://script.google.com/macros/s/AKfy123/exec?token=x').url,
+    'https://script.google.com/macros/s/AKfy123/exec');
+  check('url: a second URL pasted as the token is refused',
+    checkWebAppUrl_('https://script.google.com/macros/s/A/exec?token=https%3A%2F%2Fscript.google.com').ok,
+    'false');
+  check('url: something that is not apps script is refused',
+    checkWebAppUrl_('https://example.com/hook').ok, 'false');
+  check('url: surrounding quotes are tolerated',
+    checkWebAppUrl_('"https://script.google.com/macros/s/AKfy123/exec"').ok, 'true');
+
   // --- Wix form fields, as they actually arrive ----------------------------
   // Wix names every field "field:<slug>" and sends its own bookkeeping
   // alongside. These are real field names from a live site.

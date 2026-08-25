@@ -20,6 +20,17 @@ name gets a note to that effect in the `_Sources` tab.
 
 ## The URL
 
+Don't assemble it by hand. In the Sheet:
+
+1. **Leads → Set web app URL…** — paste the address from *Deploy → Manage
+   deployments*, ending in `/exec`, with nothing after it.
+2. **Leads → Show webhook URL** — prints the finished addresses for Wix and for
+   Google Ads, with the token already on them if you have set one.
+
+Copy the Wix one and paste it straight in. Everything below explains what those
+addresses are made of, if you want to know.
+
+
 ```
 https://script.google.com/macros/s/AKfy…/exec?source=website&form=Homepage%20Inquiry&token=YOUR_TOKEN
 ```

@@ -13,6 +13,7 @@ function onOpen() {
     .addItem('Open team roster', 'menuOpenTeamRoster')
     .addItem('Import existing leads from a tab…', 'showMigrateDialog')
     .addSeparator()
+    .addItem('Set web app URL…', 'menuSetWebAppUrl')
     .addItem('Show webhook URL', 'menuShowWebhookUrl')
     .addItem('Show last received payload', 'menuShowLastPayload')
     .addItem('Set webhook token…', 'menuSetWebhookToken')
@@ -33,6 +34,38 @@ function onInstall(e) {
 function menuSetup() {
   const message = setupWorkbook();
   SpreadsheetApp.getUi().alert('Website Leads Automation', message, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Stores the deployed web-app URL, so the menu can print URLs that are ready
+ * to paste rather than instructions for building one.
+ */
+function menuSetWebAppUrl() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt(
+    'Web app URL',
+    'In the Apps Script editor: Deploy > Manage deployments, and copy the ' +
+    'Web app URL. It ends in /exec.\n\n' +
+    'Paste just that address here — nothing after /exec. Everything the forms ' +
+    'need is added for you afterwards.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  const checked = checkWebAppUrl_(response.getResponseText());
+  if (!checked.ok && !checked.url) {
+    PropertiesService.getScriptProperties().deleteProperty('WEB_APP_URL');
+    ui.alert('Cleared', 'The stored web app URL has been removed.', ui.ButtonSet.OK);
+    return;
+  }
+  if (!checked.ok) {
+    ui.alert('That does not look right', checked.problem, ui.ButtonSet.OK);
+    return;
+  }
+
+  PropertiesService.getScriptProperties().setProperty('WEB_APP_URL', checked.url);
+  ui.alert('Saved', 'Now use Leads > Show webhook URL — it prints the ' +
+    'addresses to paste into Wix and Google Ads.', ui.ButtonSet.OK);
 }
 
 function menuShowWebhookUrl() {
@@ -56,18 +89,13 @@ function menuShowWebhookUrl() {
   // endpoint: it answers you and 404s for everybody else, including Wix.
   if (isTestWebhookUrl_(url)) {
     ui.alert(
-      'That is the test URL, not the live one',
-      'Apps Script only tells a menu about the /dev URL, which answers you and returns ' +
-      '404 to everyone else — Wix included.\n\n' +
-      'Get the live one instead:\n' +
-      '  Extensions > Apps Script > Deploy > Manage deployments\n' +
-      '  Copy the Web app URL. It ends in /exec.\n\n' +
-      'Then add to the end of it:\n' +
-      '  ?source=website' + (token ? suffix : '') +
-      '\n\nFor Google Ads use ?source=googleads instead.' +
-      (token ? '' : '\n\nNo webhook token is set yet — Leads > Set webhook token…') +
-      '\n\nCheck it by opening the finished URL in a browser: it should show ' +
-      '{"status":"ok",…}. A 404 there means the deployment is not live.',
+      'Tell me the live address first',
+      'Apps Script only tells a menu about the /dev test URL, which answers you ' +
+      'and returns 404 to everyone else — Wix included.\n\n' +
+      'In the Apps Script editor: Deploy > Manage deployments, copy the Web app ' +
+      'URL (it ends in /exec), then run Leads > Set web app URL… and paste it in.' +
+      '\n\nAfter that this menu prints addresses ready to paste, with nothing ' +
+      'left for you to assemble.',
       ui.ButtonSet.OK
     );
     return;

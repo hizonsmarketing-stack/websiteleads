@@ -143,8 +143,11 @@ Check it before wiring anything up: open the finished URL in a browser. You
 should see `{"status":"ok", …}`. A 404 there means the deployment is not live,
 and no form will reach it.
 
-**Leads → Show webhook URL** will show you the URL, and will tell you if what
-it has is the test one.
+Then tell the spreadsheet about it: **Leads → Set web app URL…**, pasting the
+address from *Manage deployments* with nothing after `/exec`. From then on
+**Leads → Show webhook URL** prints the finished addresses for Wix and Google
+Ads, so there is nothing to assemble by hand — which is where the mistakes
+happen.
 
 ## 4. Set the secrets
 

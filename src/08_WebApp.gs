@@ -216,11 +216,59 @@ function flattenGoogleAds_(payload) {
  * @return {string}
  */
 function getWebhookUrl() {
+  const stored = cleanText_(
+    PropertiesService.getScriptProperties().getProperty('WEB_APP_URL'));
+  if (stored) return stored;
   try {
     return ScriptApp.getService().getUrl() || '';
   } catch (err) {
     return '';
   }
+}
+
+/**
+ * Checks a pasted web-app URL before it is stored.
+ *
+ * Assembling this by hand goes wrong in ways that are invisible afterwards —
+ * a second URL pasted where the token belongs, a placeholder left in, the
+ * test endpoint instead of the live one — so each is named here rather than
+ * left to a 404 to explain.
+ *
+ * @param {string} url
+ * @return {{ok: boolean, url: string, problem: string}}
+ */
+function checkWebAppUrl_(url) {
+  const text = cleanText_(url).replace(/^[<"']+|[>"']+$/g, '');
+
+  if (!text) return { ok: false, url: '', problem: 'Nothing was entered.' };
+
+  if (text.indexOf('/macros/') === -1 || text.indexOf('script.google.com') === -1) {
+    return { ok: false, url: text, problem:
+      'That is not an Apps Script web app URL. It should look like ' +
+      'https://script.google.com/macros/s/AKfy…/exec' };
+  }
+
+  const base = text.split('?')[0];
+  if (isTestWebhookUrl_(base)) {
+    return { ok: false, url: text, problem:
+      'That is the /dev test URL, which only answers you. Copy the one from ' +
+      'Deploy > Manage deployments — it ends in /exec.' };
+  }
+  if (!/\/exec$/.test(base)) {
+    return { ok: false, url: text, problem:
+      'The address must end in /exec. Copy the Web app URL from ' +
+      'Deploy > Manage deployments.' };
+  }
+
+  // A query string here means the URL was assembled by hand, which is exactly
+  // what this is replacing — and it is where a second URL usually ends up.
+  if (text.indexOf('?') !== -1) {
+    return { ok: false, url: base, problem:
+      'Paste only the address itself, with nothing after /exec. The rest is ' +
+      'added for you.' };
+  }
+
+  return { ok: true, url: base, problem: '' };
 }
 
 /** @return {boolean} True for the /dev test URL, which outsiders cannot reach. */
