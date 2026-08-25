@@ -268,8 +268,12 @@ api.resetCaches();
 const rosterOk = api.runSelfTest().roster;
 check('a complete roster reports clean',
   rosterOk.every(line => line.indexOf('OK') === 0), 'true');
-check('and says who covers corporate',
-  rosterOk.some(line => /Corporate: Gina, Hector/.test(line)), 'true');
+check('and says who calls corporate',
+  rosterOk.some(line => /Corporate: called by Gina, Hector/.test(line)), 'true');
+check('and that corporate callers present their own',
+  rosterOk.some(line => /Corporate:.*presented by the caller/.test(line)), 'true');
+check('and spells out the sequence for the rest',
+  rosterOk.some(line => /Wedding:.*presented by AJ → Pam → Mhay → Vanessa/.test(line)), 'true');
 check('inactive rep left out of the coverage list',
   rosterOk.some(line => /Ella/.test(line)), 'false');
 
