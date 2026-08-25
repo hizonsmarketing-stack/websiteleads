@@ -129,14 +129,14 @@ function runSelfTest() {
     notesRecord.extras.some(function (e) { return e.value === 'Iris'; }), 'true');
 
   // --- The presenter sequence ----------------------------------------------
-  check('presenter: first row', presenterForRow_(2), 'AJ');
-  check('presenter: second row', presenterForRow_(3), 'Pam');
-  check('presenter: third row', presenterForRow_(4), 'Mhay');
-  check('presenter: fourth row', presenterForRow_(5), 'Vanessa');
-  check('presenter: sequence repeats', presenterForRow_(6), 'AJ');
-  check('presenter: still repeating far down', presenterForRow_(42), 'AJ');
-  check('presenter: and off the cycle boundary', presenterForRow_(45), 'Vanessa');
-  check('presenter: header row has none', presenterForRow_(1), '');
+  check('presenter: first row', presenterFor_('Wedding', 2, 'Bea'), 'AJ');
+  check('presenter: second row', presenterFor_('Wedding', 3, 'Bea'), 'Pam');
+  check('presenter: third row', presenterFor_('Debut', 4, 'Bea'), 'Mhay');
+  check('presenter: fourth row', presenterFor_("Kid's Party", 5, 'Bea'), 'Vanessa');
+  check('presenter: sequence repeats', presenterFor_('Private Event', 6, 'Bea'), 'AJ');
+  check('presenter: still repeating far down', presenterFor_('Wedding', 42, 'Bea'), 'AJ');
+  check('presenter: and off the cycle boundary', presenterFor_('Wedding', 45, 'Bea'), 'Vanessa');
+  check('presenter: header row has none', presenterFor_('Wedding', 1, 'Bea'), '');
 
   const twoPhones = mapRecord_({
     'Contact No.': '0917 111 1111',
@@ -287,7 +287,12 @@ function rosterReport_() {
           return label === '*' || squashKey_(label) === squashKey_(type.label);
         });
       }).map(function (member) { return member.name; });
-      lines.push('OK — ' + type.label + ': ' + names.join(', '));
+
+      const rule = presenterRule_(type.label);
+      const presenters = rule.mode === 'caller' ? 'presented by the caller'
+        : rule.mode === 'none' ? 'no presenter'
+        : 'presented by ' + rule.list.join(' → ');
+      lines.push('OK — ' + type.label + ': called by ' + names.join(', ') + ', ' + presenters);
     });
   }
   return lines;

@@ -23,7 +23,8 @@ function routeLead_(lead) {
   // The row this is about to land on decides the presenter. Reading it before
   // the append is safe: the whole intake runs under the document lock.
   if (assignment && !lead.presenter) {
-    lead.presenter = presenterForRow_(teamSheet.getLastRow() + 1);
+    lead.presenter = presenterFor_(
+      lead.eventTypeLabel, teamSheet.getLastRow() + 1, assignment.name);
   }
 
   const row = appendLead_(teamSheet, lead);
@@ -121,26 +122,58 @@ function pickAssignee_(lead) {
 }
 
 /**
+ * How presenters are decided for one event type.
+ *
+ * `Presenters - <Event Type>` in _Settings overrides the general `Presenters`
+ * list, and takes one of three forms:
+ *
+ *   AJ, Pam, Mhay, Vanessa   a sequence, written in rotation down the column
+ *   caller                   the caller presents their own — corporate works
+ *                            this way, where Shane and Abi do both jobs
+ *   none                     no presenter on these leads
+ *
+ * Left blank, the event type follows the general `Presenters` list.
+ *
+ * @param {string} eventTypeLabel
+ * @return {{mode: string, list: !Array<string>}} mode is 'list', 'caller' or 'none'.
+ */
+function presenterRule_(eventTypeLabel) {
+  const settings = getSettings_();
+  const key = 'Presenters - ' + eventTypeLabel;
+  let raw = cleanText_(
+    Object.prototype.hasOwnProperty.call(settings, key) ? settings[key] : '');
+  if (!raw) raw = cleanText_(setting_('Presenters', ''));
+
+  const token = squashKey_(raw);
+  if (!raw || token === 'none') return { mode: 'none', list: [] };
+  if (token === 'caller' || token === 'self') return { mode: 'caller', list: [] };
+
+  const list = raw.split(',').map(function (name) { return name.trim(); }).filter(String);
+  return list.length ? { mode: 'list', list: list } : { mode: 'none', list: [] };
+}
+
+/**
  * The presenter a row belongs to.
  *
- * The Presenter column runs a fixed repeating sequence down each caller's tab —
- * row 2 to the first presenter, row 3 to the second, and back to the top after
- * the last. The caller works the lead and hands it to whoever their row names,
- * so the split is decided by the sheet rather than negotiated each time.
+ * Where a sequence applies, it runs down each caller's tab by row — row 2 to
+ * the first presenter, row 3 to the second, back to the top after the last.
+ * The caller works the lead and hands it to whoever their row names, so the
+ * split is decided by the sheet rather than negotiated each time.
  *
- * Because it is derived from the row number, the sequence stays intact however
- * many leads arrive, and a row keeps its presenter when the tab is sorted.
+ * Because it is derived from the row number and written into the cell, the
+ * sequence stays intact however many leads arrive, and a row keeps its
+ * presenter when the tab is sorted.
  *
+ * @param {string} eventTypeLabel Which rule applies.
  * @param {number} row 1-based sheet row; row 1 is the header.
- * @return {string} A presenter's name, or '' when none are configured.
+ * @param {string=} callerName Used when the caller presents their own.
+ * @return {string} A name, or '' when this event type has no presenters.
  */
-function presenterForRow_(row) {
-  const presenters = String(setting_('Presenters', ''))
-    .split(',')
-    .map(function (name) { return name.trim(); })
-    .filter(String);
-  if (!presenters.length || row < 2) return '';
-  return presenters[(row - 2) % presenters.length];
+function presenterFor_(eventTypeLabel, row, callerName) {
+  const rule = presenterRule_(eventTypeLabel);
+  if (rule.mode === 'none' || row < 2) return '';
+  if (rule.mode === 'caller') return cleanText_(callerName);
+  return rule.list[(row - 2) % rule.list.length];
 }
 
 /** @return {?Object} The roster entry for a name, or null. */
@@ -370,7 +403,10 @@ function maybePromote_(sheet, row, original, incoming, leadId) {
   if (assignment && !cleanText_(moved.assignedTo)) moved.assignedTo = assignment.name;
 
   const targetSheet = getOrCreateSheet_(targetTab, LEAD_COLUMNS);
-  if (assignment) moved.presenter = presenterForRow_(targetSheet.getLastRow() + 1);
+  if (assignment) {
+    moved.presenter = presenterFor_(
+      incoming.eventTypeLabel, targetSheet.getLastRow() + 1, assignment.name);
+  }
   const newRow = appendLead_(targetSheet, moved);
   sheet.deleteRow(row);
   shiftIndexRowsAfterDelete_(sheet.getName(), row);

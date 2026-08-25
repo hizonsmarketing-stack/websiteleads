@@ -73,7 +73,7 @@ function seedSettings_() {
     'Append Duplicate Notes': 'yes = add the repeat inquiry text to the original lead’s Message.',
     'Accept Test Leads': 'yes = store Google Ads test leads instead of only acknowledging them.',
     'Round Robin Assignment': 'yes = share leads across the _Team roster.',
-    'Presenters': 'The repeating sequence written down the Presenter column, in order. Comma separated.',
+    'Presenters': 'The default repeating sequence down the Presenter column, in order. Overridden per event type below.',
     'Notify On New Lead': 'yes = email the addresses in the Notify rows below.',
     'Raw Payload Retention (rows)': 'Oldest rows in _Raw are trimmed beyond this count.',
     'Log Retention (rows)': 'Oldest rows in _Log are trimmed beyond this count.'
@@ -86,6 +86,16 @@ function seedSettings_() {
   teamTabNames_().forEach(function (tab) {
     wanted.push(['Notify - ' + tab, '',
       'Comma-separated addresses to copy on new ' + tab + ' leads, on top of the assignee.']);
+  });
+  EVENT_TYPES.forEach(function (type) {
+    // Corporate is called and presented by the same two people, so the caller
+    // presents their own. Everything else follows the general Presenters list.
+    wanted.push([
+      'Presenters - ' + type.label,
+      type.key === 'corporate' ? 'caller' : '',
+      'A sequence, or "caller" when the caller presents their own, or "none". ' +
+        'Blank follows the Presenters row above.'
+    ]);
   });
 
   const existing = {};

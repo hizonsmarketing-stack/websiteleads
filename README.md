@@ -41,7 +41,9 @@ server to host and nothing to pay for.
   who already owns that lead, never into the rotation.
 - **Each row names its presenter.** The first column of a caller's tab runs a
   fixed repeating sequence — AJ, Pam, Mhay, Vanessa, and round again — so the
-  caller hands the lead to whoever their row says. Configurable in `_Settings`.
+  caller hands the lead to whoever their row says. Corporate is the exception:
+  it is called and presented by the same two people, so the caller presents
+  their own. Both rules live in `_Settings`.
 - **Duplicates removed.** Same email or same phone as an existing lead, from any
   channel, and the new submission is folded into the original: touch count goes
   up, blank fields are filled in, the new form is added to the lead's

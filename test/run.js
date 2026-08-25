@@ -236,9 +236,10 @@ check('second corporate lead goes to the other rep', c2.tab, 'Hector');
 check('third comes back around', c3.tab, 'Gina');
 check('assignee stamped on the row', cellOf('Gina', 2, 'Assigned To'), 'Gina');
 check('presenter column leads the row', tab('Gina').getRange(1, 1).getValue(), 'Presenter');
-check('first row of a tab goes to the first presenter', cellOf('Gina', 2, 'Presenter'), 'AJ');
-check('the next row of that tab goes to the second', cellOf('Gina', 3, 'Presenter'), 'Pam');
-check('each tab runs its own sequence', cellOf('Hector', 2, 'Presenter'), 'AJ');
+// Corporate is called and presented by the same people.
+check('a corporate caller presents their own', cellOf('Gina', 2, 'Presenter'), 'Gina');
+check('on every one of their rows', cellOf('Gina', 3, 'Presenter'), 'Gina');
+check('and the other corporate caller likewise', cellOf('Hector', 2, 'Presenter'), 'Hector');
 
 const s1 = inquiry('Soc One', 's1@example.com', '0917 111 0001', 'Debut');
 const s2 = inquiry('Soc Two', 's2@example.com', '0917 111 0002', 'Church Wedding');
@@ -251,8 +252,17 @@ check('and private events', ['Bea', 'Carlo', 'Dina', 'Fred'].indexOf(s4.tab) > -
 const socialTabs = [s1.tab, s2.tab, s3.tab, s4.tab];
 check('four leads went to four different people', new Set(socialTabs).size, 4);
 check('inactive rep skipped', socialTabs.indexOf('Ella'), -1);
+
 check('roster counts kept', tab('_Team').getRange(2, 6).getValue(), 1);
 check('assignee emailed', global.__mails.some(m => m.to.indexOf('bea@example.com') > -1), 'true');
+// Everything that is not corporate runs the AJ / Pam / Mhay / Vanessa sequence.
+check('a non-corporate lead starts the sequence', cellOf(s1.tab, 2, 'Presenter'), 'AJ');
+check('and so does the first lead in another tab', cellOf(s2.tab, 2, 'Presenter'), 'AJ');
+const s5 = inquiry('Soc Five', 's5@example.com', '0917 111 0005', 'Wedding');
+check('the second lead in a tab moves down the sequence',
+  cellOf(s5.tab, 3, 'Presenter'), 'Pam');
+check('the presenter sequence never touches corporate',
+  ['AJ', 'Pam', 'Mhay', 'Vanessa'].indexOf(String(cellOf('Gina', 2, 'Presenter'))), -1);
 
 api.resetCaches();
 const rosterOk = api.runSelfTest().roster;
@@ -295,8 +305,8 @@ const revealed = post({ formName: 'Corporate Events Inquiry', name: 'Later Revea
   { source: 'website', form: 'Corporate Events Inquiry' });
 check('promotion hands it to a corporate rep', ['Gina', 'Hector'].indexOf(revealed.tab) > -1, 'true');
 check('promoted row carries the owner', cellOf(revealed.tab, 3, 'Assigned To'), revealed.tab);
-check('a promoted lead takes its new row\'s presenter',
-  cellOf(revealed.tab, 3, 'Presenter'), 'Pam');
+check('a promoted corporate lead is presented by its caller',
+  cellOf(revealed.tab, 3, 'Presenter'), revealed.tab);
 
 realLog('\n--- migrating a salesperson tab that already had leads ---');
 silence(quiet);

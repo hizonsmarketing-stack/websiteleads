@@ -45,8 +45,12 @@ the one listed first wins. Put the more specific type higher.
 
 ## Presenters
 
-The first column of every caller's tab is **Presenter**, and it runs a fixed
-repeating sequence down the tab:
+The first column of every caller's tab is **Presenter**. How it is filled
+depends on the event type.
+
+### Everything except corporate
+
+A fixed repeating sequence runs down the tab:
 
 | Row | Presenter |
 | --- | --- |
@@ -58,23 +62,45 @@ repeating sequence down the tab:
 
 The caller works the lead and hands it to whoever their row names, so the split
 is settled by the sheet rather than negotiated lead by lead. Each tab runs its
-own sequence independently, so every caller's first lead goes to AJ, their
-second to Pam, and so on.
+own sequence, so every caller's first lead goes to AJ, their second to Pam.
 
-Change the list or the order in the `Presenters` row of `_Settings` —
-comma-separated, and the order there is the order of the rotation. Removing a
-name shortens the cycle; adding one lengthens it. Clearing the row stops
-presenters being assigned at all.
+### Corporate
 
-Two consequences worth knowing:
+Corporate is called and presented by the same two people, so the sequence does
+not apply — the caller presents their own. A corporate lead in Shane's tab
+shows **Shane** as presenter; one in Abi's tab shows **Abi**.
+
+### Changing any of it
+
+| Setting | Value | Meaning |
+| --- | --- | --- |
+| `Presenters` | `AJ, Pam, Mhay, Vanessa` | The default sequence, in rotation order |
+| `Presenters - Corporate` | `caller` | The caller presents their own |
+| `Presenters - Wedding` (and the rest) | blank | Follow the `Presenters` row above |
+| any of them | `Shane, Abi` | That sequence, for that event type only |
+| any of them | `none` | No presenter on those leads |
+
+So a fifth presenter joins by adding a name to `Presenters`; a type gets its
+own bench by listing names on its own row; and a type where the caller does
+both is set to `caller`.
+
+**Leads → Run self-test** reports the arrangement back, which is the quickest
+way to confirm it is what you meant:
+
+```
+OK — Wedding: called by Bea, Carlo, Dina, Fred, presented by AJ → Pam → Mhay → Vanessa
+OK — Corporate: called by Shane, Abi, presented by the caller
+```
+
+### Two consequences worth knowing
 
 - **The sequence follows the row, not the lead.** Sorting or filtering a tab
   moves each row's presenter with it, because the name is written into the cell
   rather than calculated. Nobody is reassigned by a sort.
-- **Totals per presenter won't be exactly equal** across the whole worksheet,
-  because every tab starts its own cycle at AJ. If one caller gets far more
-  leads than another, the presenters at the top of the list see more of them.
-  Reorder the `Presenters` list periodically if that matters.
+- **Totals per presenter won't be exactly equal**, because every tab starts its
+  own cycle at AJ. If one caller gets far more leads than another, the
+  presenters at the top of the list see more of them. Reorder the `Presenters`
+  list periodically if that matters.
 
 A lead sitting in a shared event-type tab or in **Unassigned** has no presenter
 yet — it has no caller either. It gets one at the moment it reaches a caller's
@@ -94,7 +120,8 @@ All in the `_Settings` tab. Changes take effect on the next submission.
 | `Append Duplicate Notes` | `yes` | Add the repeat inquiry's text to the original lead's Message |
 | `Accept Test Leads` | `no` | Store Google Ads test leads instead of only acknowledging them |
 | `Round Robin Assignment` | `yes` | Share leads out across the `_Team` roster. `no` sends everything to the shared event-type tabs instead |
-| `Presenters` | `AJ, Pam, Mhay, Vanessa` | The repeating sequence written down the Presenter column, in order |
+| `Presenters` | `AJ, Pam, Mhay, Vanessa` | The default sequence down the Presenter column, in order |
+| `Presenters - <Event Type>` | blank, or `caller`, or a list | Overrides the default for that event type. Corporate ships as `caller` |
 | `Notify On New Lead` | `no` | Email the addresses in the Notify rows |
 | `Raw Payload Retention (rows)` | `2000` | How much of `_Raw` to keep |
 | `Log Retention (rows)` | `5000` | How much of `_Log` to keep |

@@ -32,7 +32,8 @@ it win over anything chosen in the dialog.
 A tab that already has a **PRESENTER** column keeps every value in it — those
 were real assignments and the migration does not second-guess them. The
 repeating sequence only governs leads that arrive from here on, continuing down
-the tab from whatever row the new ones land on.
+the tab from whatever row the new ones land on. On a corporate caller's tab
+there is no sequence at all — new leads there name the caller as presenter.
 
 ### Dates
 

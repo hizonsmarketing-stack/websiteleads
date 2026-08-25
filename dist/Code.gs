@@ -1607,7 +1607,8 @@ function routeLead_(lead) {
   // The row this is about to land on decides the presenter. Reading it before
   // the append is safe: the whole intake runs under the document lock.
   if (assignment && !lead.presenter) {
-    lead.presenter = presenterForRow_(teamSheet.getLastRow() + 1);
+    lead.presenter = presenterFor_(
+      lead.eventTypeLabel, teamSheet.getLastRow() + 1, assignment.name);
   }
 
   const row = appendLead_(teamSheet, lead);
@@ -1705,26 +1706,58 @@ function pickAssignee_(lead) {
 }
 
 /**
+ * How presenters are decided for one event type.
+ *
+ * `Presenters - <Event Type>` in _Settings overrides the general `Presenters`
+ * list, and takes one of three forms:
+ *
+ *   AJ, Pam, Mhay, Vanessa   a sequence, written in rotation down the column
+ *   caller                   the caller presents their own — corporate works
+ *                            this way, where Shane and Abi do both jobs
+ *   none                     no presenter on these leads
+ *
+ * Left blank, the event type follows the general `Presenters` list.
+ *
+ * @param {string} eventTypeLabel
+ * @return {{mode: string, list: !Array<string>}} mode is 'list', 'caller' or 'none'.
+ */
+function presenterRule_(eventTypeLabel) {
+  const settings = getSettings_();
+  const key = 'Presenters - ' + eventTypeLabel;
+  let raw = cleanText_(
+    Object.prototype.hasOwnProperty.call(settings, key) ? settings[key] : '');
+  if (!raw) raw = cleanText_(setting_('Presenters', ''));
+
+  const token = squashKey_(raw);
+  if (!raw || token === 'none') return { mode: 'none', list: [] };
+  if (token === 'caller' || token === 'self') return { mode: 'caller', list: [] };
+
+  const list = raw.split(',').map(function (name) { return name.trim(); }).filter(String);
+  return list.length ? { mode: 'list', list: list } : { mode: 'none', list: [] };
+}
+
+/**
  * The presenter a row belongs to.
  *
- * The Presenter column runs a fixed repeating sequence down each caller's tab —
- * row 2 to the first presenter, row 3 to the second, and back to the top after
- * the last. The caller works the lead and hands it to whoever their row names,
- * so the split is decided by the sheet rather than negotiated each time.
+ * Where a sequence applies, it runs down each caller's tab by row — row 2 to
+ * the first presenter, row 3 to the second, back to the top after the last.
+ * The caller works the lead and hands it to whoever their row names, so the
+ * split is decided by the sheet rather than negotiated each time.
  *
- * Because it is derived from the row number, the sequence stays intact however
- * many leads arrive, and a row keeps its presenter when the tab is sorted.
+ * Because it is derived from the row number and written into the cell, the
+ * sequence stays intact however many leads arrive, and a row keeps its
+ * presenter when the tab is sorted.
  *
+ * @param {string} eventTypeLabel Which rule applies.
  * @param {number} row 1-based sheet row; row 1 is the header.
- * @return {string} A presenter's name, or '' when none are configured.
+ * @param {string=} callerName Used when the caller presents their own.
+ * @return {string} A name, or '' when this event type has no presenters.
  */
-function presenterForRow_(row) {
-  const presenters = String(setting_('Presenters', ''))
-    .split(',')
-    .map(function (name) { return name.trim(); })
-    .filter(String);
-  if (!presenters.length || row < 2) return '';
-  return presenters[(row - 2) % presenters.length];
+function presenterFor_(eventTypeLabel, row, callerName) {
+  const rule = presenterRule_(eventTypeLabel);
+  if (rule.mode === 'none' || row < 2) return '';
+  if (rule.mode === 'caller') return cleanText_(callerName);
+  return rule.list[(row - 2) % rule.list.length];
 }
 
 /** @return {?Object} The roster entry for a name, or null. */
@@ -1954,7 +1987,10 @@ function maybePromote_(sheet, row, original, incoming, leadId) {
   if (assignment && !cleanText_(moved.assignedTo)) moved.assignedTo = assignment.name;
 
   const targetSheet = getOrCreateSheet_(targetTab, LEAD_COLUMNS);
-  if (assignment) moved.presenter = presenterForRow_(targetSheet.getLastRow() + 1);
+  if (assignment) {
+    moved.presenter = presenterFor_(
+      incoming.eventTypeLabel, targetSheet.getLastRow() + 1, assignment.name);
+  }
   const newRow = appendLead_(targetSheet, moved);
   sheet.deleteRow(row);
   shiftIndexRowsAfterDelete_(sheet.getName(), row);
@@ -2612,7 +2648,7 @@ function seedSettings_() {
     'Append Duplicate Notes': 'yes = add the repeat inquiry text to the original lead’s Message.',
     'Accept Test Leads': 'yes = store Google Ads test leads instead of only acknowledging them.',
     'Round Robin Assignment': 'yes = share leads across the _Team roster.',
-    'Presenters': 'The repeating sequence written down the Presenter column, in order. Comma separated.',
+    'Presenters': 'The default repeating sequence down the Presenter column, in order. Overridden per event type below.',
     'Notify On New Lead': 'yes = email the addresses in the Notify rows below.',
     'Raw Payload Retention (rows)': 'Oldest rows in _Raw are trimmed beyond this count.',
     'Log Retention (rows)': 'Oldest rows in _Log are trimmed beyond this count.'
@@ -2625,6 +2661,16 @@ function seedSettings_() {
   teamTabNames_().forEach(function (tab) {
     wanted.push(['Notify - ' + tab, '',
       'Comma-separated addresses to copy on new ' + tab + ' leads, on top of the assignee.']);
+  });
+  EVENT_TYPES.forEach(function (type) {
+    // Corporate is called and presented by the same two people, so the caller
+    // presents their own. Everything else follows the general Presenters list.
+    wanted.push([
+      'Presenters - ' + type.label,
+      type.key === 'corporate' ? 'caller' : '',
+      'A sequence, or "caller" when the caller presents their own, or "none". ' +
+        'Blank follows the Presenters row above.'
+    ]);
   });
 
   const existing = {};
@@ -3220,14 +3266,14 @@ function runSelfTest() {
     notesRecord.extras.some(function (e) { return e.value === 'Iris'; }), 'true');
 
   // --- The presenter sequence ----------------------------------------------
-  check('presenter: first row', presenterForRow_(2), 'AJ');
-  check('presenter: second row', presenterForRow_(3), 'Pam');
-  check('presenter: third row', presenterForRow_(4), 'Mhay');
-  check('presenter: fourth row', presenterForRow_(5), 'Vanessa');
-  check('presenter: sequence repeats', presenterForRow_(6), 'AJ');
-  check('presenter: still repeating far down', presenterForRow_(42), 'AJ');
-  check('presenter: and off the cycle boundary', presenterForRow_(45), 'Vanessa');
-  check('presenter: header row has none', presenterForRow_(1), '');
+  check('presenter: first row', presenterFor_('Wedding', 2, 'Bea'), 'AJ');
+  check('presenter: second row', presenterFor_('Wedding', 3, 'Bea'), 'Pam');
+  check('presenter: third row', presenterFor_('Debut', 4, 'Bea'), 'Mhay');
+  check('presenter: fourth row', presenterFor_("Kid's Party", 5, 'Bea'), 'Vanessa');
+  check('presenter: sequence repeats', presenterFor_('Private Event', 6, 'Bea'), 'AJ');
+  check('presenter: still repeating far down', presenterFor_('Wedding', 42, 'Bea'), 'AJ');
+  check('presenter: and off the cycle boundary', presenterFor_('Wedding', 45, 'Bea'), 'Vanessa');
+  check('presenter: header row has none', presenterFor_('Wedding', 1, 'Bea'), '');
 
   const twoPhones = mapRecord_({
     'Contact No.': '0917 111 1111',
@@ -3378,7 +3424,12 @@ function rosterReport_() {
           return label === '*' || squashKey_(label) === squashKey_(type.label);
         });
       }).map(function (member) { return member.name; });
-      lines.push('OK — ' + type.label + ': ' + names.join(', '));
+
+      const rule = presenterRule_(type.label);
+      const presenters = rule.mode === 'caller' ? 'presented by the caller'
+        : rule.mode === 'none' ? 'no presenter'
+        : 'presented by ' + rule.list.join(' → ');
+      lines.push('OK — ' + type.label + ': called by ' + names.join(', ') + ', ' + presenters);
     });
   }
   return lines;
