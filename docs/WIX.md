@@ -26,7 +26,10 @@ https://script.google.com/macros/s/AKfy…/exec?source=website&form=Homepage%20I
 
 - `source=website` — tags every lead from this form as **Website**.
 - `form=…` — the sub-source. URL-encode spaces as `%20`.
-- `token=…` — the shared secret from **Leads → Set webhook token…**.
+- `token=…` — a secret you invent. Set it with **Leads → Set webhook token…**
+  (the prompt offers a generated one), then put the same value here. If you
+  have not set one, leave `&token=…` off the URL entirely — submissions are
+  accepted and a warning is logged.
 
 **Leads → Show webhook URL** prints this for you, token included.
 
@@ -42,9 +45,15 @@ The request never reached the script. In order of likelihood:
 3. **Something extra got pasted** — a label, a stray space, a line break, or a
    quote around the URL.
 
-Open the exact URL in a browser to tell these apart: `{"status":"ok", …}` means
-the endpoint is live and the problem is in what Wix has; a 404 in the browser
-means it is the deployment.
+4. **"Who has access" is not "Anyone".** Set to *Only myself* or *Anyone with a
+   Google account*, an anonymous request is bounced to a sign-in page, which
+   some clients report as a 404.
+
+Test the exact URL in a **private / incognito window** — logged in as yourself
+it can work even when nobody else can reach it, which is exactly the case that
+breaks Wix. `{"status":"ok", …}` there means the endpoint really is public and
+the problem is in what Wix has; a sign-in page means access is restricted; a
+404 means the deployment.
 
 ## Wiring it up in Wix
 

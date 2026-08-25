@@ -80,16 +80,25 @@ function menuShowWebhookUrl() {
     url + '?source=website' + suffix +
     '\n\nTo override the sub-source for one form, add &form=YOUR%20FORM%20NAME.' +
     '\n\nGoogle Ads lead forms:\n' + url + '?source=googleads' +
-    '\n\nOpen either in a browser to check it: you should see {"status":"ok",…}.',
+    '\n\nCheck it in a private / incognito window — logged in as yourself it can ' +
+    'work even when nobody else can reach it. You should see {"status":"ok",…}. ' +
+    'A sign-in page instead means "Who has access" is not set to Anyone.',
     ui.ButtonSet.OK
   );
 }
 
 function menuSetWebhookToken() {
   const ui = SpreadsheetApp.getUi();
+  // Nobody should have to invent a secret on the spot, so offer one.
+  const suggestion = Utilities.getUuid().replace(/-/g, '').slice(0, 24);
   const response = ui.prompt(
     'Webhook token',
-    'Shared secret that website forms must send as &token=… (leave blank to clear):',
+    'A secret you make up, which website forms then send as &token=… on the end ' +
+    'of the URL. It is not something you look up anywhere — you decide it here ' +
+    'and paste the same value into Wix.\n\n' +
+    'Copy this one if you like:\n  ' + suggestion + '\n\n' +
+    'Leave blank to clear it. With no token set, submissions are still accepted ' +
+    'and a warning is logged.',
     ui.ButtonSet.OK_CANCEL
   );
   if (response.getSelectedButton() !== ui.Button.OK) return;
@@ -97,7 +106,15 @@ function menuSetWebhookToken() {
   const props = PropertiesService.getScriptProperties();
   if (value) props.setProperty('WEBHOOK_TOKEN', value);
   else props.deleteProperty('WEBHOOK_TOKEN');
-  ui.alert('Saved', value ? 'Webhook token set.' : 'Webhook token cleared.', ui.ButtonSet.OK);
+  ui.alert(
+    'Saved',
+    value
+      ? 'Webhook token set. Every website form URL now needs &token=' + value +
+        ' on the end of it — Leads > Show webhook URL prints the whole thing.'
+      : 'Webhook token cleared. Submissions are accepted without one, and a ' +
+        'warning is logged each time.',
+    ui.ButtonSet.OK
+  );
 }
 
 function menuSetGoogleAdsKey() {
