@@ -4,6 +4,20 @@ Each on-page form posts to the same webhook URL with its own `form` value. That
 value becomes the lead's **sub-source**, so adding a form later is a matter of
 choosing a new name — no code change, no redeployment.
 
+## Name your forms first
+
+Wix calls every new form **"My form"** until you rename it, and the form name
+is what becomes the lead's sub-source. Leave them all as "My form" and every
+form on the site collapses into one sub-source — it still works, it just stops
+telling you which form converted.
+
+Rename each one in Wix first: *Homepage Inquiry*, *Wedding Package Inquiry*,
+*Corporate Events Inquiry*, and so on. Those names then appear on every lead
+with no further configuration, and adding a form later needs none at all.
+
+The automation flags this for you: a form registered under a builder default
+name gets a note to that effect in the `_Sources` tab.
+
 ## The URL
 
 ```
@@ -28,11 +42,27 @@ https://script.google.com/macros/s/AKfy…/exec?source=website&form=Homepage%20I
    - **Method**: `POST`
    - **URL**: the URL above, with `form=` set to that form's name
    - **Header**: `Content-Type` = `application/json`
-   - **Body**: the form's fields. Name the keys the way a person would —
-     `Full Name`, `Email`, `Contact Number`, `Type of Event`, `Event Date`,
-     `Number of Guests`, `Message` — because those names are what the
-     automation matches on. Anything it doesn't recognise is kept in the
-     lead's Message column rather than dropped.
+   - **Body**: the form's fields. Wix names them `field:<slug>` — that is
+     understood as-is, so insert the tokens for that form and leave the names
+     alone. Include `formName` too: it is what tags the lead's sub-source.
+
+     These all read correctly without any configuration:
+
+     | Wix field | Read as |
+     | --- | --- |
+     | `field:full_name`, `field:your_name` | Full Name |
+     | `field:email_adress` *(typo and all)* | Email |
+     | `field:contact_number`, `field:phone_number` | Phone |
+     | `field:event_type`, `field:whats_the_occasion`, `field:type_of_celebration` | Event Type |
+     | `field:event_date`, `field:when_is_your_event`, `field:target_date_of_event` | Event Date |
+     | `field:estimated_guest_count`, `field:estimated_number_of_guests` | Guest Count |
+     | `field:which_venue_are_you_interested_in`, `field:target_location_venue` | Venue |
+     | `field:budget_range` | Budget |
+     | `field:company_name_49ed` | Company |
+
+     Anything else is kept in the lead's Message column rather than dropped.
+     Wix's own bookkeeping — `contactId`, `submissionsLink`, `formId`,
+     checkbox placeholders — is ignored.
 5. Save and activate.
 
 Whatever shape Wix ends up sending is accepted — nested or flat, any field
@@ -51,6 +81,13 @@ Repeat per form, changing only the `form=` value:
 
 Use the same names you'd want to read on a sales tab — they show up on every
 lead and on the Dashboard's sub-source breakdown.
+
+### One field worth knowing about
+
+`field:contact_person_from_hizons_catering` is deliberately **not** read as the
+client's name — it is your staff member, and treating it as the lead's Full
+Name would put a colleague's name on the lead. It goes into the Message column
+instead.
 
 ### Wix Velo instead
 

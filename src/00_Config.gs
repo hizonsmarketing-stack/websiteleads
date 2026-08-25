@@ -223,6 +223,7 @@ const FIELD_ALIASES = {
   ],
   eventDate: [
     'event date', 'date of event', 'preferred date', 'target date',
+    'when is the event', 'when is your event', 'date of celebration',
     'wedding date', 'date of wedding', 'affair date', 'date of affair',
     'celebration date', 'party date', 'debut date', 'reception date',
     'tentative date', 'date', 'schedule', 'when is your event',
@@ -235,6 +236,8 @@ const FIELD_ALIASES = {
   ],
   venue: [
     'venue', 'location', 'preferred venue', 'preferred location', 'place',
+    'which venue', 'venue are you interested in', 'venue of choice',
+    'target location', 'location venue',
     'area', 'city', 'address', 'event location', 'event venue', 'branch'
   ],
   budget: [
@@ -250,6 +253,10 @@ const FIELD_ALIASES = {
     'sales notes', 'client notes', 'internal notes', 'contact method',
     'preferred contact method', 'preferred contact', 'contact preference',
     'mode of contact', 'how to contact', 'best time to call',
+    'follow up method', 'preferred follow up method',
+    // Who at Hizon's the client has already spoken to — not the client's own
+    // name, which is what "contact person" would otherwise be read as.
+    'contact person from hizons catering', 'contact person from hizons',
     'inquiry details', 'details', 'additional info', 'additional information',
     'question', 'questions', 'how can we help', 'tell us more', 'other details',
     'requirements', 'special requests'
@@ -265,6 +272,7 @@ const FIELD_ALIASES = {
   source: ['source', 'lead source', 'channel'],
   receivedAt: [
     'received at', 'timestamp', 'date submitted', 'submitted at', 'submission date',
+    'submission time', 'submitted on',
     'date received', 'created at', 'date and time'
   ],
   assignedTo: ['assigned to', 'owner', 'sales rep', 'account executive', 'ae', 'handler'],
@@ -328,5 +336,9 @@ const NOISE_KEYS = [
   'conso date',
   'google key', 'api version', 'is test', 'gcl id', 'lead id', 'form id',
   'submission id', 'recaptcha', 'captcha', 'token', 'ip address', 'user agent',
-  'consent', 'terms', 'privacy policy', 'submit', 'g recaptcha response'
+  'consent', 'terms', 'privacy policy', 'submit', 'g recaptcha response',
+  // Wix bookkeeping. "contact id" matters: it is a UUID, and without this it
+  // reads as a phone number because it contains "contact".
+  'contact id', 'contact identity', 'submissions link', 'submission pdf',
+  'form field mask', 'form field', 'form revision', 'namespace'
 ];

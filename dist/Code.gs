@@ -249,6 +249,7 @@ const FIELD_ALIASES = {
   ],
   eventDate: [
     'event date', 'date of event', 'preferred date', 'target date',
+    'when is the event', 'when is your event', 'date of celebration',
     'wedding date', 'date of wedding', 'affair date', 'date of affair',
     'celebration date', 'party date', 'debut date', 'reception date',
     'tentative date', 'date', 'schedule', 'when is your event',
@@ -261,6 +262,8 @@ const FIELD_ALIASES = {
   ],
   venue: [
     'venue', 'location', 'preferred venue', 'preferred location', 'place',
+    'which venue', 'venue are you interested in', 'venue of choice',
+    'target location', 'location venue',
     'area', 'city', 'address', 'event location', 'event venue', 'branch'
   ],
   budget: [
@@ -276,6 +279,10 @@ const FIELD_ALIASES = {
     'sales notes', 'client notes', 'internal notes', 'contact method',
     'preferred contact method', 'preferred contact', 'contact preference',
     'mode of contact', 'how to contact', 'best time to call',
+    'follow up method', 'preferred follow up method',
+    // Who at Hizon's the client has already spoken to — not the client's own
+    // name, which is what "contact person" would otherwise be read as.
+    'contact person from hizons catering', 'contact person from hizons',
     'inquiry details', 'details', 'additional info', 'additional information',
     'question', 'questions', 'how can we help', 'tell us more', 'other details',
     'requirements', 'special requests'
@@ -291,6 +298,7 @@ const FIELD_ALIASES = {
   source: ['source', 'lead source', 'channel'],
   receivedAt: [
     'received at', 'timestamp', 'date submitted', 'submitted at', 'submission date',
+    'submission time', 'submitted on',
     'date received', 'created at', 'date and time'
   ],
   assignedTo: ['assigned to', 'owner', 'sales rep', 'account executive', 'ae', 'handler'],
@@ -354,7 +362,11 @@ const NOISE_KEYS = [
   'conso date',
   'google key', 'api version', 'is test', 'gcl id', 'lead id', 'form id',
   'submission id', 'recaptcha', 'captcha', 'token', 'ip address', 'user agent',
-  'consent', 'terms', 'privacy policy', 'submit', 'g recaptcha response'
+  'consent', 'terms', 'privacy policy', 'submit', 'g recaptcha response',
+  // Wix bookkeeping. "contact id" matters: it is a UUID, and without this it
+  // reads as a phone number because it contains "contact".
+  'contact id', 'contact identity', 'submissions link', 'submission pdf',
+  'form field mask', 'form field', 'form revision', 'namespace'
 ];
 
 // ==========================================================================
@@ -1290,15 +1302,20 @@ function isNoiseKey_(key) {
 
 /**
  * Matches one incoming key to a canonical field.
+ *
+ * `score` separates two keys that land on the same field: it is the share of
+ * the key the matching alias accounts for, so "field:full_name" beats
+ * "field:contact_person_from_hizons_catering" for Full Name.
+ *
  * @param {string} key
- * @return {{field: string, quality: number}} quality 2 = exact, 1 = contained,
- *     0 = no match.
+ * @return {{field: string, quality: number, score: number}} quality 2 = exact,
+ *     1 = contained, 0 = no match.
  */
 function matchField_(key) {
   const index = aliasIndex_();
   const squashed = squashKey_(key);
-  if (!squashed) return { field: '', quality: 0 };
-  if (index[squashed]) return { field: index[squashed], quality: 2 };
+  if (!squashed) return { field: '', quality: 0, score: 0 };
+  if (index[squashed]) return { field: index[squashed], quality: 2, score: 1 };
 
   // Question-style headers: "Whattypeofeventareyouplanning" contains "typeofevent".
   let best = '';
@@ -1310,16 +1327,16 @@ function matchField_(key) {
       bestLength = alias.length;
     }
   });
-  if (best) return { field: best, quality: 1 };
+  if (best) return { field: best, quality: 1, score: bestLength / squashed.length };
 
   for (let i = 0; i < FIELD_SUFFIX_RULES.length; i++) {
     const rule = FIELD_SUFFIX_RULES[i];
     if (squashed.length > rule.suffix.length &&
         squashed.slice(-rule.suffix.length) === rule.suffix) {
-      return { field: rule.field, quality: 1 };
+      return { field: rule.field, quality: 1, score: rule.suffix.length / squashed.length };
     }
   }
-  return { field: '', quality: 0 };
+  return { field: '', quality: 0, score: 0 };
 }
 
 /**
@@ -1339,6 +1356,7 @@ function matchField_(key) {
 function mapRecord_(flat) {
   const fields = {};
   const quality = {};
+  const scores = {};
   const labels = {};
   const extras = [];
   const messages = [];
@@ -1365,14 +1383,20 @@ function mapRecord_(flat) {
       return;
     }
 
+    const beatsIncumbent = quality[match.field] === undefined ? false
+      : (match.quality > quality[match.field] ||
+         (match.quality === quality[match.field] && match.score > scores[match.field]));
+
     if (quality[match.field] === undefined) {
       fields[match.field] = value;
       quality[match.field] = match.quality;
+      scores[match.field] = match.score;
       labels[match.field] = pretty;
-    } else if (match.quality > quality[match.field]) {
+    } else if (beatsIncumbent) {
       extras.push({ label: labels[match.field], value: fields[match.field] });
       fields[match.field] = value;
       quality[match.field] = match.quality;
+      scores[match.field] = match.score;
       labels[match.field] = pretty;
     } else {
       extras.push({ label: pretty, value: value });
@@ -1415,7 +1439,9 @@ function composeMessage_(notes, extras) {
  */
 function humanizeKey_(key) {
   const spaced = String(key)
-    .replace(/[_\-.]+/g, ' ')
+    // Wix prefixes every form field with "field:"; it means nothing to a rep.
+    .replace(/^\s*field\s*:\s*/i, '')
+    .replace(/[_\-.:]+/g, ' ')
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/\s+/g, ' ')
     .trim();
@@ -1539,7 +1565,8 @@ function loadSources_() {
     active: map[squashKey_('Active')],
     firstSeen: map[squashKey_('First Seen')],
     lastSeen: map[squashKey_('Last Seen')],
-    count: map[squashKey_('Lead Count')]
+    count: map[squashKey_('Lead Count')],
+    notes: map[squashKey_('Notes')]
   };
 
   const byKey = {};
@@ -1597,6 +1624,12 @@ function resolveSubSource_(source, rawSubSource, seedEventType) {
     newRow[cache.col.firstSeen - 1] = nowStamp_();
     newRow[cache.col.lastSeen - 1] = nowStamp_();
     newRow[cache.col.count - 1] = 0;
+    if (looksLikeDefaultFormName_(raw)) {
+      newRow[cache.col.notes - 1] =
+        'This is the form builder\'s default name. Rename the form in Wix so its ' +
+        'leads can be told apart from other forms, or set a Display Name here.';
+      log_('WARN', 'sources', 'Form is still using its builder default name', { subSource: raw });
+    }
     cache.sheet.appendRow(newRow);
 
     entry = {
@@ -1635,6 +1668,22 @@ function flushSubSources_() {
     entry.added = 0;
   });
   cache.touched = {};
+}
+
+/**
+ * Names a form builder gives a form when nobody has renamed it.
+ *
+ * Every unnamed Wix form arrives as "My form", so without this every form on
+ * the site collapses into one sub-source and the point of tracking them is
+ * lost. It still works — it is just no longer telling you anything.
+ *
+ * @param {string} name
+ * @return {boolean}
+ */
+function looksLikeDefaultFormName_(name) {
+  const squashed = squashKey_(name);
+  if (!squashed) return true;
+  return /^(myform|form|newform|untitled|untitledform|contactform|webform)\d*$/.test(squashed);
 }
 
 /** Columns of the _Sources registry. */
@@ -3643,6 +3692,62 @@ function runSelfTest() {
   check('map: extra label humanised', mapped.extras[0].label, 'How Did You Hear About Us');
   check('map: shouted header stops shouting', humanizeKey_('SALES NOTES'), 'Sales Notes');
   check('map: deliberate mixed case left alone', humanizeKey_('Preferred VIP Room'), 'Preferred VIP Room');
+
+  // --- Wix form fields, as they actually arrive ----------------------------
+  // Wix names every field "field:<slug>" and sends its own bookkeeping
+  // alongside. These are real field names from a live site.
+  check('wix: full name', matchField_('field:full_name').field, 'fullName');
+  check('wix: your name', matchField_('field:your_name').field, 'fullName');
+  check('wix: misspelled email still matches', matchField_('field:email_adress').field, 'email');
+  check('wix: contact number', matchField_('field:contact_number').field, 'phone');
+  check('wix: event type', matchField_('field:event_type').field, 'eventType');
+  check('wix: type of celebration', matchField_('field:type_of_celebration').field, 'eventType');
+  check('wix: whats the occasion', matchField_('field:whats_the_occasion').field, 'eventType');
+  check('wix: when is the event is a date, not a type',
+    matchField_('field:when_is_the_event_1').field, 'eventDate');
+  check('wix: when is your event is a date too',
+    matchField_('field:when_is_your_event').field, 'eventDate');
+  check('wix: target date of event', matchField_('field:target_date_of_event').field, 'eventDate');
+  check('wix: estimated guest count', matchField_('field:estimated_guest_count').field, 'guestCount');
+  check('wix: estimated number of guests',
+    matchField_('field:estimated_number_of_guests').field, 'guestCount');
+  check('wix: which venue is a venue, not an event type',
+    matchField_('field:which_venue_are_you_interested_in').field, 'venue');
+  check('wix: target location venue', matchField_('field:target_location_venue').field, 'venue');
+  check('wix: budget range', matchField_('field:budget_range').field, 'budget');
+  check('wix: company name', matchField_('field:company_name_49ed').field, 'company');
+  check('wix: form name becomes the sub-source', matchField_('formName').field, 'subSource');
+  check('wix: submission time is when it arrived',
+    matchField_('submissionTime').field, 'receivedAt');
+
+  // Our own staff member, not the client — this must never become the lead's name.
+  check('wix: hizons contact person is not the client',
+    matchField_('field:contact_person_from_hizons_catering').field, 'message');
+
+  // A UUID must never be read as a phone number just because it says "contact".
+  check('wix: contact id ignored', isNoiseKey_('contactId'), 'true');
+  check('wix: contact identity type ignored', isNoiseKey_('contactIdentityType'), 'true');
+  check('wix: submissions link ignored', isNoiseKey_('submissionsLink'), 'true');
+  check('wix: checkbox placeholder ignored', isNoiseKey_('field:form_field_20db'), 'true');
+  check('wix: form id ignored', isNoiseKey_('formId'), 'true');
+  check('wix: field prefix stripped from the label',
+    humanizeKey_('field:anything_else_we_should_know'), 'Anything Else We Should Know');
+
+  // A real name field beats a lookalike when both could claim the same slot.
+  const wixRecord = mapRecord_({
+    'field:full_name': 'Maria Santos',
+    'field:contact_person_from_hizons_catering': 'Bea',
+    'field:contact_number': '0917 123 4567',
+    'contactId': 'edca2245-7ce3-4d95-bfe9-b2012110eb8f'
+  });
+  check('wix: the client is the client', wixRecord.fields.fullName, 'Maria Santos');
+  check('wix: the phone is a phone', wixRecord.fields.phone, '0917 123 4567');
+  check('wix: our own contact is kept as a note',
+    wixRecord.messages.some(function (m) { return m.value === 'Bea'; }), 'true');
+
+  check('wix: the builder default name is spotted', looksLikeDefaultFormName_('My form'), 'true');
+  check('wix: so is Form 1', looksLikeDefaultFormName_('Form 1'), 'true');
+  check('wix: a real form name is not', looksLikeDefaultFormName_('Homepage Inquiry'), 'false');
 
   // --- Columns competing for one destination -------------------------------
   const notesRecord = mapRecord_({

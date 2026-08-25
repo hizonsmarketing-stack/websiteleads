@@ -120,6 +120,62 @@ function runSelfTest() {
   check('map: shouted header stops shouting', humanizeKey_('SALES NOTES'), 'Sales Notes');
   check('map: deliberate mixed case left alone', humanizeKey_('Preferred VIP Room'), 'Preferred VIP Room');
 
+  // --- Wix form fields, as they actually arrive ----------------------------
+  // Wix names every field "field:<slug>" and sends its own bookkeeping
+  // alongside. These are real field names from a live site.
+  check('wix: full name', matchField_('field:full_name').field, 'fullName');
+  check('wix: your name', matchField_('field:your_name').field, 'fullName');
+  check('wix: misspelled email still matches', matchField_('field:email_adress').field, 'email');
+  check('wix: contact number', matchField_('field:contact_number').field, 'phone');
+  check('wix: event type', matchField_('field:event_type').field, 'eventType');
+  check('wix: type of celebration', matchField_('field:type_of_celebration').field, 'eventType');
+  check('wix: whats the occasion', matchField_('field:whats_the_occasion').field, 'eventType');
+  check('wix: when is the event is a date, not a type',
+    matchField_('field:when_is_the_event_1').field, 'eventDate');
+  check('wix: when is your event is a date too',
+    matchField_('field:when_is_your_event').field, 'eventDate');
+  check('wix: target date of event', matchField_('field:target_date_of_event').field, 'eventDate');
+  check('wix: estimated guest count', matchField_('field:estimated_guest_count').field, 'guestCount');
+  check('wix: estimated number of guests',
+    matchField_('field:estimated_number_of_guests').field, 'guestCount');
+  check('wix: which venue is a venue, not an event type',
+    matchField_('field:which_venue_are_you_interested_in').field, 'venue');
+  check('wix: target location venue', matchField_('field:target_location_venue').field, 'venue');
+  check('wix: budget range', matchField_('field:budget_range').field, 'budget');
+  check('wix: company name', matchField_('field:company_name_49ed').field, 'company');
+  check('wix: form name becomes the sub-source', matchField_('formName').field, 'subSource');
+  check('wix: submission time is when it arrived',
+    matchField_('submissionTime').field, 'receivedAt');
+
+  // Our own staff member, not the client — this must never become the lead's name.
+  check('wix: hizons contact person is not the client',
+    matchField_('field:contact_person_from_hizons_catering').field, 'message');
+
+  // A UUID must never be read as a phone number just because it says "contact".
+  check('wix: contact id ignored', isNoiseKey_('contactId'), 'true');
+  check('wix: contact identity type ignored', isNoiseKey_('contactIdentityType'), 'true');
+  check('wix: submissions link ignored', isNoiseKey_('submissionsLink'), 'true');
+  check('wix: checkbox placeholder ignored', isNoiseKey_('field:form_field_20db'), 'true');
+  check('wix: form id ignored', isNoiseKey_('formId'), 'true');
+  check('wix: field prefix stripped from the label',
+    humanizeKey_('field:anything_else_we_should_know'), 'Anything Else We Should Know');
+
+  // A real name field beats a lookalike when both could claim the same slot.
+  const wixRecord = mapRecord_({
+    'field:full_name': 'Maria Santos',
+    'field:contact_person_from_hizons_catering': 'Bea',
+    'field:contact_number': '0917 123 4567',
+    'contactId': 'edca2245-7ce3-4d95-bfe9-b2012110eb8f'
+  });
+  check('wix: the client is the client', wixRecord.fields.fullName, 'Maria Santos');
+  check('wix: the phone is a phone', wixRecord.fields.phone, '0917 123 4567');
+  check('wix: our own contact is kept as a note',
+    wixRecord.messages.some(function (m) { return m.value === 'Bea'; }), 'true');
+
+  check('wix: the builder default name is spotted', looksLikeDefaultFormName_('My form'), 'true');
+  check('wix: so is Form 1', looksLikeDefaultFormName_('Form 1'), 'true');
+  check('wix: a real form name is not', looksLikeDefaultFormName_('Homepage Inquiry'), 'false');
+
   // --- Columns competing for one destination -------------------------------
   const notesRecord = mapRecord_({
     'Full name': 'Rosa Lim',
