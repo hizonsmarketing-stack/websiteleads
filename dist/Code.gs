@@ -3880,7 +3880,7 @@ function migrateExistingTab(options) {
     ambiguousDates: [],
     stoppedEarly: false,
     remaining: 0,
-    mapping: describeMapping_(table.headers),
+    mapping: describeMigrationMapping_(sheet, table.headers),
     dryRun: !!opts.dryRun
   };
   if (!table.rows.length) return summary;
@@ -4027,6 +4027,72 @@ function migrateExistingTab(options) {
     stoppedEarly: summary.stoppedEarly, remaining: summary.remaining
   });
   return summary;
+}
+
+/**
+ * Explains where each of a tab's columns will actually end up.
+ *
+ * Not the same question as "what does this header mean". A tab that already
+ * says "Guests" keeps using it, so telling someone that column maps to
+ * "Guest Count" leaves them looking for a Guest Count column that will never
+ * appear. This answers the question they are really asking.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {!Array<string>} headers
+ * @return {!Object<string,string>}
+ */
+function describeMigrationMapping_(sheet, headers) {
+  const bindings = fieldColumns_(sheet);
+  const mapping = {};
+
+  headers.forEach(function (header) {
+    const text = cleanText_(header);
+    if (!text) return;
+
+    if (isNoiseKey_(text)) {
+      mapping[text] = '(ignored)';
+      return;
+    }
+
+    const match = matchField_(text);
+    if (!match.field) {
+      mapping[text] = 'kept in the notes';
+      return;
+    }
+
+    const field = FIELD_TO_LEAD_PROPERTY[match.field] || match.field;
+    const label = leadFieldLabel_(field) || humanizeKey_(field);
+    const boundCol = bindings.byField[field];
+    const boundHeader = boundCol ? cleanText_(bindings.headers[boundCol - 1]) : '';
+
+    if (boundHeader && squashKey_(boundHeader) === squashKey_(text)) {
+      mapping[text] = label + ' — stays in this column';
+    } else if (field === 'message') {
+      mapping[text] = 'Message — new column';
+    } else if (boundHeader) {
+      // Another column already serves this field, so this one's values are
+      // kept in the notes rather than overwriting it.
+      mapping[text] = 'kept in the notes ("' + boundHeader + '" is the ' + label + ')';
+    } else {
+      mapping[text] = label + ' — new column';
+    }
+  });
+
+  return mapping;
+}
+
+let LEAD_FIELD_LABELS_ = null;
+
+/** @return {string} The canonical column name for a lead field. */
+function leadFieldLabel_(field) {
+  if (!LEAD_FIELD_LABELS_) {
+    LEAD_FIELD_LABELS_ = {};
+    Object.keys(COLUMN_TO_FIELD).forEach(function (header) {
+      const key = COLUMN_TO_FIELD[header];
+      if (LEAD_FIELD_LABELS_[key] === undefined) LEAD_FIELD_LABELS_[key] = header;
+    });
+  }
+  return LEAD_FIELD_LABELS_[field] || '';
 }
 
 /** @return {boolean} True when a tab is a salesperson tab rather than machinery. */

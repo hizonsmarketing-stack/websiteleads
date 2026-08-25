@@ -356,9 +356,20 @@ const dry = api.migrateExistingTab({ tabName: 'Iris', dryRun: true });
 check('dry run reads every row', dry.migrated, 4);
 check('dry run writes nothing', tab('Iris').getLastColumn(), 15);
 check('dry run spots the cross-tab duplicate', dry.duplicatesFound, 1);
-check('preview shows contact method as free text', dry.mapping['CONTACT METHOD'], 'Message');
+// The preview answers "where does my column end up", not "what does this
+// header mean" — telling someone Guests maps to Guest Count leaves them
+// hunting for a Guest Count column that will never appear.
+check('preview: their venue column is kept',
+  dry.mapping['Venue'], 'Venue / Location — stays in this column');
+check('preview: their guest column is kept',
+  dry.mapping['Guests'], 'Guest Count — stays in this column');
+check('preview: their phone column is kept',
+  dry.mapping['Contact number'], 'Phone — stays in this column');
+check('preview: contact method goes to a new Message column',
+  dry.mapping['CONTACT METHOD'], 'Message — new column');
 check('preview shows conso date as ignored', dry.mapping['CONSO DATE'], '(ignored)');
-check('preview reads their presenter column', dry.mapping['PRESENTER'], 'Presenter');
+check('preview reads their presenter column',
+  dry.mapping['PRESENTER'], 'Presenter — stays in this column');
 
 const migrated = api.migrateExistingTab({ tabName: 'Iris', subSource: 'Pre-automation' });
 check('rows migrated', migrated.migrated, 4);
@@ -379,8 +390,14 @@ check('and is reported for a human to settle', migrated.ambiguousDates.length, 1
 check('the report names the row', migrated.ambiguousDates[0].row, 5);
 check('the report names the person', migrated.ambiguousDates[0].name, 'Cely Ong');
 check('the preview flags it too, before writing anything', dry.ambiguousDates.length, 1);
-check('venue carried across', cellOf('Iris', 2, 'Venue / Location'), 'Quezon City');
-check('guests read as a count', cellOf('Iris', 2, 'Guest Count'), '120');
+check('their venue column holds the venue', cellOf('Iris', 2, 'Venue'), 'Quezon City');
+check('their guest column holds the count', cellOf('Iris', 2, 'Guests'), '120');
+check('no duplicate venue column was added',
+  tab('Iris').getRange(1, 1, 1, tab('Iris').getLastColumn()).getValues()[0]
+    .indexOf('Venue / Location'), -1);
+check('no duplicate guest column was added',
+  tab('Iris').getRange(1, 1, 1, tab('Iris').getLastColumn()).getValues()[0]
+    .indexOf('Guest Count'), -1);
 check('timestamp used as received date',
   String(cellOf('Iris', 2, 'Received At')).slice(0, 10), '2026-05-02');
 check('their own SOURCE wins over the dialog', cellOf('Iris', 2, 'Source'), 'Website');

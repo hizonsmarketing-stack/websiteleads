@@ -91,11 +91,20 @@ in slash format among the normalised rows.
 
 3. Click **Preview**. Nothing is written. You get:
    - which row it treated as the header, and how many data rows it found
-   - how each of your columns was interpreted (`Client Name → Full Name`,
-     `Contact → Phone`, `Remarks → Message`). Columns it doesn't recognise show
-     as `(notes)` and their values go into the **Message** column
+   - **where each of your columns ends up**:
+
+     | Preview says | Meaning |
+     | --- | --- |
+     | `Guest Count — stays in this column` | Your `Guests` column *is* the guest count. No second column appears; new leads fill yours |
+     | `Message — new column` | A column is added for it, because a tab can have several notes columns and there is no single right one to write to |
+     | `kept in the notes` | Not a field the automation knows, so its values go into **Message** rather than being dropped |
+     | `(ignored)` | Dropped entirely — webhook plumbing, or a column you've asked it to skip |
+
    - **how many rows match a lead somewhere else** — the same person already
      sitting in another rep's tab
+
+   Most of your columns should say *stays in this column*. That is the
+   automation using your sheet's own vocabulary rather than duplicating it.
 
 4. If the column mapping looks wrong, fix it before importing: see
    [FIELD_MAPPING.md](FIELD_MAPPING.md#teaching-it-a-new-column-name).

@@ -164,7 +164,8 @@
 
         var mapping = Object.keys(result.mapping).map(function (header) {
           var target = result.mapping[header];
-          var cls = target === '(ignored)' ? 'ignored' : 'to';
+          var cls = (target === '(ignored)' || target.indexOf('kept in the notes') === 0)
+            ? 'ignored' : 'to';
           return '<tr><td>' + escapeHtml(header) + '</td><td class="' + cls + '">&rarr; ' +
             escapeHtml(target) + '</td></tr>';
         }).join('');
@@ -172,8 +173,9 @@
         show(lines.join('<br>') +
           (dates ? '<br><br><strong>Dates to settle by hand</strong><table class="map">' + dates + '</table>' : '') +
           (dupes ? '<br><br><strong>Matches found</strong><table class="map">' + dupes + '</table>' : '') +
-          '<br><strong>Columns read</strong><table class="map">' + mapping + '</table>' +
-          'Columns marked <em>(notes)</em> are copied into the Message column.');
+          '<br><strong>Where each of your columns goes</strong><table class="map">' + mapping + '</table>' +
+          '<em>Stays in this column</em> means the automation writes into the column you already ' +
+          'have rather than adding a second one beside it. Nothing marked that way changes name.');
       }
 
       function preview() {
