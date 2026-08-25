@@ -226,8 +226,11 @@ function buildLead_(input) {
     [subSourceInfo.label, fields.message, message]
   );
 
-  const email = normalizeEmail_(fields.email);
-  const phone = normalizePhone_(fields.phone);
+  // Contact details are stored exactly as the person wrote them. The tidied
+  // forms are computed for matching only and never reach the sheet: a rep
+  // dials what the guest actually gave us.
+  const email = cleanText_(fields.email);
+  const phone = cleanText_(fields.phone);
   const receivedAt = input.receivedAt || nowStamp_();
 
   return {
@@ -245,7 +248,6 @@ function buildLead_(input) {
     lastName: lastName,
     email: email,
     phone: phone,
-    phoneRaw: cleanText_(fields.phone),
     company: cleanText_(fields.company),
     eventDate: normalizeDate_(fields.eventDate),
     eventDateRaw: cleanText_(fields.eventDate),
@@ -261,8 +263,8 @@ function buildLead_(input) {
     lastTouchAt: receivedAt,
     allSubSources: subSourceInfo.label,
     rawRef: input.rawRef || '',
-    emailKey: emailDedupeKey_(email),
-    phoneKey: phone
+    emailKey: emailDedupeKey_(normalizeEmail_(fields.email)),
+    phoneKey: normalizePhone_(fields.phone)
   };
 }
 

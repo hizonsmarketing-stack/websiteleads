@@ -228,7 +228,7 @@ function notifyTeam_(lead, tabName, assignment) {
     lead.presenter ? 'Presenter: ' + lead.presenter : '',
     'Name: ' + (lead.fullName || '(not given)'),
     'Email: ' + (lead.email || '(not given)'),
-    'Phone: ' + (lead.phone || lead.phoneRaw || '(not given)'),
+    'Phone: ' + (lead.phone || '(not given)'),
     'Event date: ' + (lead.eventDate || '(not given)'),
     'Guests: ' + (lead.guestCount || '(not given)'),
     'Source: ' + lead.source + ' / ' + lead.subSource,
@@ -324,7 +324,6 @@ function buildMergeUpdates_(original, incoming, matchedOn) {
   const fillable = {
     'Email': incoming.email,
     'Phone': incoming.phone,
-    'Phone (Raw)': incoming.phoneRaw,
     'Full Name': incoming.fullName,
     'First Name': incoming.firstName,
     'Last Name': incoming.lastName,

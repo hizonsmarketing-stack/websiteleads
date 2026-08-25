@@ -15,11 +15,10 @@ deleted, and whoever owns a lead keeps it. The migration adds the automation's
 columns to the right of your existing ones and fills them in from what the row
 already says.
 
-The only values it overwrites are **Email** and **Phone**, rewritten in
-normalised form (`0917 123 4567` → `+639171234567`) so they can be matched
-across sources. The original phone text is preserved in **Phone (Raw)**, and
-your own legacy columns are left untouched — if you have a "Contact" column,
-it keeps its original contents.
+**No contact detail is rewritten.** Names, emails and phone numbers stay
+exactly as they were typed, because those are what your team reads and dials.
+Matching happens on tidied copies held in the hidden `_Index` tab, never in the
+sheet.
 
 Every other column is filled **only where it is empty**. A row with a Status of
 `Quoted` keeps it; a row with no status gets `New`.
@@ -55,10 +54,12 @@ repeating sequence only governs leads that arrive from here on, continuing down
 the tab from whatever row the new ones land on. On a corporate caller's tab
 there is no sequence at all — new leads there name the caller as presenter.
 
-### Dates
+### Dates — the one value that can change
 
 Several people have typed into these columns over the years, so the import
-reads each date on its own merits rather than assuming one format:
+reads each date on its own merits rather than assuming one format. This is the
+only rewriting the migration does, and
+`Normalise Event Dates On Import` in `_Settings` turns it off entirely:
 
 | Written as | Read as | Why |
 | --- | --- | --- |

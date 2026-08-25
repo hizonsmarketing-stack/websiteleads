@@ -119,6 +119,7 @@ function intakeBatch_(records, context) {
     });
 
     housekeeping_();
+    maybeSendDigest_(summary.created);
     return summary;
   }, 120000);
 }

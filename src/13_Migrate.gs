@@ -7,14 +7,17 @@
  * dedupe index. From then on a returning inquiry is recognised as the same
  * person and merged into the historical row instead of being dealt out again.
  *
- * Nothing is deleted and no row moves. The values overwritten are Email, Phone
- * and — only where it can be read with certainty — Event Date; the originals
- * are preserved in Phone (Raw) and Event Date (Raw). Every other canonical
- * column is filled only where it is blank.
+ * Nothing is deleted, no row moves, and no contact detail is rewritten: names,
+ * emails and phone numbers stay exactly as they were typed, because those are
+ * what a rep reads and dials. Matching happens on tidied copies held in the
+ * index, not in the sheet.
  *
- * A date like "03/04/2027" that could be read either way round is left exactly
- * as typed and reported, because several people have typed into these columns
- * over the years and guessing would move real bookings by weeks.
+ * The one value that can change is Event Date, and only where it reads one way
+ * only — "03/15/2027" becomes "2027-03-15" so the column sorts, with the
+ * original kept beside it in Event Date (Raw). Turn that off with the
+ * "Normalise Event Dates On Import" setting. A date like "03/04/2027" that
+ * could be read either way round is always left as typed and reported,
+ * because guessing would move a real booking by weeks.
  *
  * A tab that already has a Presenter column keeps every value in it. The
  * repeating sequence only governs leads that arrive from here on.
@@ -184,17 +187,12 @@ function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
   const map = headerMap_(sheet);
   const updates = {};
 
-  // Normalised contact details replace what is there — matching depends on them.
-  const overwrite = { 'Email': lead.email, 'Phone': lead.phone };
-
-  // A date only gets rewritten when there is one way to read it. An ambiguous
-  // one stays exactly as typed, and stands out against the normalised rows
-  // around it — which is the point.
-  if (dateInfo && dateInfo.status === 'iso') overwrite['Event Date'] = dateInfo.value;
-
-  Object.keys(overwrite).forEach(function (header) {
-    if (cleanText_(overwrite[header])) updates[header] = overwrite[header];
-  });
+  // The only value that may replace one already in the sheet, and only when the
+  // date reads one way. An ambiguous one stays exactly as typed and stands out
+  // against the normalised rows around it — which is the point.
+  if (dateInfo && dateInfo.status === 'iso' && settingIsOn_('Normalise Event Dates On Import')) {
+    updates['Event Date'] = dateInfo.value;
+  }
 
   const fillIfBlank = {
     'Presenter': lead.presenter,
@@ -207,7 +205,6 @@ function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
     'Full Name': lead.fullName,
     'First Name': lead.firstName,
     'Last Name': lead.lastName,
-    'Phone (Raw)': lead.phoneRaw,
     'Company': lead.company,
     'Event Date (Raw)': dateInfo ? dateInfo.original : '',
     'Guest Count': lead.guestCount,

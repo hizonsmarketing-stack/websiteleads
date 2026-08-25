@@ -71,10 +71,13 @@ function seedSettings_() {
     'Dedupe Ignore Plus Tags': 'yes = maria+fair@gmail.com matches maria@gmail.com.',
     'Promote Unassigned Leads': 'yes = move a lead out of Unassigned once a later form reveals the event type.',
     'Append Duplicate Notes': 'yes = add the repeat inquiry text to the original lead’s Message.',
+    'Normalise Event Dates On Import': 'yes = rewrite unambiguous dates as YYYY-MM-DD when importing an existing tab. no = leave every date exactly as typed.',
     'Accept Test Leads': 'yes = store Google Ads test leads instead of only acknowledging them.',
     'Round Robin Assignment': 'yes = share leads across the _Team roster.',
     'Presenters': 'The default repeating sequence down the Presenter column, in order. Overridden per event type below.',
-    'Notify On New Lead': 'yes = email the addresses in the Notify rows below.',
+    'Notify On New Lead': 'yes = email the assignee, and the Notify rows below, as each lead arrives.',
+    'Digest Every N Leads': 'Send the sales team a summary email every this many new leads. 0 turns it off.',
+    'Digest Recipients': 'Comma-separated addresses the digest goes to. Blank means it is never sent.',
     'Raw Payload Retention (rows)': 'Oldest rows in _Raw are trimmed beyond this count.',
     'Log Retention (rows)': 'Oldest rows in _Log are trimmed beyond this count.'
   };
@@ -177,7 +180,7 @@ function styleLeadSheet_(sheet) {
     'Presenter': 110, 'Lead ID': 150, 'Received At': 140, 'Source': 100, 'Sub-Source': 190,
     'Event Type': 150, 'Event Type (Raw)': 150, 'Full Name': 180,
     'First Name': 120, 'Last Name': 130, 'Email': 230, 'Phone': 140,
-    'Phone (Raw)': 130, 'Company': 170, 'Event Date': 110, 'Event Date (Raw)': 120, 'Guest Count': 100,
+    'Company': 170, 'Event Date': 110, 'Event Date (Raw)': 120, 'Guest Count': 100,
     'Venue / Location': 170, 'Budget': 120, 'Message': 320, 'Campaign': 130,
     'Assigned To': 130, 'Status': 130, 'Touches': 80, 'First Seen At': 140,
     'Last Touch At': 140, 'All Sub-Sources': 220, 'Raw Ref': 110,

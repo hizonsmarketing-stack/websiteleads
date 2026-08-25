@@ -91,6 +91,9 @@ know who covers what.
      Shane as presenter.
    - The other `Presenters - …` rows are blank, meaning they follow the general
      sequence.
+   - `Digest Recipients` is blank. Put the sales team's addresses there to get a
+     summary email every ten new leads; `Digest Every N Leads` sets the
+     interval, and `0` turns it off.
 
 5. **Leads → Run self-test.** It reads the roster back and reports who covers
    what, or names anything wrong with it — a misspelled event type is otherwise

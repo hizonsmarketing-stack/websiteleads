@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_ };');
 
 const api = global.__api;
 
@@ -90,8 +90,8 @@ check('Corporate has 1 row', rows('Corporate'), 1);
 check('source tagged', cellOf('Corporate', 2, 'Source'), 'Website');
 check('sub-source tagged', cellOf('Corporate', 2, 'Sub-Source'), 'Homepage Inquiry');
 check('name tidied', cellOf('Corporate', 2, 'Full Name'), 'Ana Reyes');
-check('phone normalised', cellOf('Corporate', 2, 'Phone'), '+639171234567');
-check('email lowercased', cellOf('Corporate', 2, 'Email'), 'ana.reyes@example.com');
+check('phone stored as typed', cellOf('Corporate', 2, 'Phone'), '0917 123 4567');
+check('email stored as typed', cellOf('Corporate', 2, 'Email'), 'Ana.Reyes@example.com');
 check('guests parsed', cellOf('Corporate', 2, 'Guest Count'), '250');
 check('date parsed', cellOf('Corporate', 2, 'Event Date'), '2026-12-20');
 check('unmapped answer kept in Message',
@@ -119,9 +119,20 @@ check('touch counted', cellOf('Corporate', 2, 'Touches'), 2);
 check('both sub-sources recorded',
   String(cellOf('Corporate', 2, 'All Sub-Sources')), 'Homepage Inquiry | Google Ads Form 4242');
 check('blank company filled from repeat', cellOf('Corporate', 2, 'Company'), 'Acme Foods Inc.');
-check('original email preserved', cellOf('Corporate', 2, 'Email'), 'ana.reyes@example.com');
+check('original email untouched by the merge',
+  cellOf('Corporate', 2, 'Email'), 'Ana.Reyes@example.com');
 check('duplicate filed', rows('Duplicates'), 1);
 check('duplicate says how it matched', cellOf('Duplicates', 2, 'Matched On'), 'Phone');
+
+// Storing contact details as typed must not cost us the matching.
+api.resetCaches();
+const shouty = post({ formName: 'Contact Us', name: 'Ana Reyes',
+  email: 'ANA.REYES@EXAMPLE.COM' }, { source: 'website', form: 'Contact Us' });
+check('a differently capitalised email is the same person', shouty.action, 'merged');
+api.resetCaches();
+const spaced = post({ formName: 'Contact Us', name: 'Ana Reyes',
+  'Contact Number': '(0917) 123-4567' }, { source: 'website', form: 'Contact Us' });
+check('a differently punctuated phone is the same person', spaced.action, 'merged');
 check('Google Ads sub-source registered',
   tab('_Sources').getRange(3, 2).getValue(), 'Google Ads Form 4242');
 
@@ -144,7 +155,7 @@ check('promoted on second submission', res.action, 'merged+promoted');
 check('now in Wedding', res.tab, 'Wedding');
 check('Unassigned emptied', rows('Unassigned'), 0);
 check('Wedding has the lead', rows('Wedding'), 1);
-check('phone captured on promotion', cellOf('Wedding', 2, 'Phone'), '+639187654321');
+check('phone captured on promotion', cellOf('Wedding', 2, 'Phone'), '0918 765 4321');
 check('All Leads event type updated', cellOf('All Leads', 3, 'Event Type'), 'Wedding');
 
 realLog('\n--- a third form matching the promoted lead by its new phone ---');
@@ -185,7 +196,7 @@ check('fair name is the sub-source', cellOf('Wedding', 3, 'Sub-Source'), 'Weddin
 check('fair default event type applied', cellOf('Wedding', 3, 'Event Type'), 'Wedding');
 check('received date from the fair', String(cellOf('Wedding', 3, 'Received At')).slice(0, 10), '2026-08-15');
 check('Ana merged not duplicated', rows('Corporate'), 1);
-check('Ana touched a third time', cellOf('Corporate', 2, 'Touches'), 3);
+check('every touch on Ana counted', cellOf('Corporate', 2, 'Touches'), 5);
 check('unknown "Wedding Date" column read as the event date',
   cellOf('Wedding', 3, 'Event Date'), '2027-02-14');
 check('remarks landed in Message',
@@ -354,8 +365,7 @@ check('rows migrated', migrated.migrated, 4);
 check('rows stayed in Iris', rows('Iris'), 4);
 check('lead ids written', String(cellOf('Iris', 2, 'Lead ID')).slice(0, 3), 'LD-');
 check('owner stamped from the tab', cellOf('Iris', 2, 'Assigned To'), 'Iris');
-check('phone normalised in place', cellOf('Iris', 2, 'Phone'), '+639179990001');
-check('original phone kept', cellOf('Iris', 2, 'Phone (Raw)'), '0917 999 0001');
+check('their phone is left exactly as typed', cellOf('Iris', 2, 'Phone'), '0917 999 0001');
 check('their own column untouched', cellOf('Iris', 2, 'CONSO DATE'), '2026-01-04');
 check('event type read from their Event column', cellOf('Iris', 2, 'Event Type'), 'Debut');
 // 03/15/2027 can only be read one way, so it is normalised and the original
@@ -435,8 +445,8 @@ check('no second timestamp column beside "TIMESTAMP"', hasColumn('Received At'),
 check('columns it genuinely lacks are still added', hasColumn('Lead ID'), 'true');
 
 check('their name column is filled', cellOf('Nina', 2, 'Full name'), 'Tess Ramos');
-check('their phone column is filled, normalised',
-  cellOf('Nina', 2, 'Contact number'), '+639174441111');
+check('their phone column is filled as typed',
+  cellOf('Nina', 2, 'Contact number'), '0917 444 1111');
 
 // A guest phoning in from abroad keeps their own country's number, and is
 // recognised as the same person whether or not they typed the +.
@@ -445,9 +455,8 @@ const abroad = post({ formName: 'Homepage Inquiry', name: 'Grace Tan',
   email: 'grace@example.com', 'Contact Number': '+65 9123 4567',
   'Type of Event': 'Kiddie Party', 'Assigned To': 'Nina' },
   { source: 'website', form: 'Homepage Inquiry' });
-check('an international number is kept as its own country\'s',
-  cellOf('Nina', 3, 'Contact number'), '+6591234567');
-check('and the original is beside it', cellOf('Nina', 3, 'Phone (Raw)'), '+65 9123 4567');
+check('an international number is stored as typed',
+  cellOf('Nina', 3, 'Contact number'), '+65 9123 4567');
 api.resetCaches();
 const abroadAgain = post({ formName: 'Contact Us', name: 'Grace Tan',
   'Contact Number': '65 9123 4567' }, { source: 'website', form: 'Contact Us' });
@@ -463,6 +472,82 @@ check('their timestamp column is filled',
   String(cellOf('Nina', 2, 'TIMESTAMP')).length > 0, 'true');
 check('their notes columns are left alone', cellOf('Nina', 2, 'SALES NOTES'), '');
 check('the message goes to its own column', cellOf('Nina', 2, 'Message'), 'Asking for a quote');
+
+realLog('\n--- the digest: one email every ten new leads ---');
+silence(quiet);
+setSetting('Digest Every N Leads', '10');
+setSetting('Digest Recipients', 'sales@example.com');
+// Earlier sections already put leads in All Leads. On a fresh install the
+// marker starts at the header and the first digest covers everything so far;
+// here we start counting from now so the arithmetic is readable.
+PropertiesService.getScriptProperties()
+  .setProperty('DIGEST_MARK_ROW', String(tab('All Leads').getLastRow()));
+api.resetCaches();
+
+function digests() {
+  return global.__mails.filter(m => /new lead/.test(m.subject));
+}
+const digestsBefore = digests().length;
+
+// Nine new leads should not send anything.
+for (let i = 1; i <= 9; i++) {
+  api.resetCaches();
+  post({ formName: 'Homepage Inquiry', name: 'Digest ' + i, email: 'd' + i + '@example.com',
+    'Contact Number': '0917 000 10' + (i < 10 ? '0' + i : i),
+    'Type of Event': i % 3 === 0 ? 'Corporate seminar' : 'Church Wedding' },
+    { source: 'website', form: 'Homepage Inquiry' });
+}
+check('nine new leads send no digest', digests().length, digestsBefore);
+
+api.resetCaches();
+post({ formName: 'Homepage Inquiry', name: 'Digest 10', email: 'd10@example.com',
+  'Contact Number': '0917 000 1010', 'Type of Event': 'Debut' },
+  { source: 'website', form: 'Homepage Inquiry' });
+check('the tenth sends one', digests().length, digestsBefore + 1);
+
+const sent = digests()[digests().length - 1];
+check('it goes to the digest list', sent.to, 'sales@example.com');
+check('the subject counts them', /^10 new leads/.test(sent.subject), 'true');
+check('and breaks them down by event type', /Wedding/.test(sent.subject), 'true');
+check('the body names a lead', /Digest 10/.test(sent.body), 'true');
+check('and names who is calling them', /caller/.test(sent.body), 'true');
+check('it links back to the sheet', /docs.google.com/.test(sent.body), 'true');
+
+// A returning client is not a new lead, so the count does not move.
+api.resetCaches();
+const repeatLead = post({ formName: 'Contact Us', name: 'Digest 1', email: 'd1@example.com' },
+  { source: 'website', form: 'Contact Us' });
+check('a merge is not counted as a new lead', repeatLead.action, 'merged');
+for (let i = 11; i <= 19; i++) {
+  api.resetCaches();
+  post({ formName: 'Homepage Inquiry', name: 'Digest ' + i, email: 'd' + i + '@example.com',
+    'Contact Number': '0917 000 20' + i, 'Type of Event': 'Kiddie Party' },
+    { source: 'website', form: 'Homepage Inquiry' });
+}
+check('nine more still send nothing', digests().length, digestsBefore + 1);
+api.resetCaches();
+post({ formName: 'Homepage Inquiry', name: 'Digest 20', email: 'd20@example.com',
+  'Contact Number': '0917 000 2020', 'Type of Event': 'Kiddie Party' },
+  { source: 'website', form: 'Homepage Inquiry' });
+check('the twentieth sends the second digest', digests().length, digestsBefore + 2);
+check('which covers only the leads since the first',
+  /^10 new leads/.test(digests()[digests().length - 1].subject), 'true');
+
+// A fair worksheet that crosses the threshold several times sends one email.
+api.resetCaches();
+const bulk = book.insertSheet('Bulk Fair');
+const bulkRows = [['Name', 'Contact No.', 'Email Address']];
+for (let i = 1; i <= 25; i++) {
+  bulkRows.push(['Bulk ' + i, '0918 555 ' + (1000 + i), 'bulk' + i + '@example.com']);
+}
+bulk.getRange(1, 1, bulkRows.length, 3).setValues(bulkRows);
+const digestsBeforeBulk = digests().length;
+importFairWorksheet({ sheetName: 'Bulk Fair', fairName: 'Bulk Expo 2026' });
+check('a 25-row import sends one email, not two', digests().length, digestsBeforeBulk + 1);
+check('covering all 25', /^25 new leads/.test(digests()[digests().length - 1].subject), 'true');
+
+setSetting('Digest Every N Leads', '0');
+api.resetCaches();
 
 realLog('\n--- auth and payload shapes ---');
 silence(quiet);

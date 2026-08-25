@@ -11,6 +11,7 @@
 | **Show webhook URL** | The URLs to give Wix and Google Ads. |
 | **Set webhook token…** | The shared secret website forms must send. |
 | **Set Google Ads key…** | Must match the Key on the Google Ads lead form. |
+| **Send lead digest now** | Sends the summary email immediately, whatever the count is at. Useful for testing the address list. |
 | **Rebuild dedupe index** | Re-reads every team tab and rebuilds the matching index. Run it after bulk-editing, deleting or moving rows by hand. |
 | **Run self-test** | Checks the normalisation and routing logic, then checks the `_Team` roster for misspelled event types, active people covering nothing, two people sharing a tab, and event types nobody covers. Writes nothing. |
 
@@ -175,6 +176,35 @@ you set `Round Robin Assignment` to `no`.
 Leads whose event type couldn't be worked out go to **Unassigned** with no
 owner — and are assigned automatically if a later submission reveals the event
 type.
+
+## The digest
+
+Every ten new leads, the team gets one email summarising what came in and where
+it went — no need to open the sheet to know how the week is going.
+
+```
+Subject: 10 new leads — Wedding 3, Corporate 2, Debut 2, Kid's Party 2, Private Event 1
+
+By event type:  Wedding 3, Corporate 2, Debut 2, Kid's Party 2, Private Event 1
+By caller:      Bea 4, Carlo 4, Abi 1, Shane 1
+By source:      Website 10
+
+Maria Santos · Wedding · event 2026-12-14 · caller Bea · presenter AJ · 0917 111 2233 …
+```
+
+Set `Digest Recipients` in `_Settings` to switch it on, and `Digest Every N
+Leads` to change the interval — `0` turns it off. **Leads → Send lead digest
+now** sends one immediately, which is how to check the addresses work.
+
+Three things it deliberately does not do:
+
+- **A returning client is not a new lead.** A submission merged into a row
+  someone is already working does not move the counter.
+- **A bulk import sends one email, not five.** A fair worksheet with fifty
+  leads crosses the threshold five times and still sends a single digest
+  covering all fifty.
+- **Importing your history never triggers it.** Migrating years of past leads
+  would otherwise fire a digest for every ten of them.
 
 ### Email alerts
 

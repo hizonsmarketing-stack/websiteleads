@@ -63,11 +63,12 @@
     </div>
 
     <div class="warn">
-      Email and phone are rewritten in normalised form (<code>0917 123 4567</code> →
-      <code>+639171234567</code>) so they can be matched across sources, and event dates
-      are rewritten <em>only where there is one way to read them</em>. The originals are
-      kept in <strong>Phone (Raw)</strong> and <strong>Event Date (Raw)</strong>. Every
-      other column is filled only where it is empty, and no row is moved or deleted.
+      <strong>Names, emails and phone numbers are never rewritten</strong> — they stay
+      exactly as they were typed. Matching happens on tidied copies kept out of the sheet.
+      The one value that can change is <strong>Event Date</strong>, and only where it reads
+      one way (<code>03/15/2027</code> → <code>2027-03-15</code>), with the original kept in
+      <strong>Event Date (Raw)</strong>. Every other column is filled only where it is
+      empty, and no row is moved or deleted.
     </div>
 
     <div class="actions">

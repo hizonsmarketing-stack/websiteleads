@@ -53,6 +53,12 @@ server to host and nothing to pay for.
 - **Sub-sources tagged.** The form name or the fair name. New ones register
   themselves in the **_Sources** tab the first time they appear — adding a form
   along the way means pointing it at the webhook with a new `&form=` value.
+- **Contact details are never rewritten.** A phone number is stored exactly as
+  the guest typed it — local, international, however they wrote it. The tidied
+  form used to spot duplicates is kept out of the sheet.
+- **A digest every ten leads.** One email to the team summarising what came in
+  and who it went to, so nobody has to open the sheet to know how the week is
+  going.
 - **Nothing is dropped.** An inquiry with no recognisable event type goes to
   **Unassigned** rather than disappearing, and is moved to the right team tab
   automatically once a later submission says what the event is.
@@ -106,6 +112,7 @@ src/
   11_Menu.gs        The Leads menu
   12_Tests.gs       Self-test, runnable from the menu
   13_Migrate.gs     One-time import of leads already in a salesperson's tab
+  14_Digest.gs      The every-N-leads summary email
   FairImport.html   The bridal fair import dialog
   Migrate.html      The existing-leads import dialog
   appsscript.json   Manifest (scopes, timezone, web-app config)

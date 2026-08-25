@@ -39,7 +39,6 @@ const LEAD_COLUMNS = [
   'Last Name',
   'Email',
   'Phone',
-  'Phone (Raw)',
   'Company',
   'Event Date',
   'Event Date (Raw)',
@@ -175,10 +174,13 @@ const DEFAULT_SETTINGS = {
   'Dedupe Ignore Plus Tags': 'yes',
   'Promote Unassigned Leads': 'yes',
   'Append Duplicate Notes': 'yes',
+  'Normalise Event Dates On Import': 'yes',
   'Accept Test Leads': 'no',
   'Round Robin Assignment': 'yes',
   'Presenters': 'AJ, Pam, Mhay, Vanessa',
   'Notify On New Lead': 'no',
+  'Digest Every N Leads': '10',
+  'Digest Recipients': '',
   'Raw Payload Retention (rows)': '2000',
   'Log Retention (rows)': '5000'
 };

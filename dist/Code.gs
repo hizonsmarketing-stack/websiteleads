@@ -17,6 +17,7 @@
  *   src/11_Menu.gs
  *   src/12_Tests.gs
  *   src/13_Migrate.gs
+ *   src/14_Digest.gs
  */
 
 // ==========================================================================
@@ -64,7 +65,6 @@ const LEAD_COLUMNS = [
   'Last Name',
   'Email',
   'Phone',
-  'Phone (Raw)',
   'Company',
   'Event Date',
   'Event Date (Raw)',
@@ -200,10 +200,13 @@ const DEFAULT_SETTINGS = {
   'Dedupe Ignore Plus Tags': 'yes',
   'Promote Unassigned Leads': 'yes',
   'Append Duplicate Notes': 'yes',
+  'Normalise Event Dates On Import': 'yes',
   'Accept Test Leads': 'no',
   'Round Robin Assignment': 'yes',
   'Presenters': 'AJ, Pam, Mhay, Vanessa',
   'Notify On New Lead': 'no',
+  'Digest Every N Leads': '10',
+  'Digest Recipients': '',
   'Raw Payload Retention (rows)': '2000',
   'Log Retention (rows)': '5000'
 };
@@ -585,7 +588,6 @@ const COLUMN_TO_FIELD = {
   'Last Name': 'lastName',
   'Email': 'email',
   'Phone': 'phone',
-  'Phone (Raw)': 'phoneRaw',
   'Company': 'company',
   'Event Date': 'eventDate',
   'Event Date (Raw)': 'eventDateRaw',
@@ -758,19 +760,19 @@ function ensureHeaders_(sheet, headers) {
 }
 
 /**
- * Forces the phone columns to plain text.
+ * Forces the phone column to plain text.
  *
- * Left as "automatic", Sheets reads a leading + as the start of a formula and
- * shows +639171234567 as the number 639171234567, and a long run of digits can
- * come out as 6.39E+11. Either way the number a rep dials is wrong, so the
- * columns holding one are formatted as text.
+ * Left as "automatic", Sheets drops the leading zero from 09171234567, reads a
+ * leading + as the start of a formula, and can show a long run of digits as
+ * 6.39E+11. Every one of those changes the number a rep dials, so the column
+ * holding it is formatted as text and the number survives exactly as written.
  *
  * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
  */
 function protectTextColumns_(sheet) {
   const bindings = fieldColumns_(sheet);
   const rows = Math.max(sheet.getMaxRows() - 1, 1);
-  ['phone', 'phoneRaw'].forEach(function (field) {
+  ['phone'].forEach(function (field) {
     const col = bindings.byField[field];
     if (col) sheet.getRange(2, col, rows, 1).setNumberFormat('@');
   });
@@ -1438,8 +1440,11 @@ function buildLead_(input) {
     [subSourceInfo.label, fields.message, message]
   );
 
-  const email = normalizeEmail_(fields.email);
-  const phone = normalizePhone_(fields.phone);
+  // Contact details are stored exactly as the person wrote them. The tidied
+  // forms are computed for matching only and never reach the sheet: a rep
+  // dials what the guest actually gave us.
+  const email = cleanText_(fields.email);
+  const phone = cleanText_(fields.phone);
   const receivedAt = input.receivedAt || nowStamp_();
 
   return {
@@ -1457,7 +1462,6 @@ function buildLead_(input) {
     lastName: lastName,
     email: email,
     phone: phone,
-    phoneRaw: cleanText_(fields.phone),
     company: cleanText_(fields.company),
     eventDate: normalizeDate_(fields.eventDate),
     eventDateRaw: cleanText_(fields.eventDate),
@@ -1473,8 +1477,8 @@ function buildLead_(input) {
     lastTouchAt: receivedAt,
     allSubSources: subSourceInfo.label,
     rawRef: input.rawRef || '',
-    emailKey: emailDedupeKey_(email),
-    phoneKey: phone
+    emailKey: emailDedupeKey_(normalizeEmail_(fields.email)),
+    phoneKey: normalizePhone_(fields.phone)
   };
 }
 
@@ -1737,18 +1741,24 @@ function rebuildIndex() {
     leadTabNames_().forEach(function (tabName) {
       const tab = getSpreadsheet_().getSheetByName(tabName);
       if (!tab || tab.getLastRow() < 2) return;
-      const map = headerMap_(tab);
+      // Resolved the same way the rest of the automation does, so a tab whose
+      // phone column is called "Contact number" is indexed like any other.
+      const bound = fieldColumns_(tab).byField;
+      if (!bound.leadId) return;
       const width = tab.getLastColumn();
       const values = tab.getRange(2, 1, tab.getLastRow() - 1, width).getValues();
+      const at = function (row, field) {
+        return bound[field] ? row[bound[field] - 1] : '';
+      };
 
       values.forEach(function (row, i) {
-        const leadId = cleanText_(row[map[squashKey_('Lead ID')] - 1]);
+        const leadId = cleanText_(at(row, 'leadId'));
         if (!leadId) return;
         leads++;
         const stub = {
-          emailKey: emailDedupeKey_(normalizeEmail_(row[map[squashKey_('Email')] - 1])),
-          phoneKey: normalizePhone_(row[map[squashKey_('Phone')] - 1]),
-          eventDate: cleanText_(row[map[squashKey_('Event Date')] - 1])
+          emailKey: emailDedupeKey_(normalizeEmail_(at(row, 'email'))),
+          phoneKey: normalizePhone_(at(row, 'phone')),
+          eventDate: cleanText_(at(row, 'eventDate'))
         };
         dedupeKeys_(stub).forEach(function (k) {
           if (seen[k.key]) return;
@@ -1999,7 +2009,7 @@ function notifyTeam_(lead, tabName, assignment) {
     lead.presenter ? 'Presenter: ' + lead.presenter : '',
     'Name: ' + (lead.fullName || '(not given)'),
     'Email: ' + (lead.email || '(not given)'),
-    'Phone: ' + (lead.phone || lead.phoneRaw || '(not given)'),
+    'Phone: ' + (lead.phone || '(not given)'),
     'Event date: ' + (lead.eventDate || '(not given)'),
     'Guests: ' + (lead.guestCount || '(not given)'),
     'Source: ' + lead.source + ' / ' + lead.subSource,
@@ -2095,7 +2105,6 @@ function buildMergeUpdates_(original, incoming, matchedOn) {
   const fillable = {
     'Email': incoming.email,
     'Phone': incoming.phone,
-    'Phone (Raw)': incoming.phoneRaw,
     'Full Name': incoming.fullName,
     'First Name': incoming.firstName,
     'Last Name': incoming.lastName,
@@ -2333,6 +2342,7 @@ function intakeBatch_(records, context) {
     });
 
     housekeeping_();
+    maybeSendDigest_(summary.created);
     return summary;
   }, 120000);
 }
@@ -2833,10 +2843,13 @@ function seedSettings_() {
     'Dedupe Ignore Plus Tags': 'yes = maria+fair@gmail.com matches maria@gmail.com.',
     'Promote Unassigned Leads': 'yes = move a lead out of Unassigned once a later form reveals the event type.',
     'Append Duplicate Notes': 'yes = add the repeat inquiry text to the original lead’s Message.',
+    'Normalise Event Dates On Import': 'yes = rewrite unambiguous dates as YYYY-MM-DD when importing an existing tab. no = leave every date exactly as typed.',
     'Accept Test Leads': 'yes = store Google Ads test leads instead of only acknowledging them.',
     'Round Robin Assignment': 'yes = share leads across the _Team roster.',
     'Presenters': 'The default repeating sequence down the Presenter column, in order. Overridden per event type below.',
-    'Notify On New Lead': 'yes = email the addresses in the Notify rows below.',
+    'Notify On New Lead': 'yes = email the assignee, and the Notify rows below, as each lead arrives.',
+    'Digest Every N Leads': 'Send the sales team a summary email every this many new leads. 0 turns it off.',
+    'Digest Recipients': 'Comma-separated addresses the digest goes to. Blank means it is never sent.',
     'Raw Payload Retention (rows)': 'Oldest rows in _Raw are trimmed beyond this count.',
     'Log Retention (rows)': 'Oldest rows in _Log are trimmed beyond this count.'
   };
@@ -2939,7 +2952,7 @@ function styleLeadSheet_(sheet) {
     'Presenter': 110, 'Lead ID': 150, 'Received At': 140, 'Source': 100, 'Sub-Source': 190,
     'Event Type': 150, 'Event Type (Raw)': 150, 'Full Name': 180,
     'First Name': 120, 'Last Name': 130, 'Email': 230, 'Phone': 140,
-    'Phone (Raw)': 130, 'Company': 170, 'Event Date': 110, 'Event Date (Raw)': 120, 'Guest Count': 100,
+    'Company': 170, 'Event Date': 110, 'Event Date (Raw)': 120, 'Guest Count': 100,
     'Venue / Location': 170, 'Budget': 120, 'Message': 320, 'Campaign': 130,
     'Assigned To': 130, 'Status': 130, 'Touches': 80, 'First Seen At': 140,
     'Last Touch At': 140, 'All Sub-Sources': 220, 'Raw Ref': 110,
@@ -3102,6 +3115,8 @@ function onOpen() {
     .addItem('Set webhook token…', 'menuSetWebhookToken')
     .addItem('Set Google Ads key…', 'menuSetGoogleAdsKey')
     .addSeparator()
+    .addItem('Send lead digest now', 'menuSendDigest')
+    .addSeparator()
     .addItem('Rebuild dedupe index', 'menuRebuildIndex')
     .addItem('Run self-test', 'menuRunTests')
     .addToUi();
@@ -3168,6 +3183,10 @@ function menuSetGoogleAdsKey() {
   if (value) props.setProperty('GOOGLE_ADS_KEY', value);
   else props.deleteProperty('GOOGLE_ADS_KEY');
   ui.alert('Saved', value ? 'Google Ads key set.' : 'Google Ads key cleared.', ui.ButtonSet.OK);
+}
+
+function menuSendDigest() {
+  SpreadsheetApp.getUi().alert('Lead digest', sendDigestNow(), SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function menuRebuildIndex() {
@@ -3652,14 +3671,17 @@ function rosterReport_() {
  * dedupe index. From then on a returning inquiry is recognised as the same
  * person and merged into the historical row instead of being dealt out again.
  *
- * Nothing is deleted and no row moves. The values overwritten are Email, Phone
- * and — only where it can be read with certainty — Event Date; the originals
- * are preserved in Phone (Raw) and Event Date (Raw). Every other canonical
- * column is filled only where it is blank.
+ * Nothing is deleted, no row moves, and no contact detail is rewritten: names,
+ * emails and phone numbers stay exactly as they were typed, because those are
+ * what a rep reads and dials. Matching happens on tidied copies held in the
+ * index, not in the sheet.
  *
- * A date like "03/04/2027" that could be read either way round is left exactly
- * as typed and reported, because several people have typed into these columns
- * over the years and guessing would move real bookings by weeks.
+ * The one value that can change is Event Date, and only where it reads one way
+ * only — "03/15/2027" becomes "2027-03-15" so the column sorts, with the
+ * original kept beside it in Event Date (Raw). Turn that off with the
+ * "Normalise Event Dates On Import" setting. A date like "03/04/2027" that
+ * could be read either way round is always left as typed and reported,
+ * because guessing would move a real booking by weeks.
  *
  * A tab that already has a Presenter column keeps every value in it. The
  * repeating sequence only governs leads that arrive from here on.
@@ -3829,17 +3851,12 @@ function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
   const map = headerMap_(sheet);
   const updates = {};
 
-  // Normalised contact details replace what is there — matching depends on them.
-  const overwrite = { 'Email': lead.email, 'Phone': lead.phone };
-
-  // A date only gets rewritten when there is one way to read it. An ambiguous
-  // one stays exactly as typed, and stands out against the normalised rows
-  // around it — which is the point.
-  if (dateInfo && dateInfo.status === 'iso') overwrite['Event Date'] = dateInfo.value;
-
-  Object.keys(overwrite).forEach(function (header) {
-    if (cleanText_(overwrite[header])) updates[header] = overwrite[header];
-  });
+  // The only value that may replace one already in the sheet, and only when the
+  // date reads one way. An ambiguous one stays exactly as typed and stands out
+  // against the normalised rows around it — which is the point.
+  if (dateInfo && dateInfo.status === 'iso' && settingIsOn_('Normalise Event Dates On Import')) {
+    updates['Event Date'] = dateInfo.value;
+  }
 
   const fillIfBlank = {
     'Presenter': lead.presenter,
@@ -3852,7 +3869,6 @@ function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
     'Full Name': lead.fullName,
     'First Name': lead.firstName,
     'Last Name': lead.lastName,
-    'Phone (Raw)': lead.phoneRaw,
     'Company': lead.company,
     'Event Date (Raw)': dateInfo ? dateInfo.original : '',
     'Guest Count': lead.guestCount,
@@ -3877,4 +3893,262 @@ function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
   });
 
   updateRowCells_(sheet, rowNumber, updates);
+}
+
+// ==========================================================================
+// src/14_Digest.gs
+// ==========================================================================
+
+/**
+ * The periodic digest: one email to the sales team every N new leads.
+ *
+ * This is deliberately separate from the per-lead alert. That one tells the
+ * assignee a lead is waiting; this one gives the team a picture of what has
+ * come in and where it went, without anyone opening the sheet.
+ *
+ * Only genuinely new leads count. A returning client merged into a row someone
+ * is already working is not a new lead, and importing years of history is not
+ * ten new leads forty times over — the migration never triggers a digest.
+ */
+
+/** Script property holding the last All Leads row a digest covered. */
+const DIGEST_MARK_KEY = 'DIGEST_MARK_ROW';
+
+/**
+ * Sends the digest when enough new leads have arrived since the last one.
+ *
+ * Called once per intake batch rather than once per lead, so a fair worksheet
+ * that lands fifty leads sends one email covering all fifty rather than five
+ * emails in a row.
+ *
+ * @param {number} createdCount New leads in the batch just processed.
+ */
+function maybeSendDigest_(createdCount) {
+  if (!createdCount) return;
+  const every = Number(setting_('Digest Every N Leads', '0')) || 0;
+  if (every <= 0) return;
+
+  const pending = pendingDigestRows_();
+  if (!pending || pending.count < every) return;
+
+  try {
+    sendDigest_(pending);
+  } catch (err) {
+    log_('WARN', 'digest', 'Could not send the digest', { error: String(err) });
+  }
+}
+
+/**
+ * Which rows of All Leads have arrived since the last digest.
+ * @return {?{from: number, to: number, count: number}}
+ */
+function pendingDigestRows_() {
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.allLeads);
+  if (!sheet) return null;
+
+  const lastRow = sheet.getLastRow();
+  const props = PropertiesService.getScriptProperties();
+  let mark = Number(props.getProperty(DIGEST_MARK_KEY) || 1);
+
+  // Rows can be deleted by hand; never look further back than the sheet goes.
+  if (mark < 1 || mark > lastRow) {
+    mark = lastRow;
+    props.setProperty(DIGEST_MARK_KEY, String(mark));
+  }
+  if (lastRow <= mark) return null;
+
+  return { from: mark + 1, to: lastRow, count: lastRow - mark };
+}
+
+/**
+ * Builds and sends the digest, then moves the marker forward.
+ * @param {{from: number, to: number, count: number}} pending
+ */
+function sendDigest_(pending) {
+  const recipients = digestRecipients_();
+  const props = PropertiesService.getScriptProperties();
+
+  if (!recipients.length) {
+    log_('WARN', 'digest', 'No digest recipients set — skipping and holding the leads for next time');
+    return;
+  }
+
+  const leads = readDigestLeads_(pending);
+  if (!leads.length) {
+    props.setProperty(DIGEST_MARK_KEY, String(pending.to));
+    return;
+  }
+
+  const digest = buildDigest_(leads);
+  MailApp.sendEmail({
+    to: recipients.join(','),
+    subject: digest.subject,
+    body: digest.text,
+    htmlBody: digest.html
+  });
+
+  props.setProperty(DIGEST_MARK_KEY, String(pending.to));
+  log_('INFO', 'digest', 'Sent digest of ' + leads.length + ' leads', {
+    to: recipients, rows: pending.from + '-' + pending.to
+  });
+}
+
+/** @return {!Array<string>} Where the digest goes. */
+function digestRecipients_() {
+  return String(setting_('Digest Recipients', ''))
+    .split(/[,;]/)
+    .map(function (address) { return address.trim(); })
+    .filter(String);
+}
+
+/**
+ * Reads the leads a digest covers out of All Leads.
+ * @param {{from: number, to: number}} pending
+ * @return {!Array<!Object>}
+ */
+function readDigestLeads_(pending) {
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.allLeads);
+  const bound = fieldColumns_(sheet).byField;
+  const width = sheet.getLastColumn();
+  const values = sheet.getRange(pending.from, 1, pending.to - pending.from + 1, width).getValues();
+
+  const at = function (row, field) {
+    return bound[field] ? cleanText_(row[bound[field] - 1]) : '';
+  };
+
+  return values.map(function (row) {
+    return {
+      receivedAt: at(row, 'receivedAt'),
+      name: at(row, 'fullName') || at(row, 'email') || at(row, 'phone') || '(no name given)',
+      email: at(row, 'email'),
+      phone: at(row, 'phone'),
+      eventType: at(row, 'eventTypeLabel') || FALLBACK_EVENT_TYPE.label,
+      eventDate: at(row, 'eventDate'),
+      guestCount: at(row, 'guestCount'),
+      source: at(row, 'source'),
+      subSource: at(row, 'subSource'),
+      caller: at(row, 'assignedTo'),
+      presenter: at(row, 'presenter')
+    };
+  }).filter(function (lead) {
+    return lead.name !== '(no name given)' || lead.email || lead.phone;
+  });
+}
+
+/**
+ * Renders the digest.
+ * @param {!Array<!Object>} leads
+ * @return {{subject: string, text: string, html: string}}
+ */
+function buildDigest_(leads) {
+  const byType = tally_(leads, function (lead) { return lead.eventType; });
+  const byCaller = tally_(leads, function (lead) { return lead.caller || 'Unassigned'; });
+  const bySource = tally_(leads, function (lead) { return lead.source || 'Unknown'; });
+
+  const subject = leads.length + ' new lead' + (leads.length === 1 ? '' : 's') +
+    ' — ' + describeTally_(byType);
+
+  const textLines = [
+    leads.length + ' new leads since the last digest.',
+    '',
+    'By event type:  ' + describeTally_(byType),
+    'By caller:      ' + describeTally_(byCaller),
+    'By source:      ' + describeTally_(bySource),
+    ''
+  ];
+  leads.forEach(function (lead) {
+    textLines.push([
+      lead.name,
+      lead.eventType,
+      lead.eventDate ? 'event ' + lead.eventDate : '',
+      lead.caller ? 'caller ' + lead.caller : 'unassigned',
+      lead.presenter ? 'presenter ' + lead.presenter : '',
+      [lead.phone, lead.email].filter(String).join(' / '),
+      lead.source + (lead.subSource ? ' / ' + lead.subSource : '')
+    ].filter(String).join(' · '));
+  });
+  textLines.push('', getSpreadsheet_().getUrl());
+
+  const rows = leads.map(function (lead) {
+    return '<tr>' + [
+      escapeHtml_(lead.name),
+      escapeHtml_(lead.eventType),
+      escapeHtml_(lead.eventDate || '—'),
+      escapeHtml_(lead.guestCount || '—'),
+      escapeHtml_([lead.phone, lead.email].filter(String).join('<br>')),
+      escapeHtml_(lead.caller || '—'),
+      escapeHtml_(lead.presenter || '—'),
+      escapeHtml_(lead.source + (lead.subSource ? ' / ' + lead.subSource : ''))
+    ].map(function (cell) {
+      return '<td style="padding:6px 10px;border-bottom:1px solid #e3e8e6;' +
+        'font-size:13px;vertical-align:top">' + cell + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+
+  const head = ['Name', 'Event type', 'Date', 'Guests', 'Contact', 'Caller', 'Presenter', 'Source']
+    .map(function (label) {
+      return '<th style="padding:6px 10px;border-bottom:2px solid #1c3d5a;text-align:left;' +
+        'font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#4a5c57">' +
+        label + '</th>';
+    }).join('');
+
+  const html =
+    '<div style="font-family:Arial,Helvetica,sans-serif;color:#131c1a">' +
+    '<h2 style="margin:0 0 4px;font-size:18px">' + leads.length + ' new lead' +
+      (leads.length === 1 ? '' : 's') + '</h2>' +
+    '<p style="margin:0 0 16px;color:#5b6c67;font-size:13px">Since the last digest.</p>' +
+    '<p style="margin:0 0 4px;font-size:13px"><strong>By event type:</strong> ' +
+      escapeHtml_(describeTally_(byType)) + '</p>' +
+    '<p style="margin:0 0 4px;font-size:13px"><strong>By caller:</strong> ' +
+      escapeHtml_(describeTally_(byCaller)) + '</p>' +
+    '<p style="margin:0 0 16px;font-size:13px"><strong>By source:</strong> ' +
+      escapeHtml_(describeTally_(bySource)) + '</p>' +
+    '<table style="border-collapse:collapse;width:100%"><thead><tr>' + head +
+      '</tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<p style="margin:18px 0 0;font-size:13px"><a href="' + getSpreadsheet_().getUrl() +
+      '">Open the sales worksheet</a></p></div>';
+
+  return { subject: subject, text: textLines.join('\n'), html: html };
+}
+
+/** @return {!Object<string,number>} Counts keyed by whatever `key` returns. */
+function tally_(items, key) {
+  const counts = {};
+  items.forEach(function (item) {
+    const label = key(item) || '—';
+    counts[label] = (counts[label] || 0) + 1;
+  });
+  return counts;
+}
+
+/** @return {string} "Wedding 4, Corporate 3", biggest first. */
+function describeTally_(counts) {
+  return Object.keys(counts)
+    .sort(function (a, b) { return counts[b] - counts[a] || (a < b ? -1 : 1); })
+    .map(function (label) { return label + ' ' + counts[label]; })
+    .join(', ');
+}
+
+/** @return {string} Text safe to drop into the digest's HTML. */
+function escapeHtml_(text) {
+  return String(text === null || text === undefined ? '' : text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/&lt;br&gt;/g, '<br>');
+}
+
+/**
+ * Menu action: send a digest now, whatever the count is at.
+ * @return {string} What happened, for the alert.
+ */
+function sendDigestNow() {
+  const pending = pendingDigestRows_();
+  if (!pending) return 'No new leads since the last digest.';
+  if (!digestRecipients_().length) {
+    return 'Nobody to send it to. Add addresses to the "Digest Recipients" row of ' +
+      SHEETS.settings + ' first.';
+  }
+  sendDigest_(pending);
+  return 'Sent a digest of ' + pending.count + ' lead' + (pending.count === 1 ? '' : 's') + '.';
 }

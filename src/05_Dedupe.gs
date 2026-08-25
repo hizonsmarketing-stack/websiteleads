@@ -180,18 +180,24 @@ function rebuildIndex() {
     leadTabNames_().forEach(function (tabName) {
       const tab = getSpreadsheet_().getSheetByName(tabName);
       if (!tab || tab.getLastRow() < 2) return;
-      const map = headerMap_(tab);
+      // Resolved the same way the rest of the automation does, so a tab whose
+      // phone column is called "Contact number" is indexed like any other.
+      const bound = fieldColumns_(tab).byField;
+      if (!bound.leadId) return;
       const width = tab.getLastColumn();
       const values = tab.getRange(2, 1, tab.getLastRow() - 1, width).getValues();
+      const at = function (row, field) {
+        return bound[field] ? row[bound[field] - 1] : '';
+      };
 
       values.forEach(function (row, i) {
-        const leadId = cleanText_(row[map[squashKey_('Lead ID')] - 1]);
+        const leadId = cleanText_(at(row, 'leadId'));
         if (!leadId) return;
         leads++;
         const stub = {
-          emailKey: emailDedupeKey_(normalizeEmail_(row[map[squashKey_('Email')] - 1])),
-          phoneKey: normalizePhone_(row[map[squashKey_('Phone')] - 1]),
-          eventDate: cleanText_(row[map[squashKey_('Event Date')] - 1])
+          emailKey: emailDedupeKey_(normalizeEmail_(at(row, 'email'))),
+          phoneKey: normalizePhone_(at(row, 'phone')),
+          eventDate: cleanText_(at(row, 'eventDate'))
         };
         dedupeKeys_(stub).forEach(function (k) {
           if (seen[k.key]) return;

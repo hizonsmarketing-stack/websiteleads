@@ -101,29 +101,47 @@ Save (or `npm run push`). No redeployment is needed — alias changes take effec
 on the next import or submission. Run `npm test` first if you have the repo
 checked out.
 
-## How values are cleaned up
+## What is stored, and what is only used for matching
+
+**Contact details are stored exactly as the person typed them.** A rep dials
+what the guest actually gave you. The tidied forms below exist only to decide
+whether two submissions are the same person, and they live in the hidden
+`_Index` tab rather than in any column your team reads.
+
+| Field | In the sheet | Matched as |
+| --- | --- | --- |
+| Phone | `0917 123 4567` | `+639171234567` |
+| Phone | `(0917) 123-4567` | `+639171234567` — the same person |
+| Phone | `+65 9123 4567` | `+6591234567` |
+| Phone | `65 9123 4567` | `+6591234567` — still Singapore, still the same person |
+| Email | `Maria.Cruz@Gmail.COM` | `maria.cruz@gmail.com` |
+| Email | `maria+expo@gmail.com` | `maria@gmail.com` (toggle: *Dedupe Ignore Plus Tags*) |
+
+So two people who write the same number differently never become two leads, and
+nobody's number is quietly reformatted underneath them.
+
+The phone column is formatted as plain text, so a leading zero survives, a
+leading `+` is not read as a formula, and a long number is never shown as
+`6.39E+11`.
+
+Everything else is tidied on the way in, because it has no prior form to
+preserve — these values are being written for the first time:
 
 | Input | Stored as | Why |
 | --- | --- | --- |
-| `0917 123 4567`, `(0917) 123-4567`, `+63 917 123 4567`, `9171234567` | `+639171234567` | So the same person's number matches across channels |
-| `+1 415 555 0132`, `001 415 555 0132`, `1 415 555 0132` | `+14155550132` | Numbers with their own country code are left alone, with or without the `+` |
-| `+65 9123 4567` **and** `65 9123 4567` | `+6591234567` | Both are Singapore, so both dedupe to one person |
-| `  Maria.Cruz@Gmail.COM ` | `maria.cruz@gmail.com` | Case and spacing shouldn't create a second lead |
-| `maria+expo@gmail.com` | stored as typed; matched as `maria@gmail.com` | Tagged addresses are the same inbox (toggle: *Dedupe Ignore Plus Tags*) |
 | `MARIA CRUZ` | `Maria Cruz` | All-caps worksheets are common |
 | `12/14/2026`, `14/12/2026`, `2026-12-14` | `2026-12-14` | Month-first is assumed; day-first is used when the first number is over 12 |
-| `03/04/2027` in a historical tab | left as typed, and reported | Could be read either way; see [EXISTING_LEADS.md](EXISTING_LEADS.md#dates) |
 | `sometime next year` | kept as written | Better an odd date than a lost one |
 | `around 150 pax` | `150` |  |
 | `100 - 150` | `100-150` | Ranges are preserved |
 
-The original phone text is always kept in **Phone (Raw)**, and the original
-event-type wording in **Event Type (Raw)**.
+The original event-type wording is kept in **Event Type (Raw)**, so you can
+always see what the form actually said.
 
 ### Numbers from abroad
 
 Enquiries arrive from the diaspora and from guests planning an event back home,
-so a number is only treated as local when it can be. One written with a `+` or
+so a number is only *matched* as local when it can be. One written with a `+` or
 a `00` is taken as it stands. One written without either is read as
 international when it starts with a recognised calling code and is long enough
 to be a real number there — `65 9123 4567` is Singapore, not a Philippine
@@ -137,14 +155,13 @@ Local always wins first, so that number is never misread. The rule is:
    `Local Mobile Prefix`) and short enough to be local **is** local.
 2. Otherwise, a recognised calling code with at least seven digits after it and
    ten digits in total is international.
-3. Otherwise it is local, and the default country code is added.
+3. Otherwise it is local, and the default country code is used for matching.
 
 Calling codes live in `INTERNATIONAL_DIAL_CODES` in `src/00_Config.gs`. Add one
 if enquiries start arriving from somewhere it does not cover — a number from an
-unlisted country still works when the guest types the `+`.
-
-Phone columns are formatted as plain text, so the leading `+` survives instead
-of being read as a formula, and a long number is never shown as `6.39E+11`.
+unlisted country still matches correctly when the guest types the `+`. And
+because nothing is rewritten, the worst case of a miss is a duplicate row, not
+a wrong number.
 
 ## How event types are decided
 

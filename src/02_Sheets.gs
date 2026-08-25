@@ -18,7 +18,6 @@ const COLUMN_TO_FIELD = {
   'Last Name': 'lastName',
   'Email': 'email',
   'Phone': 'phone',
-  'Phone (Raw)': 'phoneRaw',
   'Company': 'company',
   'Event Date': 'eventDate',
   'Event Date (Raw)': 'eventDateRaw',
@@ -191,19 +190,19 @@ function ensureHeaders_(sheet, headers) {
 }
 
 /**
- * Forces the phone columns to plain text.
+ * Forces the phone column to plain text.
  *
- * Left as "automatic", Sheets reads a leading + as the start of a formula and
- * shows +639171234567 as the number 639171234567, and a long run of digits can
- * come out as 6.39E+11. Either way the number a rep dials is wrong, so the
- * columns holding one are formatted as text.
+ * Left as "automatic", Sheets drops the leading zero from 09171234567, reads a
+ * leading + as the start of a formula, and can show a long run of digits as
+ * 6.39E+11. Every one of those changes the number a rep dials, so the column
+ * holding it is formatted as text and the number survives exactly as written.
  *
  * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
  */
 function protectTextColumns_(sheet) {
   const bindings = fieldColumns_(sheet);
   const rows = Math.max(sheet.getMaxRows() - 1, 1);
-  ['phone', 'phoneRaw'].forEach(function (field) {
+  ['phone'].forEach(function (field) {
     const col = bindings.byField[field];
     if (col) sheet.getRange(2, col, rows, 1).setNumberFormat('@');
   });

@@ -17,6 +17,8 @@ function onOpen() {
     .addItem('Set webhook token…', 'menuSetWebhookToken')
     .addItem('Set Google Ads key…', 'menuSetGoogleAdsKey')
     .addSeparator()
+    .addItem('Send lead digest now', 'menuSendDigest')
+    .addSeparator()
     .addItem('Rebuild dedupe index', 'menuRebuildIndex')
     .addItem('Run self-test', 'menuRunTests')
     .addToUi();
@@ -83,6 +85,10 @@ function menuSetGoogleAdsKey() {
   if (value) props.setProperty('GOOGLE_ADS_KEY', value);
   else props.deleteProperty('GOOGLE_ADS_KEY');
   ui.alert('Saved', value ? 'Google Ads key set.' : 'Google Ads key cleared.', ui.ButtonSet.OK);
+}
+
+function menuSendDigest() {
+  SpreadsheetApp.getUi().alert('Lead digest', sendDigestNow(), SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function menuRebuildIndex() {
