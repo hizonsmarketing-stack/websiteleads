@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD };');
 
 const api = global.__api;
 
@@ -43,7 +43,14 @@ function cellOf(sheetName, row, header) {
   const s = tab(sheetName);
   const headers = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
   const squash = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '');
-  const col = headers.map(squash).indexOf(squash(header));
+  let col = headers.map(squash).indexOf(squash(header));
+  if (col === -1) {
+    // The sheet may serve this field under its own name — "Contact number"
+    // for Phone — exactly as the automation resolves it.
+    const field = api.COLUMN_TO_FIELD[header];
+    const bound = field ? api.fieldColumns_(s).byField[field] : 0;
+    if (bound) col = bound - 1;
+  }
   if (col === -1) throw new Error('no column "' + header + '" on ' + sheetName);
   return s.getRange(row, col + 1).getValue();
 }
@@ -392,6 +399,54 @@ api.resetCaches();
 const second = api.migrateExistingTab({ tabName: 'Iris' });
 check('re-running the migration is a no-op', second.migrated, 0);
 check('already-migrated rows are recognised', second.alreadyDone, 4);
+
+realLog('\n--- a caller tab that uses its own column names ---');
+silence(quiet);
+// A tab that has been in use for years does not use our column names. Its
+// columns still mean the same things, so they are used rather than duplicated.
+const nina = book.insertSheet('Nina');
+nina.getRange(1, 1, 1, 15).setValues([[
+  'Full name', 'Email', 'Contact number', 'CONTACT METHOD', 'Event', 'Event Date',
+  'CONSO DATE', 'Venue', 'Guests', 'PRESENTER', 'SALES NOTES', 'CLIENT NOTES',
+  'TIMESTAMP', 'SOURCE', 'SUB-SOURCE']]);
+tab('_Team').appendRow(['Nina', 'Nina', "Kid's Party", '', 'yes', 0, '', '']);
+api.resetCaches();
+
+// Naming the owner also proves a lead that arrives with one keeps it, rather
+// than going into the rotation.
+const ninaLead = post({ formName: 'Homepage Inquiry', name: 'Tess Ramos',
+  email: 'tess@example.com', 'Contact Number': '0917 444 1111',
+  'Type of Event': 'Kiddie Party', 'Number of Guests': '60',
+  'Preferred Venue': 'Pasig', 'Assigned To': 'Nina',
+  'Message': 'Asking for a quote' },
+  { source: 'website', form: 'Homepage Inquiry' });
+check('a lead naming its owner goes to them', ninaLead.tab, 'Nina');
+
+const ninaHeaders = tab('Nina').getRange(1, 1, 1, tab('Nina').getLastColumn()).getValues()[0];
+function hasColumn(name) {
+  const squash = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return ninaHeaders.map(squash).indexOf(squash(name)) > -1;
+}
+check('no second phone column beside "Contact number"', hasColumn('Phone'), 'false');
+check('no second event type column beside "Event"', hasColumn('Event Type'), 'false');
+check('no second guest column beside "Guests"', hasColumn('Guest Count'), 'false');
+check('no second venue column beside "Venue"', hasColumn('Venue / Location'), 'false');
+check('no second timestamp column beside "TIMESTAMP"', hasColumn('Received At'), 'false');
+check('columns it genuinely lacks are still added', hasColumn('Lead ID'), 'true');
+
+check('their name column is filled', cellOf('Nina', 2, 'Full name'), 'Tess Ramos');
+check('their phone column is filled, normalised',
+  cellOf('Nina', 2, 'Contact number'), '+639174441111');
+check('their event column is filled', cellOf('Nina', 2, 'Event'), "Kid's Party");
+check('their guest column is filled', cellOf('Nina', 2, 'Guests'), '60');
+check('their venue column is filled', cellOf('Nina', 2, 'Venue'), 'Pasig');
+check('their source column is filled', cellOf('Nina', 2, 'SOURCE'), 'Website');
+check('their sub-source column is filled', cellOf('Nina', 2, 'SUB-SOURCE'), 'Homepage Inquiry');
+check('their presenter column is filled', cellOf('Nina', 2, 'PRESENTER'), 'AJ');
+check('their timestamp column is filled',
+  String(cellOf('Nina', 2, 'TIMESTAMP')).length > 0, 'true');
+check('their notes columns are left alone', cellOf('Nina', 2, 'SALES NOTES'), '');
+check('the message goes to its own column', cellOf('Nina', 2, 'Message'), 'Asking for a quote');
 
 realLog('\n--- auth and payload shapes ---');
 silence(quiet);

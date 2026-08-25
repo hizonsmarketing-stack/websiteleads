@@ -22,10 +22,30 @@ your own legacy columns are left untouched — if you have a "Contact" column,
 it keeps its original contents.
 
 Every other column is filled **only where it is empty**. A row with a Status of
-`Quoted` keeps it; a row with no status gets `New`. If your tab already has a
-column the automation also uses — `Email`, `Venue`, `Event Date`, `SOURCE`,
-`SUB-SOURCE` — that column is reused rather than duplicated, and the values in
-it win over anything chosen in the dialog.
+`Quoted` keeps it; a row with no status gets `New`.
+
+### Your columns are used, not duplicated
+
+A tab that has been in use for years doesn't use the automation's column names,
+and it doesn't have to. Any column that means the same thing is used as it is:
+
+| Your column | Used as |
+| --- | --- |
+| `Contact number` | Phone |
+| `Event` | Event Type |
+| `Guests` | Guest Count |
+| `Venue` | Venue / Location |
+| `TIMESTAMP` | Received At |
+| `Full name`, `Email`, `Event Date`, `SOURCE`, `SUB-SOURCE`, `PRESENTER` | themselves |
+
+No second column appears beside any of these, and new leads arriving from the
+website fill the columns your team already reads. Only fields your tab genuinely
+lacks — Lead ID, Message, Status, Touches and so on — are added on the right.
+
+Notes columns are the exception: a tab can have several (`SALES NOTES`,
+`CLIENT NOTES`, `CONTACT METHOD`), so writing to one of them would overwrite
+another. They keep their historical values, and a new **Message** column carries
+what arrives from here on.
 
 ### Presenters
 

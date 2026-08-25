@@ -572,6 +572,93 @@ const COLUMN_TO_FIELD = {
 };
 
 /**
+ * Canonical fields an existing column may be bound to by its alias.
+ *
+ * Message is deliberately absent: a tab can carry several notes columns
+ * (SALES NOTES, CLIENT NOTES, CONTACT METHOD), and writing the composed
+ * message into whichever came first would overwrite one of them.
+ */
+const ALIAS_BINDABLE_FIELDS = {
+  fullName: true, firstName: true, lastName: true, email: true, phone: true,
+  company: true, eventType: true, eventDate: true, guestCount: true,
+  venue: true, budget: true, campaign: true, presenter: true,
+  assignedTo: true, status: true, receivedAt: true, source: true, subSource: true
+};
+
+/**
+ * Where the alias dictionary's name for a field differs from the property the
+ * lead record carries it in. The dictionary answers "what does this header
+ * mean"; the lead record is what gets written. Without this translation a
+ * bound column would read a property that does not exist and stay blank.
+ */
+const FIELD_TO_LEAD_PROPERTY = {
+  eventType: 'eventTypeLabel'
+};
+
+let FIELD_COLUMNS_CACHE_ = {};
+
+/**
+ * Works out which column on a sheet serves each canonical field.
+ *
+ * A tab that has been in use for years does not use our column names. It says
+ * "Contact number", not "Phone"; "Guests", not "Guest Count". Those columns
+ * mean the same thing, so they are used as they are rather than left blank
+ * beside a second column that duplicates them.
+ *
+ * Resolution runs in two passes so it is predictable: a column named exactly
+ * like ours claims that field first, wherever it sits; then aliases fill what
+ * is left, leftmost column winning.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @return {{byField: !Object<string,number>, byColumn: !Array<string>,
+ *           headers: !Array<string>}}
+ */
+function fieldColumns_(sheet) {
+  const name = sheet.getName();
+  const width = Math.max(sheet.getLastColumn(), 1);
+  const cached = FIELD_COLUMNS_CACHE_[name];
+  if (cached && cached.width === width) return cached.value;
+
+  const headers = sheet.getRange(1, 1, 1, width).getValues()[0]
+    .map(function (h) { return cleanText_(h); });
+
+  const canonical = {};
+  Object.keys(COLUMN_TO_FIELD).forEach(function (header) {
+    canonical[squashKey_(header)] = COLUMN_TO_FIELD[header];
+  });
+
+  const byField = {};
+  const byColumn = [];
+
+  headers.forEach(function (header, i) {
+    const field = canonical[squashKey_(header)];
+    if (field && byField[field] === undefined) {
+      byField[field] = i + 1;
+      byColumn[i] = field;
+    }
+  });
+
+  headers.forEach(function (header, i) {
+    if (byColumn[i] || !header || isNoiseKey_(header)) return;
+    const match = matchField_(header);
+    if (!match.field || ALIAS_BINDABLE_FIELDS[match.field] !== true) return;
+    const field = FIELD_TO_LEAD_PROPERTY[match.field] || match.field;
+    if (byField[field] !== undefined) return;
+    byField[field] = i + 1;
+    byColumn[i] = field;
+  });
+
+  const value = { byField: byField, byColumn: byColumn, headers: headers };
+  FIELD_COLUMNS_CACHE_[name] = { width: width, value: value };
+  return value;
+}
+
+/** Forgets the cached bindings for a sheet whose header row just changed. */
+function forgetFieldColumns_(sheetName) {
+  delete FIELD_COLUMNS_CACHE_[sheetName];
+}
+
+/**
  * Returns a sheet, creating it with the given headers when absent. When the
  * sheet already exists, any header in `headers` that is missing is appended to
  * the right — existing columns and their data are never moved or deleted.
@@ -586,6 +673,7 @@ function getOrCreateSheet_(name, headers) {
     sheet = ss.insertSheet(name);
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     formatHeaderRow_(sheet, headers.length);
+    forgetFieldColumns_(name);
     return sheet;
   }
   ensureHeaders_(sheet, headers);
@@ -605,12 +693,21 @@ function ensureHeaders_(sheet, headers) {
   if (existing.join('') === '') {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     formatHeaderRow_(sheet, headers.length);
+    forgetFieldColumns_(sheet.getName());
     return;
   }
 
+  const bindings = fieldColumns_(sheet);
   const have = {};
   existing.forEach(function (h) { if (h) have[squashKey_(h)] = true; });
-  const missing = headers.filter(function (h) { return !have[squashKey_(h)]; });
+
+  const missing = headers.filter(function (h) {
+    if (have[squashKey_(h)]) return false;
+    // A column already doing this job — "Contact number" for Phone — means we
+    // do not add a second one beside it.
+    const field = COLUMN_TO_FIELD[h];
+    return !(field && bindings.byField[field] !== undefined);
+  });
   if (!missing.length) return;
 
   // Append after the last populated column — never over a gap in the header row.
@@ -621,6 +718,7 @@ function ensureHeaders_(sheet, headers) {
   }
   sheet.getRange(1, startCol, 1, missing.length).setValues([missing]);
   formatHeaderRow_(sheet, needed);
+  forgetFieldColumns_(sheet.getName());
 }
 
 /** Bolds, freezes and sizes the header row. */
@@ -657,10 +755,9 @@ function headerMap_(sheet) {
  * @return {!Array<*>}
  */
 function leadToRow_(sheet, lead) {
-  const width = Math.max(sheet.getLastColumn(), 1);
-  const headers = sheet.getRange(1, 1, 1, width).getValues()[0];
-  return headers.map(function (header) {
-    const field = COLUMN_TO_FIELD[cleanText_(header)];
+  const bindings = fieldColumns_(sheet);
+  return bindings.headers.map(function (header, i) {
+    const field = bindings.byColumn[i];
     if (!field) return '';
     const value = lead[field];
     return (value === undefined || value === null) ? '' : value;
@@ -689,7 +786,7 @@ function appendLead_(sheet, lead) {
  * @return {number} 1-based row, or 0 when not found.
  */
 function findLeadRow_(sheet, leadId, hintRow) {
-  const idCol = headerMap_(sheet)[squashKey_('Lead ID')];
+  const idCol = fieldColumns_(sheet).byField.leadId;
   if (!idCol) return 0;
 
   if (hintRow && hintRow > 1 && hintRow <= sheet.getLastRow()) {
@@ -712,9 +809,11 @@ function findLeadRow_(sheet, leadId, hintRow) {
  * @param {!Object<string,*>} updates Keyed by column header.
  */
 function updateRowCells_(sheet, row, updates) {
+  const bindings = fieldColumns_(sheet);
   const map = headerMap_(sheet);
   Object.keys(updates).forEach(function (header) {
-    const col = map[squashKey_(header)];
+    const field = COLUMN_TO_FIELD[header];
+    const col = (field && bindings.byField[field]) || map[squashKey_(header)];
     if (col) sheet.getRange(row, col).setValue(updates[header]);
   });
 }
@@ -726,12 +825,10 @@ function updateRowCells_(sheet, row, updates) {
  * @return {!Object}
  */
 function readLeadRow_(sheet, row) {
-  const width = Math.max(sheet.getLastColumn(), 1);
-  const headers = sheet.getRange(1, 1, 1, width).getValues()[0];
-  const values = sheet.getRange(row, 1, 1, width).getValues()[0];
+  const bindings = fieldColumns_(sheet);
+  const values = sheet.getRange(row, 1, 1, bindings.headers.length).getValues()[0];
   const lead = {};
-  headers.forEach(function (header, i) {
-    const field = COLUMN_TO_FIELD[cleanText_(header)];
+  bindings.byColumn.forEach(function (field, i) {
     if (field) lead[field] = values[i];
   });
   return lead;

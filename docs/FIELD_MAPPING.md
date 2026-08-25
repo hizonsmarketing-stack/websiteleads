@@ -66,6 +66,23 @@ all.
 
 The full lists are `FIELD_ALIASES` in `src/00_Config.gs`.
 
+## Writing back into your own columns
+
+The same matching decides where values are *written*, not just where they are
+read from. A tab whose phone column is called `Contact number` keeps using it —
+no `Phone` column appears beside it — and new leads fill it normalised.
+
+Resolution runs in two passes so it is predictable:
+
+1. A column named exactly like a canonical one claims that field, wherever it
+   sits in the sheet.
+2. Aliases fill what is left, the leftmost column winning.
+
+Free-text notes are deliberately excluded from the second pass. A tab often has
+several notes columns, and binding the composed message to whichever came first
+would overwrite one of them, so notes always go to a **Message** column of their
+own.
+
 ## Teaching it a new column name
 
 When a preview shows an important column as `(notes)`, add the header to the
