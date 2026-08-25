@@ -38,6 +38,7 @@ function setupWorkbook() {
 
     seedSettings_();
     TEAM_CACHE_ = null;
+    const rosterTabs = createRosterTabs_();
     buildDashboard_();
     hideInternalTabs_();
     SETTINGS_CACHE_ = null;
@@ -45,6 +46,9 @@ function setupWorkbook() {
     let message = created.length
       ? 'Setup complete. Created: ' + created.join(', ') + '.'
       : 'Setup complete. All tabs were already in place and have been checked.';
+    if (rosterTabs.length) {
+      message += '\n\nCreated a tab for ' + rosterTabs.join(', ') + '.';
+    }
     if (detected.length) {
       message += '\n\nFound ' + detected.length + ' existing tab' +
         (detected.length === 1 ? '' : 's') + ' that could be salespeople:\n  ' +
@@ -117,6 +121,27 @@ function seedSettings_() {
   sheet.setColumnWidth(2, 220);
   sheet.setColumnWidth(3, 520);
   sheet.getRange(1, 3, sheet.getMaxRows(), 1).setFontColor('#666666');
+}
+
+/**
+ * Gives everyone active on the roster a tab to work in.
+ *
+ * On a spreadsheet that starts empty there is nothing for setup to detect, so
+ * the roster is typed by hand and this turns it into tabs. Existing tabs are
+ * left exactly as they are — no reformatting of a sheet a team already uses.
+ *
+ * @return {!Array<string>} Tab names newly created.
+ */
+function createRosterTabs_() {
+  const created = [];
+  loadTeam_().forEach(function (member) {
+    if (!member.active || !member.tab) return;
+    if (getSpreadsheet_().getSheetByName(member.tab)) return;
+    styleLeadSheet_(getOrCreateSheet_(member.tab, LEAD_COLUMNS));
+    created.push(member.tab);
+  });
+  if (created.length) log_('INFO', 'setup', 'Created roster tabs', { tabs: created });
+  return created;
 }
 
 /**

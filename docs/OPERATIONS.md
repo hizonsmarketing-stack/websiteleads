@@ -144,7 +144,13 @@ All in the `_Settings` tab. Changes take effect on the next submission.
 
 Setup pre-fills this with every tab in the workbook that the automation doesn't
 own, inactive and with no event types, so nothing routes to a person until
-you've said who covers what. When you've filled it in, run **Leads → Run
+you've said who covers what. On a spreadsheet that starts empty there is
+nothing to detect: type the roster instead, and running **Setup / repair tabs**
+again gives everyone marked active a tab. Tabs that already exist are never
+restyled — a team's own layout is left alone.
+
+Adding a salesperson later is the same move: a row on `_Team`, then
+**Setup / repair tabs**. When you've filled it in, run **Leads → Run
 self-test** — it reads the roster back and tells you if anything is misspelled
 or uncovered.
 

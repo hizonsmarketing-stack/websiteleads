@@ -78,6 +78,12 @@ server to host and nothing to pay for.
 | `_Sources` | The source / sub-source registry — where new forms show up |
 | `_Index`, `_Raw`, `_Log` | Machinery: dedupe keys, raw payload archive, run log (hidden) |
 
+**Installing onto a spreadsheet that already holds leads?** Nothing is deleted,
+no row moves, and no contact detail is rewritten — the specifics, verified, are
+in [docs/EXISTING_LEADS.md](docs/EXISTING_LEADS.md). Making a copy of the
+worksheet first (File → Make a copy) turns the first run into a rehearsal you
+can throw away.
+
 ## Getting started
 
 1. **[docs/SETUP.md](docs/SETUP.md)** — install the script on the sales

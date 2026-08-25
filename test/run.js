@@ -549,6 +549,20 @@ check('covering all 25', /^25 new leads/.test(digests()[digests().length - 1].su
 setSetting('Digest Every N Leads', '0');
 api.resetCaches();
 
+realLog('\n--- starting from a blank spreadsheet ---');
+silence(quiet);
+// Nothing to detect, so the roster is typed by hand and setup turns it into
+// tabs. An existing tab is never restyled.
+tab('_Team').appendRow(['Dana', 'Dana', 'Wedding', '', 'yes', 0, '', '']);
+tab('_Team').appendRow(['Resting Rey', 'Resting Rey', 'Wedding', '', 'no', 0, '', '']);
+api.resetCaches();
+check('the tab does not exist yet', !!tab('Dana'), 'false');
+api.setupWorkbook();
+check('setup creates a tab for an active salesperson', !!tab('Dana'), 'true');
+check('with the lead columns ready', tab('Dana').getRange(1, 2).getValue(), 'Lead ID');
+check('and none for someone not taking leads', !!tab('Resting Rey'), 'false');
+api.resetCaches();
+
 realLog('\n--- auth and payload shapes ---');
 silence(quiet);
 PropertiesService.getScriptProperties().setProperty('WEBHOOK_TOKEN', 's3cret');

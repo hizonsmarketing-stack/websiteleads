@@ -74,7 +74,9 @@ know who covers what.
 
 1. **Leads → Open team roster** (or open the `_Team` tab).
 2. Setup has already listed every tab that isn't one of its own — one row per
-   salesperson. For each:
+   salesperson. **Starting from a blank spreadsheet?** There is nothing to
+   detect, so type a row per person yourself; running *Setup / repair tabs*
+   again then creates a tab for everyone marked active. For each:
    - **Event Types** — comma-separated, spelled exactly as the labels:
      `Wedding`, `Debut`, `Kid's Party`, `Private Event`, `Corporate`.
      Someone covering three of them gets all three, comma separated. `*` means
