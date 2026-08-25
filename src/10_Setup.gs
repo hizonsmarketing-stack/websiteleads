@@ -72,7 +72,8 @@ function seedSettings_() {
     'Promote Unassigned Leads': 'yes = move a lead out of Unassigned once a later form reveals the event type.',
     'Append Duplicate Notes': 'yes = add the repeat inquiry text to the original lead’s Message.',
     'Accept Test Leads': 'yes = store Google Ads test leads instead of only acknowledging them.',
-    'Round Robin Assignment': 'yes = fill Assigned To from the Reps list for each tab.',
+    'Round Robin Assignment': 'yes = share leads across the _Team roster.',
+    'Presenters': 'The repeating sequence written down the Presenter column, in order. Comma separated.',
     'Notify On New Lead': 'yes = email the addresses in the Notify rows below.',
     'Raw Payload Retention (rows)': 'Oldest rows in _Raw are trimmed beyond this count.',
     'Log Retention (rows)': 'Oldest rows in _Log are trimmed beyond this count.'
@@ -163,7 +164,7 @@ function seedTeamTab_() {
 function styleLeadSheet_(sheet) {
   const map = headerMap_(sheet);
   const widths = {
-    'Lead ID': 150, 'Received At': 140, 'Source': 100, 'Sub-Source': 190,
+    'Presenter': 110, 'Lead ID': 150, 'Received At': 140, 'Source': 100, 'Sub-Source': 190,
     'Event Type': 150, 'Event Type (Raw)': 150, 'Full Name': 180,
     'First Name': 120, 'Last Name': 130, 'Email': 230, 'Phone': 140,
     'Phone (Raw)': 130, 'Company': 170, 'Event Date': 110, 'Event Date (Raw)': 120, 'Guest Count': 100,

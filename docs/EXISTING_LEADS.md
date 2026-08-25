@@ -27,6 +27,13 @@ column the automation also uses — `Email`, `Venue`, `Event Date`, `SOURCE`,
 `SUB-SOURCE` — that column is reused rather than duplicated, and the values in
 it win over anything chosen in the dialog.
 
+### Presenters
+
+A tab that already has a **PRESENTER** column keeps every value in it — those
+were real assignments and the migration does not second-guess them. The
+repeating sequence only governs leads that arrive from here on, continuing down
+the tab from whatever row the new ones land on.
+
 ### Dates
 
 Several people have typed into these columns over the years, so the import

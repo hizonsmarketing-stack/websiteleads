@@ -83,8 +83,11 @@ know who covers what.
    - **Active** — `yes` for anyone currently taking leads.
 3. Leave **Assigned Count** and **Last Assigned At** alone — that's the
    rotation's memory.
+4. Check the `Presenters` row in `_Settings`. It ships as
+   `AJ, Pam, Mhay, Vanessa` — the repeating sequence written down the first
+   column of every caller's tab. The order there is the order of the rotation.
 
-4. **Leads → Run self-test.** It reads the roster back and reports who covers
+5. **Leads → Run self-test.** It reads the roster back and reports who covers
    what, or names anything wrong with it — a misspelled event type is otherwise
    invisible, and silently drops that person from the rotation.
 

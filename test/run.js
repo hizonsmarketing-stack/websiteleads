@@ -235,6 +235,10 @@ check('corporate lead goes to a person tab', c1.tab, 'Gina');
 check('second corporate lead goes to the other rep', c2.tab, 'Hector');
 check('third comes back around', c3.tab, 'Gina');
 check('assignee stamped on the row', cellOf('Gina', 2, 'Assigned To'), 'Gina');
+check('presenter column leads the row', tab('Gina').getRange(1, 1).getValue(), 'Presenter');
+check('first row of a tab goes to the first presenter', cellOf('Gina', 2, 'Presenter'), 'AJ');
+check('the next row of that tab goes to the second', cellOf('Gina', 3, 'Presenter'), 'Pam');
+check('each tab runs its own sequence', cellOf('Hector', 2, 'Presenter'), 'AJ');
 
 const s1 = inquiry('Soc One', 's1@example.com', '0917 111 0001', 'Debut');
 const s2 = inquiry('Soc Two', 's2@example.com', '0917 111 0002', 'Church Wedding');
@@ -291,6 +295,8 @@ const revealed = post({ formName: 'Corporate Events Inquiry', name: 'Later Revea
   { source: 'website', form: 'Corporate Events Inquiry' });
 check('promotion hands it to a corporate rep', ['Gina', 'Hector'].indexOf(revealed.tab) > -1, 'true');
 check('promoted row carries the owner', cellOf(revealed.tab, 3, 'Assigned To'), revealed.tab);
+check('a promoted lead takes its new row\'s presenter',
+  cellOf(revealed.tab, 3, 'Presenter'), 'Pam');
 
 realLog('\n--- migrating a salesperson tab that already had leads ---');
 silence(quiet);
@@ -301,14 +307,14 @@ const legacyData = [
    'CONSO DATE', 'Venue', 'Guests', 'PRESENTER', 'SALES NOTES', 'CLIENT NOTES',
    'TIMESTAMP', 'SOURCE', 'SUB-SOURCE'],
   ['Rosa Lim', 'rosa@example.com', '0917 999 0001', 'Viber please', 'Debut', '03/15/2027',
-   '2026-01-04', 'Quezon City', '120', 'Iris', 'Called twice, no answer',
+   '2026-01-04', 'Quezon City', '120', 'Mhay', 'Called twice, no answer',
    'Wants a garden setup', '2026-05-02', 'Website', 'Homepage Inquiry'],
   ['Ana Reyes', '', '0917 123 4567', 'Call', 'Corporate', '',
-   '2026-01-05', 'Makati', '80', 'Iris', '', '', '2026-04-11', 'Website', 'Contact Us'],
+   '2026-01-05', 'Makati', '80', 'Vanessa', '', '', '2026-04-11', 'Website', 'Contact Us'],
   ['Ben Cruz', 'ben@example.com', '0918 999 0002', 'Text', 'Wedding', '06/06/2027',
-   '', 'Tagaytay', '200', 'Iris', '', '', '2026-06-01', 'Exhibit', 'Bridal Fair 2026'],
+   '', 'Tagaytay', '200', 'AJ', '', '', '2026-06-01', 'Exhibit', 'Bridal Fair 2026'],
   ['Cely Ong', 'cely@example.com', '0917 777 0003', 'Call', 'Kiddie Party', '03/04/2027',
-   '', 'Pasig', '40', 'Iris', '', '', '2026-07-04', 'Website', 'Contact Us']
+   '', 'Pasig', '40', 'Pam', '', '', '2026-07-04', 'Website', 'Contact Us']
 ];
 legacy.getRange(1, 1, legacyData.length, legacyData[0].length).setValues(legacyData);
 tab('_Team').appendRow(['Iris', 'Iris', socials, '', 'yes', 0, '', '']);
@@ -320,7 +326,7 @@ check('dry run writes nothing', tab('Iris').getLastColumn(), 15);
 check('dry run spots the cross-tab duplicate', dry.duplicatesFound, 1);
 check('preview shows contact method as free text', dry.mapping['CONTACT METHOD'], 'Message');
 check('preview shows conso date as ignored', dry.mapping['CONSO DATE'], '(ignored)');
-check('preview shows presenter going to the notes', dry.mapping['PRESENTER'], '(notes)');
+check('preview reads their presenter column', dry.mapping['PRESENTER'], 'Presenter');
 
 const migrated = api.migrateExistingTab({ tabName: 'Iris', subSource: 'Pre-automation' });
 check('rows migrated', migrated.migrated, 4);
@@ -354,7 +360,10 @@ const rosaNotes = String(cellOf('Iris', 2, 'Message'));
 check('sales notes kept', /Sales Notes: Called twice, no answer/.test(rosaNotes), 'true');
 check('client notes kept alongside them', /Client Notes: Wants a garden setup/.test(rosaNotes), 'true');
 check('contact method landed in the notes', /Contact Method: Viber please/.test(rosaNotes), 'true');
-check('presenter landed in the notes', /Presenter: Iris/.test(rosaNotes), 'true');
+check('presenter is a column, not a note', /Presenter:/.test(rosaNotes), 'false');
+check('their existing presenter is kept as they had it',
+  cellOf('Iris', 2, 'Presenter'), 'Mhay');
+check('and the row below keeps its own', cellOf('Iris', 3, 'Presenter'), 'Vanessa');
 check('labels are not shouted back at the rep', /SALES NOTES/.test(rosaNotes), 'false');
 check('conso date is nowhere in the notes', /2026-01-04/.test(rosaNotes), 'false');
 

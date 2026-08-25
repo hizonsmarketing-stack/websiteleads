@@ -231,6 +231,7 @@ function buildLead_(input) {
   const receivedAt = input.receivedAt || nowStamp_();
 
   return {
+    presenter: cleanText_(fields.presenter),
     leadId: makeLeadId_(),
     receivedAt: receivedAt,
     source: subSourceInfo.source,

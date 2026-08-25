@@ -112,7 +112,8 @@ function runSelfTest() {
     'SALES NOTES': 'Called twice, no answer',
     'CLIENT NOTES': 'Wants a garden setup',
     'CONSO DATE': '2026-01-04',
-    'PRESENTER': 'Iris'
+    'PRESENTER': 'Pam',
+    'BOOTH STAFF': 'Iris'
   });
   check('notes: contact method is free text, not a phone', matchField_('CONTACT METHOD').field, 'message');
   check('notes: phone column still wins the phone slot', notesRecord.fields.phone, '0917 123 4567');
@@ -123,8 +124,19 @@ function runSelfTest() {
     notesRecord.messages.some(function (m) { return m.value === 'Wants a garden setup'; }), 'true');
   check('notes: labelled by their own headers', notesRecord.messages[0].label.length > 0, 'true');
   check('conso date is dropped, not filed as an event date', isNoiseKey_('CONSO DATE'), 'true');
+  check('presenter gets its own column, not the notes', notesRecord.fields.presenter, 'Pam');
   check('unknown column still reaches the notes',
     notesRecord.extras.some(function (e) { return e.value === 'Iris'; }), 'true');
+
+  // --- The presenter sequence ----------------------------------------------
+  check('presenter: first row', presenterForRow_(2), 'AJ');
+  check('presenter: second row', presenterForRow_(3), 'Pam');
+  check('presenter: third row', presenterForRow_(4), 'Mhay');
+  check('presenter: fourth row', presenterForRow_(5), 'Vanessa');
+  check('presenter: sequence repeats', presenterForRow_(6), 'AJ');
+  check('presenter: still repeating far down', presenterForRow_(42), 'AJ');
+  check('presenter: and off the cycle boundary', presenterForRow_(45), 'Vanessa');
+  check('presenter: header row has none', presenterForRow_(1), '');
 
   const twoPhones = mapRecord_({
     'Contact No.': '0917 111 1111',

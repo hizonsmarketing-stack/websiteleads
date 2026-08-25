@@ -20,6 +20,11 @@ function routeLead_(lead) {
   const teamSheet = getOrCreateSheet_(tabName, LEAD_COLUMNS);
 
   if (assignment && !lead.assignedTo) lead.assignedTo = assignment.name;
+  // The row this is about to land on decides the presenter. Reading it before
+  // the append is safe: the whole intake runs under the document lock.
+  if (assignment && !lead.presenter) {
+    lead.presenter = presenterForRow_(teamSheet.getLastRow() + 1);
+  }
 
   const row = appendLead_(teamSheet, lead);
   appendLead_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS), lead);
@@ -115,6 +120,29 @@ function pickAssignee_(lead) {
   return candidates[0];
 }
 
+/**
+ * The presenter a row belongs to.
+ *
+ * The Presenter column runs a fixed repeating sequence down each caller's tab —
+ * row 2 to the first presenter, row 3 to the second, and back to the top after
+ * the last. The caller works the lead and hands it to whoever their row names,
+ * so the split is decided by the sheet rather than negotiated each time.
+ *
+ * Because it is derived from the row number, the sequence stays intact however
+ * many leads arrive, and a row keeps its presenter when the tab is sorted.
+ *
+ * @param {number} row 1-based sheet row; row 1 is the header.
+ * @return {string} A presenter's name, or '' when none are configured.
+ */
+function presenterForRow_(row) {
+  const presenters = String(setting_('Presenters', ''))
+    .split(',')
+    .map(function (name) { return name.trim(); })
+    .filter(String);
+  if (!presenters.length || row < 2) return '';
+  return presenters[(row - 2) % presenters.length];
+}
+
 /** @return {?Object} The roster entry for a name, or null. */
 function namedMember_(name) {
   const wanted = squashKey_(name);
@@ -164,6 +192,7 @@ function notifyTeam_(lead, tabName, assignment) {
 
   const lines = [
     'Event type: ' + lead.eventTypeLabel,
+    lead.presenter ? 'Presenter: ' + lead.presenter : '',
     'Name: ' + (lead.fullName || '(not given)'),
     'Email: ' + (lead.email || '(not given)'),
     'Phone: ' + (lead.phone || lead.phoneRaw || '(not given)'),
@@ -340,14 +369,17 @@ function maybePromote_(sheet, row, original, incoming, leadId) {
   const targetTab = (assignment && assignment.tab) || incoming.eventTypeTab;
   if (assignment && !cleanText_(moved.assignedTo)) moved.assignedTo = assignment.name;
 
-  const newRow = appendLead_(getOrCreateSheet_(targetTab, LEAD_COLUMNS), moved);
+  const targetSheet = getOrCreateSheet_(targetTab, LEAD_COLUMNS);
+  if (assignment) moved.presenter = presenterForRow_(targetSheet.getLastRow() + 1);
+  const newRow = appendLead_(targetSheet, moved);
   sheet.deleteRow(row);
   shiftIndexRowsAfterDelete_(sheet.getName(), row);
   moveIndexEntries_(leadId, targetTab, newRow);
   syncAllLeadsRow_(leadId, {
     'Event Type': incoming.eventTypeLabel,
     'Event Type (Raw)': incoming.eventTypeRaw || '',
-    'Assigned To': moved.assignedTo
+    'Assigned To': moved.assignedTo,
+    'Presenter': moved.presenter || ''
   });
   if (assignment) recordAssignment_(assignment);
   notifyTeam_(moved, targetTab, assignment);

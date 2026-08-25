@@ -45,8 +45,14 @@ const SHEETS = {
   raw: '_Raw'
 };
 
-/** Canonical lead record, in column order. Team tabs and All Leads share it. */
+/**
+ * Canonical lead record, in column order. Team tabs and All Leads share it.
+ *
+ * Presenter leads the row deliberately: a tab belongs to one caller, and the
+ * first thing they need to see on a lead is which presenter it goes to.
+ */
 const LEAD_COLUMNS = [
+  'Presenter',
   'Lead ID',
   'Received At',
   'Source',
@@ -195,6 +201,7 @@ const DEFAULT_SETTINGS = {
   'Append Duplicate Notes': 'yes',
   'Accept Test Leads': 'no',
   'Round Robin Assignment': 'yes',
+  'Presenters': 'AJ, Pam, Mhay, Vanessa',
   'Notify On New Lead': 'no',
   'Raw Payload Retention (rows)': '2000',
   'Log Retention (rows)': '5000'
@@ -254,6 +261,10 @@ const FIELD_ALIASES = {
   budget: [
     'budget', 'budget range', 'estimated budget', 'price range',
     'budget per head', 'budget per pax', 'target budget'
+  ],
+  presenter: [
+    'presenter', 'presentor', 'presented by', 'assigned presenter',
+    'presenter assigned', 'endorsed to'
   ],
   message: [
     'message', 'notes', 'note', 'remarks', 'comments', 'comment', 'inquiry',
@@ -527,6 +538,7 @@ function leafKey_(path) {
 
 /** Column header -> lead object property. */
 const COLUMN_TO_FIELD = {
+  'Presenter': 'presenter',
   'Lead ID': 'leadId',
   'Received At': 'receivedAt',
   'Source': 'source',
@@ -1244,6 +1256,7 @@ function buildLead_(input) {
   const receivedAt = input.receivedAt || nowStamp_();
 
   return {
+    presenter: cleanText_(fields.presenter),
     leadId: makeLeadId_(),
     receivedAt: receivedAt,
     source: subSourceInfo.source,
@@ -1591,6 +1604,11 @@ function routeLead_(lead) {
   const teamSheet = getOrCreateSheet_(tabName, LEAD_COLUMNS);
 
   if (assignment && !lead.assignedTo) lead.assignedTo = assignment.name;
+  // The row this is about to land on decides the presenter. Reading it before
+  // the append is safe: the whole intake runs under the document lock.
+  if (assignment && !lead.presenter) {
+    lead.presenter = presenterForRow_(teamSheet.getLastRow() + 1);
+  }
 
   const row = appendLead_(teamSheet, lead);
   appendLead_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS), lead);
@@ -1686,6 +1704,29 @@ function pickAssignee_(lead) {
   return candidates[0];
 }
 
+/**
+ * The presenter a row belongs to.
+ *
+ * The Presenter column runs a fixed repeating sequence down each caller's tab —
+ * row 2 to the first presenter, row 3 to the second, and back to the top after
+ * the last. The caller works the lead and hands it to whoever their row names,
+ * so the split is decided by the sheet rather than negotiated each time.
+ *
+ * Because it is derived from the row number, the sequence stays intact however
+ * many leads arrive, and a row keeps its presenter when the tab is sorted.
+ *
+ * @param {number} row 1-based sheet row; row 1 is the header.
+ * @return {string} A presenter's name, or '' when none are configured.
+ */
+function presenterForRow_(row) {
+  const presenters = String(setting_('Presenters', ''))
+    .split(',')
+    .map(function (name) { return name.trim(); })
+    .filter(String);
+  if (!presenters.length || row < 2) return '';
+  return presenters[(row - 2) % presenters.length];
+}
+
 /** @return {?Object} The roster entry for a name, or null. */
 function namedMember_(name) {
   const wanted = squashKey_(name);
@@ -1735,6 +1776,7 @@ function notifyTeam_(lead, tabName, assignment) {
 
   const lines = [
     'Event type: ' + lead.eventTypeLabel,
+    lead.presenter ? 'Presenter: ' + lead.presenter : '',
     'Name: ' + (lead.fullName || '(not given)'),
     'Email: ' + (lead.email || '(not given)'),
     'Phone: ' + (lead.phone || lead.phoneRaw || '(not given)'),
@@ -1911,14 +1953,17 @@ function maybePromote_(sheet, row, original, incoming, leadId) {
   const targetTab = (assignment && assignment.tab) || incoming.eventTypeTab;
   if (assignment && !cleanText_(moved.assignedTo)) moved.assignedTo = assignment.name;
 
-  const newRow = appendLead_(getOrCreateSheet_(targetTab, LEAD_COLUMNS), moved);
+  const targetSheet = getOrCreateSheet_(targetTab, LEAD_COLUMNS);
+  if (assignment) moved.presenter = presenterForRow_(targetSheet.getLastRow() + 1);
+  const newRow = appendLead_(targetSheet, moved);
   sheet.deleteRow(row);
   shiftIndexRowsAfterDelete_(sheet.getName(), row);
   moveIndexEntries_(leadId, targetTab, newRow);
   syncAllLeadsRow_(leadId, {
     'Event Type': incoming.eventTypeLabel,
     'Event Type (Raw)': incoming.eventTypeRaw || '',
-    'Assigned To': moved.assignedTo
+    'Assigned To': moved.assignedTo,
+    'Presenter': moved.presenter || ''
   });
   if (assignment) recordAssignment_(assignment);
   notifyTeam_(moved, targetTab, assignment);
@@ -2566,7 +2611,8 @@ function seedSettings_() {
     'Promote Unassigned Leads': 'yes = move a lead out of Unassigned once a later form reveals the event type.',
     'Append Duplicate Notes': 'yes = add the repeat inquiry text to the original lead’s Message.',
     'Accept Test Leads': 'yes = store Google Ads test leads instead of only acknowledging them.',
-    'Round Robin Assignment': 'yes = fill Assigned To from the Reps list for each tab.',
+    'Round Robin Assignment': 'yes = share leads across the _Team roster.',
+    'Presenters': 'The repeating sequence written down the Presenter column, in order. Comma separated.',
     'Notify On New Lead': 'yes = email the addresses in the Notify rows below.',
     'Raw Payload Retention (rows)': 'Oldest rows in _Raw are trimmed beyond this count.',
     'Log Retention (rows)': 'Oldest rows in _Log are trimmed beyond this count.'
@@ -2657,7 +2703,7 @@ function seedTeamTab_() {
 function styleLeadSheet_(sheet) {
   const map = headerMap_(sheet);
   const widths = {
-    'Lead ID': 150, 'Received At': 140, 'Source': 100, 'Sub-Source': 190,
+    'Presenter': 110, 'Lead ID': 150, 'Received At': 140, 'Source': 100, 'Sub-Source': 190,
     'Event Type': 150, 'Event Type (Raw)': 150, 'Full Name': 180,
     'First Name': 120, 'Last Name': 130, 'Email': 230, 'Phone': 140,
     'Phone (Raw)': 130, 'Company': 170, 'Event Date': 110, 'Event Date (Raw)': 120, 'Guest Count': 100,
@@ -3157,7 +3203,8 @@ function runSelfTest() {
     'SALES NOTES': 'Called twice, no answer',
     'CLIENT NOTES': 'Wants a garden setup',
     'CONSO DATE': '2026-01-04',
-    'PRESENTER': 'Iris'
+    'PRESENTER': 'Pam',
+    'BOOTH STAFF': 'Iris'
   });
   check('notes: contact method is free text, not a phone', matchField_('CONTACT METHOD').field, 'message');
   check('notes: phone column still wins the phone slot', notesRecord.fields.phone, '0917 123 4567');
@@ -3168,8 +3215,19 @@ function runSelfTest() {
     notesRecord.messages.some(function (m) { return m.value === 'Wants a garden setup'; }), 'true');
   check('notes: labelled by their own headers', notesRecord.messages[0].label.length > 0, 'true');
   check('conso date is dropped, not filed as an event date', isNoiseKey_('CONSO DATE'), 'true');
+  check('presenter gets its own column, not the notes', notesRecord.fields.presenter, 'Pam');
   check('unknown column still reaches the notes',
     notesRecord.extras.some(function (e) { return e.value === 'Iris'; }), 'true');
+
+  // --- The presenter sequence ----------------------------------------------
+  check('presenter: first row', presenterForRow_(2), 'AJ');
+  check('presenter: second row', presenterForRow_(3), 'Pam');
+  check('presenter: third row', presenterForRow_(4), 'Mhay');
+  check('presenter: fourth row', presenterForRow_(5), 'Vanessa');
+  check('presenter: sequence repeats', presenterForRow_(6), 'AJ');
+  check('presenter: still repeating far down', presenterForRow_(42), 'AJ');
+  check('presenter: and off the cycle boundary', presenterForRow_(45), 'Vanessa');
+  check('presenter: header row has none', presenterForRow_(1), '');
 
   const twoPhones = mapRecord_({
     'Contact No.': '0917 111 1111',
@@ -3347,6 +3405,9 @@ function rosterReport_() {
  * A date like "03/04/2027" that could be read either way round is left exactly
  * as typed and reported, because several people have typed into these columns
  * over the years and guessing would move real bookings by weeks.
+ *
+ * A tab that already has a Presenter column keeps every value in it. The
+ * repeating sequence only governs leads that arrive from here on.
  */
 
 /**
@@ -3522,6 +3583,7 @@ function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
   });
 
   const fillIfBlank = {
+    'Presenter': lead.presenter,
     'Lead ID': lead.leadId,
     'Received At': lead.receivedAt,
     'Source': lead.source,

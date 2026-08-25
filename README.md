@@ -39,6 +39,9 @@ server to host and nothing to pay for.
   so far gets the next one, so the split is even and explainable. Ties break on
   who was assigned longest ago. A returning inquiry always goes back to the rep
   who already owns that lead, never into the rotation.
+- **Each row names its presenter.** The first column of a caller's tab runs a
+  fixed repeating sequence — AJ, Pam, Mhay, Vanessa, and round again — so the
+  caller hands the lead to whoever their row says. Configurable in `_Settings`.
 - **Duplicates removed.** Same email or same phone as an existing lead, from any
   channel, and the new submission is folded into the original: touch count goes
   up, blank fields are filled in, the new form is added to the lead's
@@ -57,7 +60,7 @@ server to host and nothing to pay for.
 | Tab | What lives there |
 | --- | --- |
 | `Dashboard` | Live counts by team, source, status and sub-source |
-| One tab per salesperson | Where their leads land — your existing tabs, kept as they are |
+| One tab per caller | Where their leads land — your existing tabs, kept as they are. First column names the presenter for that row |
 | `Wedding`, `Debut`, `Kid's Party`, `Private Event`, `Corporate` | Fallback queues for event types nobody is rostered for |
 | `Unassigned` | Leads whose event type is unknown, awaiting a human or a follow-up form |
 | `All Leads` | Master log of every unique lead |

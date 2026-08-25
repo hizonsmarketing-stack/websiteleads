@@ -6,6 +6,7 @@
 
 /** Column header -> lead object property. */
 const COLUMN_TO_FIELD = {
+  'Presenter': 'presenter',
   'Lead ID': 'leadId',
   'Received At': 'receivedAt',
   'Source': 'source',

@@ -43,6 +43,43 @@ Details in [WIX.md](WIX.md).
 Order matters only for ties: when two types match keywords of identical length,
 the one listed first wins. Put the more specific type higher.
 
+## Presenters
+
+The first column of every caller's tab is **Presenter**, and it runs a fixed
+repeating sequence down the tab:
+
+| Row | Presenter |
+| --- | --- |
+| 2 | AJ |
+| 3 | Pam |
+| 4 | Mhay |
+| 5 | Vanessa |
+| 6 | AJ — and round again |
+
+The caller works the lead and hands it to whoever their row names, so the split
+is settled by the sheet rather than negotiated lead by lead. Each tab runs its
+own sequence independently, so every caller's first lead goes to AJ, their
+second to Pam, and so on.
+
+Change the list or the order in the `Presenters` row of `_Settings` —
+comma-separated, and the order there is the order of the rotation. Removing a
+name shortens the cycle; adding one lengthens it. Clearing the row stops
+presenters being assigned at all.
+
+Two consequences worth knowing:
+
+- **The sequence follows the row, not the lead.** Sorting or filtering a tab
+  moves each row's presenter with it, because the name is written into the cell
+  rather than calculated. Nobody is reassigned by a sort.
+- **Totals per presenter won't be exactly equal** across the whole worksheet,
+  because every tab starts its own cycle at AJ. If one caller gets far more
+  leads than another, the presenters at the top of the list see more of them.
+  Reorder the `Presenters` list periodically if that matters.
+
+A lead sitting in a shared event-type tab or in **Unassigned** has no presenter
+yet — it has no caller either. It gets one at the moment it reaches a caller's
+tab.
+
 ## Settings
 
 All in the `_Settings` tab. Changes take effect on the next submission.
@@ -57,6 +94,7 @@ All in the `_Settings` tab. Changes take effect on the next submission.
 | `Append Duplicate Notes` | `yes` | Add the repeat inquiry's text to the original lead's Message |
 | `Accept Test Leads` | `no` | Store Google Ads test leads instead of only acknowledging them |
 | `Round Robin Assignment` | `yes` | Share leads out across the `_Team` roster. `no` sends everything to the shared event-type tabs instead |
+| `Presenters` | `AJ, Pam, Mhay, Vanessa` | The repeating sequence written down the Presenter column, in order |
 | `Notify On New Lead` | `no` | Email the addresses in the Notify rows |
 | `Raw Payload Retention (rows)` | `2000` | How much of `_Raw` to keep |
 | `Log Retention (rows)` | `5000` | How much of `_Log` to keep |

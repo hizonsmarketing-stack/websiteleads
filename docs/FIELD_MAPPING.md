@@ -61,6 +61,7 @@ all.
 | Budget | budget, budget range, budget per head |
 | Message | message, notes, remarks, inquiry details, special requests |
 | Campaign | campaign, campaign id, utm campaign, ad group |
+| Presenter | presenter, presentor, presented by, endorsed to |
 | Sub-Source | form, form name, fair name, event name |
 
 The full lists are `FIELD_ALIASES` in `src/00_Config.gs`.

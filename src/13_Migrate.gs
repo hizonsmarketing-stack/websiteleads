@@ -15,6 +15,9 @@
  * A date like "03/04/2027" that could be read either way round is left exactly
  * as typed and reported, because several people have typed into these columns
  * over the years and guessing would move real bookings by weeks.
+ *
+ * A tab that already has a Presenter column keeps every value in it. The
+ * repeating sequence only governs leads that arrive from here on.
  */
 
 /**
@@ -190,6 +193,7 @@ function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
   });
 
   const fillIfBlank = {
+    'Presenter': lead.presenter,
     'Lead ID': lead.leadId,
     'Received At': lead.receivedAt,
     'Source': lead.source,

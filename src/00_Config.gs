@@ -20,8 +20,14 @@ const SHEETS = {
   raw: '_Raw'
 };
 
-/** Canonical lead record, in column order. Team tabs and All Leads share it. */
+/**
+ * Canonical lead record, in column order. Team tabs and All Leads share it.
+ *
+ * Presenter leads the row deliberately: a tab belongs to one caller, and the
+ * first thing they need to see on a lead is which presenter it goes to.
+ */
 const LEAD_COLUMNS = [
+  'Presenter',
   'Lead ID',
   'Received At',
   'Source',
@@ -170,6 +176,7 @@ const DEFAULT_SETTINGS = {
   'Append Duplicate Notes': 'yes',
   'Accept Test Leads': 'no',
   'Round Robin Assignment': 'yes',
+  'Presenters': 'AJ, Pam, Mhay, Vanessa',
   'Notify On New Lead': 'no',
   'Raw Payload Retention (rows)': '2000',
   'Log Retention (rows)': '5000'
@@ -229,6 +236,10 @@ const FIELD_ALIASES = {
   budget: [
     'budget', 'budget range', 'estimated budget', 'price range',
     'budget per head', 'budget per pax', 'target budget'
+  ],
+  presenter: [
+    'presenter', 'presentor', 'presented by', 'assigned presenter',
+    'presenter assigned', 'endorsed to'
   ],
   message: [
     'message', 'notes', 'note', 'remarks', 'comments', 'comment', 'inquiry',
