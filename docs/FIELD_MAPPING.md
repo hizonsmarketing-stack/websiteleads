@@ -106,7 +106,8 @@ checked out.
 | Input | Stored as | Why |
 | --- | --- | --- |
 | `0917 123 4567`, `(0917) 123-4567`, `+63 917 123 4567`, `9171234567` | `+639171234567` | So the same person's number matches across channels |
-| `+1 415 555 0132` | `+14155550132` | Numbers with their own country code are left alone |
+| `+1 415 555 0132`, `001 415 555 0132`, `1 415 555 0132` | `+14155550132` | Numbers with their own country code are left alone, with or without the `+` |
+| `+65 9123 4567` **and** `65 9123 4567` | `+6591234567` | Both are Singapore, so both dedupe to one person |
 | `  Maria.Cruz@Gmail.COM ` | `maria.cruz@gmail.com` | Case and spacing shouldn't create a second lead |
 | `maria+expo@gmail.com` | stored as typed; matched as `maria@gmail.com` | Tagged addresses are the same inbox (toggle: *Dedupe Ignore Plus Tags*) |
 | `MARIA CRUZ` | `Maria Cruz` | All-caps worksheets are common |
@@ -118,6 +119,32 @@ checked out.
 
 The original phone text is always kept in **Phone (Raw)**, and the original
 event-type wording in **Event Type (Raw)**.
+
+### Numbers from abroad
+
+Enquiries arrive from the diaspora and from guests planning an event back home,
+so a number is only treated as local when it can be. One written with a `+` or
+a `00` is taken as it stands. One written without either is read as
+international when it starts with a recognised calling code and is long enough
+to be a real number there — `65 9123 4567` is Singapore, not a Philippine
+number with a stray 65 on the front.
+
+The order matters because of one trap: a local mobile written without its
+leading zero, `9171234567`, starts with `91`, which is India's calling code.
+Local always wins first, so that number is never misread. The rule is:
+
+1. Anything starting with the local mobile prefix (`9`, set by
+   `Local Mobile Prefix`) and short enough to be local **is** local.
+2. Otherwise, a recognised calling code with at least seven digits after it and
+   ten digits in total is international.
+3. Otherwise it is local, and the default country code is added.
+
+Calling codes live in `INTERNATIONAL_DIAL_CODES` in `src/00_Config.gs`. Add one
+if enquiries start arriving from somewhere it does not cover — a number from an
+unlisted country still works when the guest types the `+`.
+
+Phone columns are formatted as plain text, so the leading `+` survives instead
+of being read as a formula, and a long number is never shown as `6.39E+11`.
 
 ## How event types are decided
 

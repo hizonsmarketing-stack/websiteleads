@@ -33,7 +33,8 @@ function emailDedupeKey_(email) {
  *
  * Handles the shapes people actually type in Philippine forms: 0917 123 4567,
  * 63 917 123 4567, +63-917-123-4567, 9171234567, (02) 8123 4567. Numbers that
- * already carry a different country code are preserved as-is.
+ * already carry a different country code are preserved as-is, including when
+ * the + was left off — see looksInternational_.
  * @param {*} raw
  * @param {string=} countryCode Digits only, e.g. "63".
  * @return {string} E.164-ish string, or '' when there is no usable number.
@@ -56,12 +57,46 @@ function normalizePhone_(raw, countryCode) {
     digits = cc + digits.slice(1);
   } else if (cc && digits.indexOf(cc) === 0 && digits.length > cc.length + 6) {
     // Already prefixed with the country code.
+  } else if (looksInternational_(digits, cc)) {
+    // Somebody abroad who left the + off. Take it as written.
   } else if (digits.length <= 10) {
     digits = cc + digits;
   }
 
   if (digits.length < 8 || digits.length > 15) return '';
   return '+' + digits;
+}
+
+/**
+ * Decides whether digits typed without a + already carry a country code.
+ *
+ * The hard case is that a local mobile written without its 0 — 9171234567 —
+ * begins with 91, which is India's calling code. A local number is therefore
+ * always read as local first: anything starting with the local mobile prefix
+ * and short enough to be a local number is never treated as international.
+ *
+ * What is left must both start with a recognised calling code and be long
+ * enough to be a real number in that country, so a short local landline like
+ * 81234567 is not mistaken for Japan.
+ *
+ * @param {string} digits Digits only.
+ * @param {string} cc The default country code.
+ * @return {boolean}
+ */
+function looksInternational_(digits, cc) {
+  const localMobile = String(setting_('Local Mobile Prefix', '9')).replace(/\D/g, '');
+  if (localMobile && digits.length <= 10 && digits.indexOf(localMobile) === 0) return false;
+  if (digits.length < 10) return false;
+
+  const codes = INTERNATIONAL_DIAL_CODES.slice().sort(function (a, b) {
+    return b.length - a.length;
+  });
+  for (let i = 0; i < codes.length; i++) {
+    const code = codes[i];
+    if (code === cc) continue;
+    if (digits.indexOf(code) === 0 && digits.length - code.length >= 7) return true;
+  }
+  return false;
 }
 
 /**

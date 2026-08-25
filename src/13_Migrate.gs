@@ -149,8 +149,12 @@ function migrateExistingTab(options) {
     });
   };
 
-  if (opts.dryRun) run();
-  else withLock_(run, 120000);
+  if (opts.dryRun) {
+    run();
+  } else {
+    withLock_(run, 120000);
+    protectTextColumns_(sheet);
+  }
 
   log_('INFO', 'migrate', (opts.dryRun ? 'Previewed' : 'Migrated') + ' "' + tabName + '"', {
     rows: summary.rows, migrated: summary.migrated,

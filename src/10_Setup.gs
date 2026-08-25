@@ -203,6 +203,7 @@ function styleLeadSheet_(sheet) {
     sheet.getRange(2, statusCol, sheet.getMaxRows() - 1, 1).setDataValidation(rule);
   }
 
+  protectTextColumns_(sheet);
   formatHeaderRow_(sheet, Math.max(sheet.getLastColumn(), 1));
   if (!sheet.getBandings().length) {
     sheet.getRange(1, 1, sheet.getMaxRows(), Math.max(sheet.getLastColumn(), 1))

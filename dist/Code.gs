@@ -195,6 +195,7 @@ const SOURCES = {
 const DEFAULT_SETTINGS = {
   'Time Zone': 'Asia/Manila',
   'Default Country Code': '63',
+  'Local Mobile Prefix': '9',
   'Dedupe On': 'email,phone',
   'Dedupe Ignore Plus Tags': 'yes',
   'Promote Unassigned Leads': 'yes',
@@ -301,6 +302,40 @@ const FIELD_SUFFIX_RULES = [
   { suffix: 'date', field: 'eventDate' },
   { suffix: 'email', field: 'email' },
   { suffix: 'emailaddress', field: 'email' }
+];
+
+/**
+ * Calling codes recognised on a number typed without a leading + or 00.
+ *
+ * A guest who writes "65 9123 4567" means Singapore, not a Philippine number
+ * with a stray 65 on the front. Longest codes are tried first so 852 beats 85.
+ * Add a code here if enquiries start arriving from somewhere new.
+ */
+const INTERNATIONAL_DIAL_CODES = [
+  // North America
+  '1',
+  // Europe
+  '7', '30', '31', '32', '33', '34', '36', '39', '40', '41', '43', '44', '45',
+  '46', '47', '48', '49', '351', '353', '354', '356', '357', '358', '359',
+  '370', '371', '372', '373', '374', '375', '376', '377', '378', '380', '381',
+  '385', '386', '420', '421', '423',
+  // Latin America
+  '51', '52', '53', '54', '55', '56', '57', '58', '502', '503', '504', '505',
+  '506', '507', '509', '591', '593', '595', '598',
+  // Asia Pacific
+  '60', '61', '62', '64', '65', '66', '81', '82', '84', '86', '91', '92', '93',
+  '94', '95', '673', '675', '676', '677', '679', '680', '685', '850', '852',
+  '853', '855', '856', '880', '886', '960', '975', '976', '977', '992', '993',
+  '994', '995', '996', '998',
+  // Middle East
+  '90', '961', '962', '963', '964', '965', '966', '967', '968', '970', '971',
+  '972', '973', '974',
+  // Africa
+  '20', '27', '211', '212', '213', '216', '218', '220', '221', '223', '225',
+  '226', '227', '228', '229', '230', '231', '232', '233', '234', '235', '236',
+  '237', '238', '239', '240', '241', '242', '243', '244', '245', '248', '249',
+  '250', '251', '252', '253', '254', '255', '256', '257', '258', '260', '261',
+  '262', '263', '264', '265', '266', '267', '268', '269'
 ];
 
 /** Keys carried by a Google Ads lead-form webhook payload. */
@@ -719,6 +754,26 @@ function ensureHeaders_(sheet, headers) {
   sheet.getRange(1, startCol, 1, missing.length).setValues([missing]);
   formatHeaderRow_(sheet, needed);
   forgetFieldColumns_(sheet.getName());
+  protectTextColumns_(sheet);
+}
+
+/**
+ * Forces the phone columns to plain text.
+ *
+ * Left as "automatic", Sheets reads a leading + as the start of a formula and
+ * shows +639171234567 as the number 639171234567, and a long run of digits can
+ * come out as 6.39E+11. Either way the number a rep dials is wrong, so the
+ * columns holding one are formatted as text.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ */
+function protectTextColumns_(sheet) {
+  const bindings = fieldColumns_(sheet);
+  const rows = Math.max(sheet.getMaxRows() - 1, 1);
+  ['phone', 'phoneRaw'].forEach(function (field) {
+    const col = bindings.byField[field];
+    if (col) sheet.getRange(2, col, rows, 1).setNumberFormat('@');
+  });
 }
 
 /** Bolds, freezes and sizes the header row. */
@@ -896,7 +951,8 @@ function emailDedupeKey_(email) {
  *
  * Handles the shapes people actually type in Philippine forms: 0917 123 4567,
  * 63 917 123 4567, +63-917-123-4567, 9171234567, (02) 8123 4567. Numbers that
- * already carry a different country code are preserved as-is.
+ * already carry a different country code are preserved as-is, including when
+ * the + was left off — see looksInternational_.
  * @param {*} raw
  * @param {string=} countryCode Digits only, e.g. "63".
  * @return {string} E.164-ish string, or '' when there is no usable number.
@@ -919,12 +975,46 @@ function normalizePhone_(raw, countryCode) {
     digits = cc + digits.slice(1);
   } else if (cc && digits.indexOf(cc) === 0 && digits.length > cc.length + 6) {
     // Already prefixed with the country code.
+  } else if (looksInternational_(digits, cc)) {
+    // Somebody abroad who left the + off. Take it as written.
   } else if (digits.length <= 10) {
     digits = cc + digits;
   }
 
   if (digits.length < 8 || digits.length > 15) return '';
   return '+' + digits;
+}
+
+/**
+ * Decides whether digits typed without a + already carry a country code.
+ *
+ * The hard case is that a local mobile written without its 0 — 9171234567 —
+ * begins with 91, which is India's calling code. A local number is therefore
+ * always read as local first: anything starting with the local mobile prefix
+ * and short enough to be a local number is never treated as international.
+ *
+ * What is left must both start with a recognised calling code and be long
+ * enough to be a real number in that country, so a short local landline like
+ * 81234567 is not mistaken for Japan.
+ *
+ * @param {string} digits Digits only.
+ * @param {string} cc The default country code.
+ * @return {boolean}
+ */
+function looksInternational_(digits, cc) {
+  const localMobile = String(setting_('Local Mobile Prefix', '9')).replace(/\D/g, '');
+  if (localMobile && digits.length <= 10 && digits.indexOf(localMobile) === 0) return false;
+  if (digits.length < 10) return false;
+
+  const codes = INTERNATIONAL_DIAL_CODES.slice().sort(function (a, b) {
+    return b.length - a.length;
+  });
+  for (let i = 0; i < codes.length; i++) {
+    const code = codes[i];
+    if (code === cc) continue;
+    if (digits.indexOf(code) === 0 && digits.length - code.length >= 7) return true;
+  }
+  return false;
 }
 
 /**
@@ -2875,6 +2965,7 @@ function styleLeadSheet_(sheet) {
     sheet.getRange(2, statusCol, sheet.getMaxRows() - 1, 1).setDataValidation(rule);
   }
 
+  protectTextColumns_(sheet);
   formatHeaderRow_(sheet, Math.max(sheet.getLastColumn(), 1));
   if (!sheet.getBandings().length) {
     sheet.getRange(1, 1, sheet.getMaxRows(), Math.max(sheet.getLastColumn(), 1))
@@ -3265,6 +3356,22 @@ function runSelfTest() {
   check('phone: two numbers keeps first', normalizePhone_('0917 123 4567 / 0918 765 4321', '63'), '+639171234567');
   check('phone: foreign number kept', normalizePhone_('+1 415 555 0132', '63'), '+14155550132');
   check('phone: junk rejected', normalizePhone_('n/a', '63'), '');
+
+  // Numbers from abroad, with and without the + people forget to type.
+  check('phone: US with plus', normalizePhone_('+1 415 555 0132', '63'), '+14155550132');
+  check('phone: US with 00', normalizePhone_('001 415 555 0132', '63'), '+14155550132');
+  check('phone: US bare code', normalizePhone_('1 415 555 0132', '63'), '+14155550132');
+  check('phone: Singapore with plus', normalizePhone_('+65 9123 4567', '63'), '+6591234567');
+  check('phone: Singapore without plus', normalizePhone_('65 9123 4567', '63'), '+6591234567');
+  check('phone: Hong Kong without plus', normalizePhone_('852 5123 4567', '63'), '+85251234567');
+  check('phone: UAE without plus', normalizePhone_('971 50 123 4567', '63'), '+971501234567');
+  check('phone: Brunei without plus', normalizePhone_('673 712 3456', '63'), '+6737123456');
+  check('phone: UK with plus', normalizePhone_('+44 20 7946 0018', '63'), '+442079460018');
+  // The trap: a local mobile without its 0 starts with 91, which is India.
+  check('phone: local mobile is never read as India',
+    normalizePhone_('9171234567', '63'), '+639171234567');
+  check('phone: short local landline is never read as Japan',
+    normalizePhone_('8123 4567', '63'), '+6381234567');
 
   // --- Email normalisation -------------------------------------------------
   check('email: trimmed and lowered', normalizeEmail_('  Maria.Cruz@Gmail.COM '), 'maria.cruz@gmail.com');
@@ -3687,8 +3794,12 @@ function migrateExistingTab(options) {
     });
   };
 
-  if (opts.dryRun) run();
-  else withLock_(run, 120000);
+  if (opts.dryRun) {
+    run();
+  } else {
+    withLock_(run, 120000);
+    protectTextColumns_(sheet);
+  }
 
   log_('INFO', 'migrate', (opts.dryRun ? 'Previewed' : 'Migrated') + ' "' + tabName + '"', {
     rows: summary.rows, migrated: summary.migrated,

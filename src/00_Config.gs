@@ -170,6 +170,7 @@ const SOURCES = {
 const DEFAULT_SETTINGS = {
   'Time Zone': 'Asia/Manila',
   'Default Country Code': '63',
+  'Local Mobile Prefix': '9',
   'Dedupe On': 'email,phone',
   'Dedupe Ignore Plus Tags': 'yes',
   'Promote Unassigned Leads': 'yes',
@@ -276,6 +277,40 @@ const FIELD_SUFFIX_RULES = [
   { suffix: 'date', field: 'eventDate' },
   { suffix: 'email', field: 'email' },
   { suffix: 'emailaddress', field: 'email' }
+];
+
+/**
+ * Calling codes recognised on a number typed without a leading + or 00.
+ *
+ * A guest who writes "65 9123 4567" means Singapore, not a Philippine number
+ * with a stray 65 on the front. Longest codes are tried first so 852 beats 85.
+ * Add a code here if enquiries start arriving from somewhere new.
+ */
+const INTERNATIONAL_DIAL_CODES = [
+  // North America
+  '1',
+  // Europe
+  '7', '30', '31', '32', '33', '34', '36', '39', '40', '41', '43', '44', '45',
+  '46', '47', '48', '49', '351', '353', '354', '356', '357', '358', '359',
+  '370', '371', '372', '373', '374', '375', '376', '377', '378', '380', '381',
+  '385', '386', '420', '421', '423',
+  // Latin America
+  '51', '52', '53', '54', '55', '56', '57', '58', '502', '503', '504', '505',
+  '506', '507', '509', '591', '593', '595', '598',
+  // Asia Pacific
+  '60', '61', '62', '64', '65', '66', '81', '82', '84', '86', '91', '92', '93',
+  '94', '95', '673', '675', '676', '677', '679', '680', '685', '850', '852',
+  '853', '855', '856', '880', '886', '960', '975', '976', '977', '992', '993',
+  '994', '995', '996', '998',
+  // Middle East
+  '90', '961', '962', '963', '964', '965', '966', '967', '968', '970', '971',
+  '972', '973', '974',
+  // Africa
+  '20', '27', '211', '212', '213', '216', '218', '220', '221', '223', '225',
+  '226', '227', '228', '229', '230', '231', '232', '233', '234', '235', '236',
+  '237', '238', '239', '240', '241', '242', '243', '244', '245', '248', '249',
+  '250', '251', '252', '253', '254', '255', '256', '257', '258', '260', '261',
+  '262', '263', '264', '265', '266', '267', '268', '269'
 ];
 
 /** Keys carried by a Google Ads lead-form webhook payload. */

@@ -187,6 +187,26 @@ function ensureHeaders_(sheet, headers) {
   sheet.getRange(1, startCol, 1, missing.length).setValues([missing]);
   formatHeaderRow_(sheet, needed);
   forgetFieldColumns_(sheet.getName());
+  protectTextColumns_(sheet);
+}
+
+/**
+ * Forces the phone columns to plain text.
+ *
+ * Left as "automatic", Sheets reads a leading + as the start of a formula and
+ * shows +639171234567 as the number 639171234567, and a long run of digits can
+ * come out as 6.39E+11. Either way the number a rep dials is wrong, so the
+ * columns holding one are formatted as text.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ */
+function protectTextColumns_(sheet) {
+  const bindings = fieldColumns_(sheet);
+  const rows = Math.max(sheet.getMaxRows() - 1, 1);
+  ['phone', 'phoneRaw'].forEach(function (field) {
+    const col = bindings.byField[field];
+    if (col) sheet.getRange(2, col, rows, 1).setNumberFormat('@');
+  });
 }
 
 /** Bolds, freezes and sizes the header row. */

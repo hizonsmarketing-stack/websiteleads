@@ -32,6 +32,22 @@ function runSelfTest() {
   check('phone: foreign number kept', normalizePhone_('+1 415 555 0132', '63'), '+14155550132');
   check('phone: junk rejected', normalizePhone_('n/a', '63'), '');
 
+  // Numbers from abroad, with and without the + people forget to type.
+  check('phone: US with plus', normalizePhone_('+1 415 555 0132', '63'), '+14155550132');
+  check('phone: US with 00', normalizePhone_('001 415 555 0132', '63'), '+14155550132');
+  check('phone: US bare code', normalizePhone_('1 415 555 0132', '63'), '+14155550132');
+  check('phone: Singapore with plus', normalizePhone_('+65 9123 4567', '63'), '+6591234567');
+  check('phone: Singapore without plus', normalizePhone_('65 9123 4567', '63'), '+6591234567');
+  check('phone: Hong Kong without plus', normalizePhone_('852 5123 4567', '63'), '+85251234567');
+  check('phone: UAE without plus', normalizePhone_('971 50 123 4567', '63'), '+971501234567');
+  check('phone: Brunei without plus', normalizePhone_('673 712 3456', '63'), '+6737123456');
+  check('phone: UK with plus', normalizePhone_('+44 20 7946 0018', '63'), '+442079460018');
+  // The trap: a local mobile without its 0 starts with 91, which is India.
+  check('phone: local mobile is never read as India',
+    normalizePhone_('9171234567', '63'), '+639171234567');
+  check('phone: short local landline is never read as Japan',
+    normalizePhone_('8123 4567', '63'), '+6381234567');
+
   // --- Email normalisation -------------------------------------------------
   check('email: trimmed and lowered', normalizeEmail_('  Maria.Cruz@Gmail.COM '), 'maria.cruz@gmail.com');
   check('email: invalid rejected', normalizeEmail_('not an email'), '');

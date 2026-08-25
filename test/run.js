@@ -437,6 +437,22 @@ check('columns it genuinely lacks are still added', hasColumn('Lead ID'), 'true'
 check('their name column is filled', cellOf('Nina', 2, 'Full name'), 'Tess Ramos');
 check('their phone column is filled, normalised',
   cellOf('Nina', 2, 'Contact number'), '+639174441111');
+
+// A guest phoning in from abroad keeps their own country's number, and is
+// recognised as the same person whether or not they typed the +.
+api.resetCaches();
+const abroad = post({ formName: 'Homepage Inquiry', name: 'Grace Tan',
+  email: 'grace@example.com', 'Contact Number': '+65 9123 4567',
+  'Type of Event': 'Kiddie Party', 'Assigned To': 'Nina' },
+  { source: 'website', form: 'Homepage Inquiry' });
+check('an international number is kept as its own country\'s',
+  cellOf('Nina', 3, 'Contact number'), '+6591234567');
+check('and the original is beside it', cellOf('Nina', 3, 'Phone (Raw)'), '+65 9123 4567');
+api.resetCaches();
+const abroadAgain = post({ formName: 'Contact Us', name: 'Grace Tan',
+  'Contact Number': '65 9123 4567' }, { source: 'website', form: 'Contact Us' });
+check('the same number without the + is the same person', abroadAgain.action, 'merged');
+check('and does not open a second row', abroadAgain.tab, 'Nina');
 check('their event column is filled', cellOf('Nina', 2, 'Event'), "Kid's Party");
 check('their guest column is filled', cellOf('Nina', 2, 'Guests'), '60');
 check('their venue column is filled', cellOf('Nina', 2, 'Venue'), 'Pasig');

@@ -28,6 +28,7 @@ class FakeRange {
     return this;
   }
   setDataValidation() { return this; }
+  setNumberFormat() { return this; }
   setWrapStrategy() { return this; }
   setFontWeight() { return this; }
   setBackground() { return this; }
