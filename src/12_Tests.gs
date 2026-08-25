@@ -120,6 +120,13 @@ function runSelfTest() {
   check('map: shouted header stops shouting', humanizeKey_('SALES NOTES'), 'Sales Notes');
   check('map: deliberate mixed case left alone', humanizeKey_('Preferred VIP Room'), 'Preferred VIP Room');
 
+  check('webhook: the /dev URL is the test one',
+    isTestWebhookUrl_('https://script.google.com/macros/s/ABC/dev'), 'true');
+  check('webhook: the /exec URL is the live one',
+    isTestWebhookUrl_('https://script.google.com/macros/s/ABC/exec'), 'false');
+  check('webhook: /dev with a query string is still the test one',
+    isTestWebhookUrl_('https://script.google.com/macros/s/ABC/dev?source=website'), 'true');
+
   // --- Wix form fields, as they actually arrive ----------------------------
   // Wix names every field "field:<slug>" and sends its own bookkeeping
   // alongside. These are real field names from a live site.

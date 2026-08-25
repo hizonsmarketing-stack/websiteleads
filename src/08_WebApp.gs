@@ -205,8 +205,14 @@ function flattenGoogleAds_(payload) {
 }
 
 /**
- * Convenience for the menu: the current web-app URL, or '' when the script has
- * never been deployed.
+ * The web-app URL as this execution sees it, or '' when there is none.
+ *
+ * Careful: run from a menu, this returns the /dev URL, which is the test
+ * endpoint and only answers the logged-in editor. Anything else — Wix, Google
+ * Ads, a browser in another profile — gets a 404 from it. The live URL ends in
+ * /exec and carries the deployment id rather than the script id, so it cannot
+ * be derived from this one; it has to come from Manage deployments.
+ *
  * @return {string}
  */
 function getWebhookUrl() {
@@ -215,4 +221,9 @@ function getWebhookUrl() {
   } catch (err) {
     return '';
   }
+}
+
+/** @return {boolean} True for the /dev test URL, which outsiders cannot reach. */
+function isTestWebhookUrl_(url) {
+  return /\/dev(\?|$)/.test(String(url || ''));
 }

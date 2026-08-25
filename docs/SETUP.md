@@ -133,7 +133,18 @@ the script is deployed.
 not a hole in your data: the endpoint only accepts lead submissions, and step 4
 locks it behind a shared secret.
 
-You can always get the URL back from **Leads → Show webhook URL**.
+**The URL must end in `/exec`.** The `/dev` URL that also exists is the test
+endpoint: it answers you, and returns **404** to everyone else — Wix included.
+`/dev` carries the script id and `/exec` carries the deployment id, so one
+cannot be turned into the other; the live one only comes from *Manage
+deployments*.
+
+Check it before wiring anything up: open the finished URL in a browser. You
+should see `{"status":"ok", …}`. A 404 there means the deployment is not live,
+and no form will reach it.
+
+**Leads → Show webhook URL** will show you the URL, and will tell you if what
+it has is the test one.
 
 ## 4. Set the secrets
 

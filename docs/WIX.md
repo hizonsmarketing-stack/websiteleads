@@ -30,6 +30,22 @@ https://script.google.com/macros/s/AKfy…/exec?source=website&form=Homepage%20I
 
 **Leads → Show webhook URL** prints this for you, token included.
 
+### If Wix reports a 404
+
+The request never reached the script. In order of likelihood:
+
+1. **The URL ends in `/dev` instead of `/exec`.** `/dev` is the test endpoint
+   and only answers the logged-in editor; everyone else gets a 404. Copy the
+   live one from *Apps Script → Deploy → Manage deployments*.
+2. **Nothing is deployed.** *Manage deployments* should list a **Web app** with
+   *Execute as: Me* and *Who has access: Anyone*.
+3. **Something extra got pasted** — a label, a stray space, a line break, or a
+   quote around the URL.
+
+Open the exact URL in a browser to tell these apart: `{"status":"ok", …}` means
+the endpoint is live and the problem is in what Wix has; a 404 in the browser
+means it is the deployment.
+
 ## Wiring it up in Wix
 
 1. In your Wix dashboard: **Automations → + New Automation**.

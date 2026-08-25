@@ -38,6 +38,10 @@ function menuSetup() {
 function menuShowWebhookUrl() {
   const ui = SpreadsheetApp.getUi();
   const url = getWebhookUrl();
+  const props = PropertiesService.getScriptProperties();
+  const token = props.getProperty('WEBHOOK_TOKEN') || '';
+  const suffix = token ? '&token=' + encodeURIComponent(token) : '';
+
   if (!url) {
     ui.alert(
       'Not deployed yet',
@@ -47,51 +51,36 @@ function menuShowWebhookUrl() {
     );
     return;
   }
-  const token = PropertiesService.getScriptProperties().getProperty('WEBHOOK_TOKEN') || '';
-  const suffix = token ? '&token=' + encodeURIComponent(token) : '';
-  ui.alert(
-    'Webhook URL',
-    'Website form:\n' + url + '?source=website&form=YOUR%20FORM%20NAME' + suffix +
-    '\n\nGoogle Ads lead form:\n' + url + '?source=googleads' +
-    '\n\nChange the form name for each different form — it becomes the sub-source.',
-    ui.ButtonSet.OK
-  );
-}
 
-/**
- * Shows the most recent payload exactly as it arrived.
- *
- * This is the answer to "the form submitted but the fields are wrong": every
- * request is archived verbatim, and what a form tool actually sends is rarely
- * what its settings screen implies.
- */
-function menuShowLastPayload() {
-  const ui = SpreadsheetApp.getUi();
-  const sheet = getSpreadsheet_().getSheetByName(SHEETS.raw);
-
-  if (!sheet || sheet.getLastRow() < 2) {
+  // Read from a menu, Apps Script hands back the /dev URL. It is the test
+  // endpoint: it answers you and 404s for everybody else, including Wix.
+  if (isTestWebhookUrl_(url)) {
     ui.alert(
-      'Nothing received yet',
-      'No form has reached the webhook. Submit a test through the form, then try again.\n\n' +
-      'If a submission should have arrived, check the ' + SHEETS.log + ' tab — rejected ' +
-      'requests are logged there with the reason.',
+      'That is the test URL, not the live one',
+      'Apps Script only tells a menu about the /dev URL, which answers you and returns ' +
+      '404 to everyone else — Wix included.\n\n' +
+      'Get the live one instead:\n' +
+      '  Extensions > Apps Script > Deploy > Manage deployments\n' +
+      '  Copy the Web app URL. It ends in /exec.\n\n' +
+      'Then add to the end of it:\n' +
+      '  ?source=website' + (token ? suffix : '') +
+      '\n\nFor Google Ads use ?source=googleads instead.' +
+      (token ? '' : '\n\nNo webhook token is set yet — Leads > Set webhook token…') +
+      '\n\nCheck it by opening the finished URL in a browser: it should show ' +
+      '{"status":"ok",…}. A 404 there means the deployment is not live.',
       ui.ButtonSet.OK
     );
     return;
   }
 
-  const row = sheet.getRange(sheet.getLastRow(), 1, 1, 5).getValues()[0];
-  const payload = String(row[4] || '');
-  const shown = payload.length > 3000
-    ? payload.slice(0, 3000) + '\n\n…truncated. The whole thing is in the ' + SHEETS.raw + ' tab.'
-    : payload;
-
   ui.alert(
-    'Last received payload',
-    'Received:   ' + row[1] + '\n' +
-    'Source:     ' + row[2] + '\n' +
-    'Sub-source: ' + row[3] + '\n' +
-    'Reference:  ' + row[0] + '\n\n' + shown,
+    'Webhook URL',
+    'Website forms — the same URL for every form, because Wix sends the form ' +
+    'name and it becomes the sub-source:\n' +
+    url + '?source=website' + suffix +
+    '\n\nTo override the sub-source for one form, add &form=YOUR%20FORM%20NAME.' +
+    '\n\nGoogle Ads lead forms:\n' + url + '?source=googleads' +
+    '\n\nOpen either in a browser to check it: you should see {"status":"ok",…}.',
     ui.ButtonSet.OK
   );
 }
