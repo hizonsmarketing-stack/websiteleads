@@ -168,6 +168,11 @@ Full details in [FIELD_MAPPING.md](FIELD_MAPPING.md).
 
 ## Testing a form
 
+**Use a different email address for each test.** Two submissions with the same
+email are the same person as far as the automation is concerned, so the second
+merges into the first row rather than creating a new lead — correct in
+production, confusing when you are trying to see two leads appear.
+
 Submit it. Then check, in order:
 
 1. The team tab for the event type you selected.

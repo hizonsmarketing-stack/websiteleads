@@ -1290,6 +1290,28 @@ function aliasIndex_() {
   return index;
 }
 
+/**
+ * Spots a value that is really an unfilled placeholder.
+ *
+ * A form builder's body can be saved with its tokens never substituted, in
+ * which case every field arrives holding its own name — "field:full_name" as
+ * the answer to field:full_name. Taken at face value that produces a lead
+ * called field:full_name, which looks like a real lead and is not. Better to
+ * drop it and say the form is misconfigured.
+ *
+ * @param {string} key
+ * @param {string} value
+ * @return {boolean}
+ */
+function isPlaceholderValue_(key, value) {
+  const text = cleanText_(value);
+  if (!text) return false;
+  if (squashKey_(text) === squashKey_(key)) return true;
+  if (/^field\s*:/i.test(text)) return true;
+  if (/^\{\{.*\}\}$/.test(text)) return true;
+  return false;
+}
+
 /** @return {boolean} True for plumbing keys that should never reach a sales rep. */
 function isNoiseKey_(key) {
   const squashed = squashKey_(key);
@@ -1351,7 +1373,8 @@ function matchField_(key) {
  * @param {!Object<string,*>} flat Output of flatten_().
  * @return {{fields: !Object<string,string>,
  *           extras: !Array<{label: string, value: string}>,
- *           messages: !Array<{label: string, value: string}>}}
+ *           messages: !Array<{label: string, value: string}>,
+ *           placeholders: number}}
  */
 function mapRecord_(flat) {
   const fields = {};
@@ -1360,6 +1383,7 @@ function mapRecord_(flat) {
   const labels = {};
   const extras = [];
   const messages = [];
+  let placeholders = 0;
 
   Object.keys(flat).forEach(function (path) {
     const value = cleanText_(flat[path]);
@@ -1367,6 +1391,10 @@ function mapRecord_(flat) {
 
     const label = leafKey_(path);
     if (isNoiseKey_(label)) return;
+    if (isPlaceholderValue_(label, value)) {
+      placeholders++;
+      return;
+    }
 
     const pretty = humanizeKey_(label);
     const match = matchField_(label);
@@ -1403,7 +1431,7 @@ function mapRecord_(flat) {
     }
   });
 
-  return { fields: fields, extras: extras, messages: messages };
+  return { fields: fields, extras: extras, messages: messages, placeholders: placeholders };
 }
 
 /**
@@ -2440,7 +2468,16 @@ function intakeRecord_(input) {
   });
 
   if (!lead.email && !lead.phone && !lead.fullName) {
-    return { action: 'skipped', reason: 'no contact details', leadId: '', tab: '', row: 0, eventType: '' };
+    // Say which of the two it is: a form whose tokens were never substituted
+    // is a configuration mistake, and "no contact details" sends someone
+    // looking in the wrong place for it.
+    const reason = mapped.placeholders
+      ? 'the form sent its field tokens instead of the answers — check the body of the automation'
+      : 'no contact details';
+    log_('WARN', 'intake', 'Nothing usable in this submission', {
+      subSource: input.subSource, reason: reason
+    });
+    return { action: 'skipped', reason: reason, leadId: '', tab: '', row: 0, eventType: '' };
   }
   if (!lead.email && !lead.phone) {
     lead.status = 'Needs Contact Info';
@@ -3865,6 +3902,23 @@ function runSelfTest() {
   check('wix: the builder default name is spotted', looksLikeDefaultFormName_('My form'), 'true');
   check('wix: so is Form 1', looksLikeDefaultFormName_('Form 1'), 'true');
   check('wix: a real form name is not', looksLikeDefaultFormName_('Homepage Inquiry'), 'false');
+
+  check('placeholder: a token standing in for its own answer',
+    isPlaceholderValue_('field:full_name', 'field:full_name'), 'true');
+  check('placeholder: any unfilled field token',
+    isPlaceholderValue_('anything', 'field:contact_number'), 'true');
+  check('placeholder: unsubstituted handlebars',
+    isPlaceholderValue_('Name', '{{contact.name}}'), 'true');
+  check('placeholder: a real answer is not one',
+    isPlaceholderValue_('field:full_name', 'Maria Santos'), 'false');
+  const unfilled = mapRecord_({
+    'field:full_name': 'field:full_name',
+    'field:email_adress': 'field:email_adress'
+  });
+  check('placeholder: nothing is taken from an unfilled form',
+    Object.keys(unfilled.fields).length, 0);
+  check('placeholder: and it is counted so the reason can say so',
+    unfilled.placeholders, 2);
 
   // --- Columns competing for one destination -------------------------------
   const notesRecord = mapRecord_({

@@ -55,7 +55,16 @@ function intakeRecord_(input) {
   });
 
   if (!lead.email && !lead.phone && !lead.fullName) {
-    return { action: 'skipped', reason: 'no contact details', leadId: '', tab: '', row: 0, eventType: '' };
+    // Say which of the two it is: a form whose tokens were never substituted
+    // is a configuration mistake, and "no contact details" sends someone
+    // looking in the wrong place for it.
+    const reason = mapped.placeholders
+      ? 'the form sent its field tokens instead of the answers — check the body of the automation'
+      : 'no contact details';
+    log_('WARN', 'intake', 'Nothing usable in this submission', {
+      subSource: input.subSource, reason: reason
+    });
+    return { action: 'skipped', reason: reason, leadId: '', tab: '', row: 0, eventType: '' };
   }
   if (!lead.email && !lead.phone) {
     lead.status = 'Needs Contact Info';

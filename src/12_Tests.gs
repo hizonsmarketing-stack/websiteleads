@@ -200,6 +200,23 @@ function runSelfTest() {
   check('wix: so is Form 1', looksLikeDefaultFormName_('Form 1'), 'true');
   check('wix: a real form name is not', looksLikeDefaultFormName_('Homepage Inquiry'), 'false');
 
+  check('placeholder: a token standing in for its own answer',
+    isPlaceholderValue_('field:full_name', 'field:full_name'), 'true');
+  check('placeholder: any unfilled field token',
+    isPlaceholderValue_('anything', 'field:contact_number'), 'true');
+  check('placeholder: unsubstituted handlebars',
+    isPlaceholderValue_('Name', '{{contact.name}}'), 'true');
+  check('placeholder: a real answer is not one',
+    isPlaceholderValue_('field:full_name', 'Maria Santos'), 'false');
+  const unfilled = mapRecord_({
+    'field:full_name': 'field:full_name',
+    'field:email_adress': 'field:email_adress'
+  });
+  check('placeholder: nothing is taken from an unfilled form',
+    Object.keys(unfilled.fields).length, 0);
+  check('placeholder: and it is counted so the reason can say so',
+    unfilled.placeholders, 2);
+
   // --- Columns competing for one destination -------------------------------
   const notesRecord = mapRecord_({
     'Full name': 'Rosa Lim',

@@ -264,6 +264,23 @@ To review what's being caught, sort the Duplicates tab by **Received At**.
 
 ## Troubleshooting
 
+**A test submission landed on top of the previous one.**
+That is deduplication doing its job. Two submissions carrying the same email or
+phone are the same person, so the second is merged into the first: **Touches**
+goes to 2, the new message is appended below the old one, and the row is filed
+in the **Duplicates** tab. Existing values are never overwritten, so the event
+type stays as the first submission set it.
+
+To test several distinct leads, give each one a different email address —
+`you+test1@gmail.com`, `you+test2@gmail.com` and so on will not work, because
+plus-tags are deliberately treated as the same inbox. Use genuinely different
+addresses, or set `Dedupe Ignore Plus Tags` to `no` while testing.
+
+**A lead arrived named "field:full_name".**
+The automation's body was saved with its tokens never substituted, so every
+answer is its own field name. Such submissions are now skipped rather than
+stored, and `_Log` says so. Fix the body in the automation.
+
 **A lead didn't arrive.**
 Check `_Log` (unhide it: right-click any tab → *Show all tabs*, or **Setup /
 repair tabs** which hides them again afterwards). Every request is logged,
