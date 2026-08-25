@@ -3253,6 +3253,7 @@ function onOpen() {
     .addItem('Import existing leads from a tab…', 'showMigrateDialog')
     .addSeparator()
     .addItem('Show webhook URL', 'menuShowWebhookUrl')
+    .addItem('Show last received payload', 'menuShowLastPayload')
     .addItem('Set webhook token…', 'menuSetWebhookToken')
     .addItem('Set Google Ads key…', 'menuSetGoogleAdsKey')
     .addSeparator()
@@ -3292,6 +3293,44 @@ function menuShowWebhookUrl() {
     'Website form:\n' + url + '?source=website&form=YOUR%20FORM%20NAME' + suffix +
     '\n\nGoogle Ads lead form:\n' + url + '?source=googleads' +
     '\n\nChange the form name for each different form — it becomes the sub-source.',
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Shows the most recent payload exactly as it arrived.
+ *
+ * This is the answer to "the form submitted but the fields are wrong": every
+ * request is archived verbatim, and what a form tool actually sends is rarely
+ * what its settings screen implies.
+ */
+function menuShowLastPayload() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.raw);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    ui.alert(
+      'Nothing received yet',
+      'No form has reached the webhook. Submit a test through the form, then try again.\n\n' +
+      'If a submission should have arrived, check the ' + SHEETS.log + ' tab — rejected ' +
+      'requests are logged there with the reason.',
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+
+  const row = sheet.getRange(sheet.getLastRow(), 1, 1, 5).getValues()[0];
+  const payload = String(row[4] || '');
+  const shown = payload.length > 3000
+    ? payload.slice(0, 3000) + '\n\n…truncated. The whole thing is in the ' + SHEETS.raw + ' tab.'
+    : payload;
+
+  ui.alert(
+    'Last received payload',
+    'Received:   ' + row[1] + '\n' +
+    'Source:     ' + row[2] + '\n' +
+    'Sub-source: ' + row[3] + '\n' +
+    'Reference:  ' + row[0] + '\n\n' + shown,
     ui.ButtonSet.OK
   );
 }

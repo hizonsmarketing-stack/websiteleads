@@ -20,9 +20,24 @@ https://script.google.com/macros/s/AKfy…/exec?source=website&form=Homepage%20I
 
 1. In your Wix dashboard: **Automations → + New Automation**.
 2. **Trigger**: *Form submitted* (Wix Forms), and pick the form.
-3. **Action**: *Send via Webhook*.
-4. Paste the URL above, with `form=` set to that form's name.
+3. **Action**: under *Integrations*, choose **Send HTTP request**.
+   (Wix used to call this *Send via Webhook*. Do **not** pick *Update Google
+   Sheets* — that writes rows straight into a sheet and skips the
+   deduplication, tagging and routing entirely.)
+4. Configure the request:
+   - **Method**: `POST`
+   - **URL**: the URL above, with `form=` set to that form's name
+   - **Header**: `Content-Type` = `application/json`
+   - **Body**: the form's fields. Name the keys the way a person would —
+     `Full Name`, `Email`, `Contact Number`, `Type of Event`, `Event Date`,
+     `Number of Guests`, `Message` — because those names are what the
+     automation matches on. Anything it doesn't recognise is kept in the
+     lead's Message column rather than dropped.
 5. Save and activate.
+
+Whatever shape Wix ends up sending is accepted — nested or flat, any field
+names. If a field doesn't land where you expect, **Leads → Show last received
+payload** prints exactly what arrived, which is what to work from.
 
 Repeat per form, changing only the `form=` value:
 
