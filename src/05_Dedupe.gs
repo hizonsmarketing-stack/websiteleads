@@ -19,7 +19,7 @@ let INDEX_CACHE_ = null;
 function loadIndex_() {
   if (INDEX_CACHE_) return INDEX_CACHE_;
   const sheet = getOrCreateSheet_(SHEETS.index, INDEX_COLUMNS);
-  const cache = { byKey: {}, rowsByLeadId: {}, sheet: sheet };
+  const cache = { byKey: {}, rowsByLeadId: {}, sheet: sheet, pending: [] };
 
   const lastRow = sheet.getLastRow();
   if (lastRow > 1) {
@@ -98,21 +98,36 @@ function findDuplicate_(lead) {
  */
 function indexLead_(lead, tab, row) {
   const index = loadIndex_();
-  const stamp = nowStamp_();
   dedupeKeys_(lead).forEach(function (k) {
     if (index.byKey[k.key]) return;
-    index.sheet.appendRow([k.key, lead.leadId, tab, row, stamp]);
-    const entry = {
-      key: k.key,
-      leadId: lead.leadId,
-      tab: tab,
-      row: row,
-      indexRow: index.sheet.getLastRow()
-    };
+    const entry = { key: k.key, leadId: lead.leadId, tab: tab, row: row, indexRow: 0 };
     index.byKey[k.key] = entry;
+    index.pending.push(entry);
     if (!index.rowsByLeadId[lead.leadId]) index.rowsByLeadId[lead.leadId] = [];
     index.rowsByLeadId[lead.leadId].push(entry);
   });
+}
+
+/**
+ * Writes buffered index entries in one go.
+ *
+ * Entries are buffered rather than appended one at a time because an import of
+ * several hundred leads would otherwise make a separate write per contact
+ * detail, which is what pushes a big import past the six-minute limit.
+ */
+function flushIndex_() {
+  const index = INDEX_CACHE_;
+  if (!index || !index.pending.length) return;
+
+  const stamp = nowStamp_();
+  const start = index.sheet.getLastRow() + 1;
+  index.sheet.getRange(start, 1, index.pending.length, INDEX_COLUMNS.length).setValues(
+    index.pending.map(function (entry) {
+      return [entry.key, entry.leadId, entry.tab, entry.row, stamp];
+    })
+  );
+  index.pending.forEach(function (entry, i) { entry.indexRow = start + i; });
+  index.pending = [];
 }
 
 /**
@@ -124,6 +139,9 @@ function indexLead_(lead, tab, row) {
  */
 function moveIndexEntries_(leadId, tab, row) {
   const index = loadIndex_();
+  // These entries are addressed by their row in _Index, so anything still
+  // buffered has to reach the sheet before it can be updated.
+  flushIndex_();
   const entries = index.rowsByLeadId[leadId] || [];
   const stamp = nowStamp_();
   entries.forEach(function (entry) {
@@ -142,18 +160,17 @@ function moveIndexEntries_(leadId, tab, row) {
  */
 function mergeIndexKeys_(incoming, entry) {
   const index = loadIndex_();
-  const stamp = nowStamp_();
   dedupeKeys_(incoming).forEach(function (k) {
     if (index.byKey[k.key]) return;
-    index.sheet.appendRow([k.key, entry.leadId, entry.tab, entry.row, stamp]);
     const added = {
       key: k.key,
       leadId: entry.leadId,
       tab: entry.tab,
       row: entry.row,
-      indexRow: index.sheet.getLastRow()
+      indexRow: 0
     };
     index.byKey[k.key] = added;
+    index.pending.push(added);
     if (!index.rowsByLeadId[entry.leadId]) index.rowsByLeadId[entry.leadId] = [];
     index.rowsByLeadId[entry.leadId].push(added);
   });

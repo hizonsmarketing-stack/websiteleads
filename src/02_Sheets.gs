@@ -264,6 +264,22 @@ function appendLead_(sheet, lead) {
 }
 
 /**
+ * Appends many rows in one write.
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {!Array<!Array<*>>} rows
+ */
+function appendRows_(sheet, rows) {
+  if (!rows || !rows.length) return;
+  const width = Math.max(sheet.getLastColumn(), rows[0].length);
+  const padded = rows.map(function (row) {
+    const copy = row.slice();
+    while (copy.length < width) copy.push('');
+    return copy.slice(0, width);
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, padded.length, width).setValues(padded);
+}
+
+/**
  * Locates a lead by id. `hintRow` (from the index) is checked first; a full
  * column scan is the fallback, so manually inserted or deleted rows in a team
  * tab cannot desynchronise the automation.

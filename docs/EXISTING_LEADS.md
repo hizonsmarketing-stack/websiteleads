@@ -114,6 +114,23 @@ other copy is. Sort that tab and work through it with the reps involved.
 The row is still indexed under whichever contact details are unique to it, so
 future inquiries are matched to one of them rather than creating a third copy.
 
+## Big tabs
+
+Google gives a script six minutes per run. A tab with more rows than that
+allows **stops cleanly rather than being killed**, and says so:
+
+> Stopped after 1,200 to stay inside Google's time limit — 900 row(s) still to
+> go. Run the import again on this tab to carry on; rows already done are
+> skipped.
+
+Run it again and it picks up where it left off. Nothing is left half-written:
+rows are processed in blocks, and a block is either written whole or not at
+all. `Import Time Budget (seconds)` in `_Settings` controls when it stops —
+lower it if runs are being killed anyway, but 240 leaves comfortable headroom.
+
+If you ever see Google's own *"Exceeded maximum execution time"* error rather
+than the message above, the budget has been set too high; put it back to 240.
+
 ## Re-running it
 
 Safe. Rows that already have a **Lead ID** are skipped, and the summary reports

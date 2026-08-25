@@ -144,6 +144,9 @@ function runSelfTest() {
   check('unknown column still reaches the notes',
     notesRecord.extras.some(function (e) { return e.value === 'Iris'; }), 'true');
 
+  check('settings: a deliberate zero is not read as "unset"',
+    numberSetting_('No Such Setting At All', 240), 240);
+
   // --- The presenter sequence ----------------------------------------------
   check('presenter: first row', presenterFor_('Wedding', 2, 'Bea'), 'AJ');
   check('presenter: second row', presenterFor_('Wedding', 3, 'Bea'), 'Pam');

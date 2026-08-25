@@ -43,6 +43,24 @@ function setting_(key, fallback) {
   return (value === undefined || value === '') ? fallback : value;
 }
 
+/**
+ * Reads a numeric setting.
+ *
+ * Not `Number(setting_(k)) || fallback`: that reads a deliberate 0 as "no
+ * value" and quietly substitutes the default, which is exactly wrong for
+ * settings where 0 means "none" or "stop immediately".
+ *
+ * @param {string} key
+ * @param {number} fallback Used when the value is blank or not a number.
+ * @return {number}
+ */
+function numberSetting_(key, fallback) {
+  const raw = String(setting_(key, String(fallback))).trim();
+  if (raw === '') return fallback;
+  const parsed = Number(raw);
+  return (isFinite(parsed) && parsed >= 0) ? parsed : fallback;
+}
+
 /** @return {boolean} True for yes / true / 1 / on. */
 function settingIsOn_(key) {
   return /^(yes|y|true|1|on)$/i.test(String(setting_(key, 'no')));

@@ -428,6 +428,7 @@ function maybePromote_(sheet, row, original, incoming, leadId) {
 /** Keeps index row numbers correct after a row is deleted from a tab. */
 function shiftIndexRowsAfterDelete_(tabName, deletedRow) {
   const index = loadIndex_();
+  flushIndex_();
   Object.keys(index.byKey).forEach(function (key) {
     const entry = index.byKey[key];
     if (entry.tab !== tabName || entry.row <= deletedRow) return;

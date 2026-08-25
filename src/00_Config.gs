@@ -175,6 +175,7 @@ const DEFAULT_SETTINGS = {
   'Promote Unassigned Leads': 'yes',
   'Append Duplicate Notes': 'yes',
   'Normalise Event Dates On Import': 'yes',
+  'Import Time Budget (seconds)': '240',
   'Accept Test Leads': 'no',
   'Round Robin Assignment': 'yes',
   'Presenters': 'AJ, Pam, Mhay, Vanessa',

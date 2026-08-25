@@ -201,6 +201,7 @@ const DEFAULT_SETTINGS = {
   'Promote Unassigned Leads': 'yes',
   'Append Duplicate Notes': 'yes',
   'Normalise Event Dates On Import': 'yes',
+  'Import Time Budget (seconds)': '240',
   'Accept Test Leads': 'no',
   'Round Robin Assignment': 'yes',
   'Presenters': 'AJ, Pam, Mhay, Vanessa',
@@ -403,6 +404,24 @@ function getSettings_() {
 function setting_(key, fallback) {
   const value = getSettings_()[key];
   return (value === undefined || value === '') ? fallback : value;
+}
+
+/**
+ * Reads a numeric setting.
+ *
+ * Not `Number(setting_(k)) || fallback`: that reads a deliberate 0 as "no
+ * value" and quietly substitutes the default, which is exactly wrong for
+ * settings where 0 means "none" or "stop immediately".
+ *
+ * @param {string} key
+ * @param {number} fallback Used when the value is blank or not a number.
+ * @return {number}
+ */
+function numberSetting_(key, fallback) {
+  const raw = String(setting_(key, String(fallback))).trim();
+  if (raw === '') return fallback;
+  const parsed = Number(raw);
+  return (isFinite(parsed) && parsed >= 0) ? parsed : fallback;
 }
 
 /** @return {boolean} True for yes / true / 1 / on. */
@@ -831,6 +850,22 @@ function appendLead_(sheet, lead) {
   const row = leadToRow_(sheet, lead);
   sheet.appendRow(row);
   return sheet.getLastRow();
+}
+
+/**
+ * Appends many rows in one write.
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {!Array<!Array<*>>} rows
+ */
+function appendRows_(sheet, rows) {
+  if (!rows || !rows.length) return;
+  const width = Math.max(sheet.getLastColumn(), rows[0].length);
+  const padded = rows.map(function (row) {
+    const copy = row.slice();
+    while (copy.length < width) copy.push('');
+    return copy.slice(0, width);
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, padded.length, width).setValues(padded);
 }
 
 /**
@@ -1482,24 +1517,19 @@ function buildLead_(input) {
   };
 }
 
+let SOURCES_CACHE_ = null;
+
 /**
- * Looks a form or fair up in the _Sources registry, adding it when it is new.
+ * Reads the _Sources registry once per execution.
  *
- * This is how sub-sources get added "along the way": the first lead from an
- * unrecognised form registers itself with the raw identifier as its name, and
- * the team can then give it a friendlier display name or a default event type
- * without touching any code.
+ * It used to be re-read for every single lead, which is fine for one webhook
+ * call and ruinous for an import of several hundred rows.
  *
- * @param {string} source One of SOURCES.
- * @param {string} rawSubSource The identifier as received.
- * @param {string=} seedEventType Default event type to store when this
- *     sub-source is being registered for the first time.
- * @return {{source: string, label: string, defaultEventType: string}}
+ * @return {!Object}
  */
-function resolveSubSource_(source, rawSubSource, seedEventType) {
-  const raw = cleanText_(rawSubSource) || 'Unknown Form';
+function loadSources_() {
+  if (SOURCES_CACHE_) return SOURCES_CACHE_;
   const sheet = getOrCreateSheet_(SHEETS.sources, SOURCES_COLUMNS);
-  const lastRow = sheet.getLastRow();
   const map = headerMap_(sheet);
   const col = {
     source: map[squashKey_('Source')],
@@ -1512,34 +1542,99 @@ function resolveSubSource_(source, rawSubSource, seedEventType) {
     count: map[squashKey_('Lead Count')]
   };
 
-  if (lastRow > 1) {
-    const values = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
-    for (let i = 0; i < values.length; i++) {
-      if (squashKey_(values[i][col.raw - 1]) !== squashKey_(raw)) continue;
-      const row = i + 2;
-      sheet.getRange(row, col.lastSeen).setValue(nowStamp_());
-      sheet.getRange(row, col.count).setValue((Number(values[i][col.count - 1]) || 0) + 1);
-      return {
-        source: cleanText_(values[i][col.source - 1]) || source,
-        label: cleanText_(values[i][col.label - 1]) || raw,
-        defaultEventType: cleanText_(values[i][col.eventType - 1])
+  const byKey = {};
+  if (sheet.getLastRow() > 1) {
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+    values.forEach(function (row, i) {
+      const raw = cleanText_(row[col.raw - 1]);
+      if (!raw) return;
+      byKey[squashKey_(raw)] = {
+        row: i + 2,
+        source: cleanText_(row[col.source - 1]),
+        label: cleanText_(row[col.label - 1]) || raw,
+        defaultEventType: cleanText_(row[col.eventType - 1]),
+        count: Number(row[col.count - 1]) || 0,
+        added: 0
       };
-    }
+    });
   }
 
-  const newRow = new Array(sheet.getLastColumn()).fill('');
-  newRow[col.source - 1] = source;
-  newRow[col.raw - 1] = raw;
-  newRow[col.label - 1] = raw;
-  newRow[col.eventType - 1] = cleanText_(seedEventType);
-  newRow[col.active - 1] = 'yes';
-  newRow[col.firstSeen - 1] = nowStamp_();
-  newRow[col.lastSeen - 1] = nowStamp_();
-  newRow[col.count - 1] = 1;
-  sheet.appendRow(newRow);
-  log_('INFO', 'sources', 'Registered new sub-source', { source: source, subSource: raw });
+  SOURCES_CACHE_ = { sheet: sheet, col: col, byKey: byKey, touched: {} };
+  return SOURCES_CACHE_;
+}
 
-  return { source: source, label: raw, defaultEventType: cleanText_(seedEventType) };
+/**
+ * Looks a form or fair up in the _Sources registry, adding it when it is new.
+ *
+ * This is how sub-sources get added "along the way": the first lead from an
+ * unrecognised form registers itself with the raw identifier as its name, and
+ * the team can then give it a friendlier display name or a default event type
+ * without touching any code.
+ *
+ * Counts are tallied in memory and written back by flushSubSources_ at the end
+ * of the batch, so importing four hundred leads writes one row, not eight
+ * hundred cells.
+ *
+ * @param {string} source One of SOURCES.
+ * @param {string} rawSubSource The identifier as received.
+ * @param {string=} seedEventType Default event type to store when this
+ *     sub-source is being registered for the first time.
+ * @return {{source: string, label: string, defaultEventType: string}}
+ */
+function resolveSubSource_(source, rawSubSource, seedEventType) {
+  const cache = loadSources_();
+  const raw = cleanText_(rawSubSource) || 'Unknown Form';
+  const key = squashKey_(raw);
+  let entry = cache.byKey[key];
+
+  if (!entry) {
+    const newRow = new Array(cache.sheet.getLastColumn()).fill('');
+    newRow[cache.col.source - 1] = source;
+    newRow[cache.col.raw - 1] = raw;
+    newRow[cache.col.label - 1] = raw;
+    newRow[cache.col.eventType - 1] = cleanText_(seedEventType);
+    newRow[cache.col.active - 1] = 'yes';
+    newRow[cache.col.firstSeen - 1] = nowStamp_();
+    newRow[cache.col.lastSeen - 1] = nowStamp_();
+    newRow[cache.col.count - 1] = 0;
+    cache.sheet.appendRow(newRow);
+
+    entry = {
+      row: cache.sheet.getLastRow(),
+      source: source,
+      label: raw,
+      defaultEventType: cleanText_(seedEventType),
+      count: 0,
+      added: 0
+    };
+    cache.byKey[key] = entry;
+    log_('INFO', 'sources', 'Registered new sub-source', { source: source, subSource: raw });
+  }
+
+  entry.added += 1;
+  cache.touched[key] = true;
+
+  return {
+    source: entry.source || source,
+    label: entry.label || raw,
+    defaultEventType: entry.defaultEventType
+  };
+}
+
+/** Writes the tallied Last Seen and Lead Count values back to _Sources. */
+function flushSubSources_() {
+  const cache = SOURCES_CACHE_;
+  if (!cache) return;
+  const stamp = nowStamp_();
+  Object.keys(cache.touched).forEach(function (key) {
+    const entry = cache.byKey[key];
+    if (!entry || !entry.added) return;
+    cache.sheet.getRange(entry.row, cache.col.lastSeen).setValue(stamp);
+    cache.sheet.getRange(entry.row, cache.col.count).setValue(entry.count + entry.added);
+    entry.count += entry.added;
+    entry.added = 0;
+  });
+  cache.touched = {};
 }
 
 /** Columns of the _Sources registry. */
@@ -1580,7 +1675,7 @@ let INDEX_CACHE_ = null;
 function loadIndex_() {
   if (INDEX_CACHE_) return INDEX_CACHE_;
   const sheet = getOrCreateSheet_(SHEETS.index, INDEX_COLUMNS);
-  const cache = { byKey: {}, rowsByLeadId: {}, sheet: sheet };
+  const cache = { byKey: {}, rowsByLeadId: {}, sheet: sheet, pending: [] };
 
   const lastRow = sheet.getLastRow();
   if (lastRow > 1) {
@@ -1659,21 +1754,36 @@ function findDuplicate_(lead) {
  */
 function indexLead_(lead, tab, row) {
   const index = loadIndex_();
-  const stamp = nowStamp_();
   dedupeKeys_(lead).forEach(function (k) {
     if (index.byKey[k.key]) return;
-    index.sheet.appendRow([k.key, lead.leadId, tab, row, stamp]);
-    const entry = {
-      key: k.key,
-      leadId: lead.leadId,
-      tab: tab,
-      row: row,
-      indexRow: index.sheet.getLastRow()
-    };
+    const entry = { key: k.key, leadId: lead.leadId, tab: tab, row: row, indexRow: 0 };
     index.byKey[k.key] = entry;
+    index.pending.push(entry);
     if (!index.rowsByLeadId[lead.leadId]) index.rowsByLeadId[lead.leadId] = [];
     index.rowsByLeadId[lead.leadId].push(entry);
   });
+}
+
+/**
+ * Writes buffered index entries in one go.
+ *
+ * Entries are buffered rather than appended one at a time because an import of
+ * several hundred leads would otherwise make a separate write per contact
+ * detail, which is what pushes a big import past the six-minute limit.
+ */
+function flushIndex_() {
+  const index = INDEX_CACHE_;
+  if (!index || !index.pending.length) return;
+
+  const stamp = nowStamp_();
+  const start = index.sheet.getLastRow() + 1;
+  index.sheet.getRange(start, 1, index.pending.length, INDEX_COLUMNS.length).setValues(
+    index.pending.map(function (entry) {
+      return [entry.key, entry.leadId, entry.tab, entry.row, stamp];
+    })
+  );
+  index.pending.forEach(function (entry, i) { entry.indexRow = start + i; });
+  index.pending = [];
 }
 
 /**
@@ -1685,6 +1795,9 @@ function indexLead_(lead, tab, row) {
  */
 function moveIndexEntries_(leadId, tab, row) {
   const index = loadIndex_();
+  // These entries are addressed by their row in _Index, so anything still
+  // buffered has to reach the sheet before it can be updated.
+  flushIndex_();
   const entries = index.rowsByLeadId[leadId] || [];
   const stamp = nowStamp_();
   entries.forEach(function (entry) {
@@ -1703,18 +1816,17 @@ function moveIndexEntries_(leadId, tab, row) {
  */
 function mergeIndexKeys_(incoming, entry) {
   const index = loadIndex_();
-  const stamp = nowStamp_();
   dedupeKeys_(incoming).forEach(function (k) {
     if (index.byKey[k.key]) return;
-    index.sheet.appendRow([k.key, entry.leadId, entry.tab, entry.row, stamp]);
     const added = {
       key: k.key,
       leadId: entry.leadId,
       tab: entry.tab,
       row: entry.row,
-      indexRow: index.sheet.getLastRow()
+      indexRow: 0
     };
     index.byKey[k.key] = added;
+    index.pending.push(added);
     if (!index.rowsByLeadId[entry.leadId]) index.rowsByLeadId[entry.leadId] = [];
     index.rowsByLeadId[entry.leadId].push(added);
   });
@@ -2209,6 +2321,7 @@ function maybePromote_(sheet, row, original, incoming, leadId) {
 /** Keeps index row numbers correct after a row is deleted from a tab. */
 function shiftIndexRowsAfterDelete_(tabName, deletedRow) {
   const index = loadIndex_();
+  flushIndex_();
   Object.keys(index.byKey).forEach(function (key) {
     const entry = index.byKey[key];
     if (entry.tab !== tabName || entry.row <= deletedRow) return;
@@ -2341,6 +2454,8 @@ function intakeBatch_(records, context) {
       merged: summary.merged, skipped: summary.skipped, byTab: summary.byTab
     });
 
+    flushIndex_();
+    flushSubSources_();
     housekeeping_();
     maybeSendDigest_(summary.created);
     return summary;
@@ -2350,8 +2465,8 @@ function intakeBatch_(records, context) {
 /** Keeps the archive tabs from growing without bound. */
 function housekeeping_() {
   try {
-    trimSheet_(SHEETS.raw, Number(setting_('Raw Payload Retention (rows)', '2000')) || 2000);
-    trimSheet_(SHEETS.log, Number(setting_('Log Retention (rows)', '5000')) || 5000);
+    trimSheet_(SHEETS.raw, numberSetting_('Raw Payload Retention (rows)', 2000));
+    trimSheet_(SHEETS.log, numberSetting_('Log Retention (rows)', 5000));
   } catch (err) {
     console.error('Housekeeping failed: ' + err);
   }
@@ -2848,6 +2963,7 @@ function seedSettings_() {
     'Promote Unassigned Leads': 'yes = move a lead out of Unassigned once a later form reveals the event type.',
     'Append Duplicate Notes': 'yes = add the repeat inquiry text to the original lead’s Message.',
     'Normalise Event Dates On Import': 'yes = rewrite unambiguous dates as YYYY-MM-DD when importing an existing tab. no = leave every date exactly as typed.',
+    'Import Time Budget (seconds)': 'How long an import works before stopping cleanly and asking to be run again. Apps Script kills a run at 360.',
     'Accept Test Leads': 'yes = store Google Ads test leads instead of only acknowledging them.',
     'Round Robin Assignment': 'yes = share leads across the _Team roster.',
     'Presenters': 'The default repeating sequence down the Presenter column, in order. Overridden per event type below.',
@@ -3513,6 +3629,9 @@ function runSelfTest() {
   check('unknown column still reaches the notes',
     notesRecord.extras.some(function (e) { return e.value === 'Iris'; }), 'true');
 
+  check('settings: a deliberate zero is not read as "unset"',
+    numberSetting_('No Such Setting At All', 240), 240);
+
   // --- The presenter sequence ----------------------------------------------
   check('presenter: first row', presenterFor_('Wedding', 2, 'Bea'), 'AJ');
   check('presenter: second row', presenterFor_('Wedding', 3, 'Bea'), 'Pam');
@@ -3710,7 +3829,19 @@ function rosterReport_() {
  *
  * A tab that already has a Presenter column keeps every value in it. The
  * repeating sequence only governs leads that arrive from here on.
+ *
+ * Rows are processed in chunks with a time budget. A tab too big to finish
+ * inside Apps Script's six minutes stops cleanly and says how many are left;
+ * running it again picks up where it stopped, because a row that already has a
+ * Lead ID is skipped.
  */
+
+/** Rows read, filled and written back in one go. */
+const MIGRATE_CHUNK_ROWS = 200;
+
+/** Default seconds to work for before stopping cleanly. Apps Script kills a
+ *  run at six minutes; stopping first is what makes the import resumable. */
+const MIGRATE_TIME_BUDGET_SECONDS = 240;
 
 /**
  * @param {!Object} options
@@ -3726,6 +3857,7 @@ function rosterReport_() {
  */
 function migrateExistingTab(options) {
   const opts = options || {};
+  const startedAt = Date.now();
   const tabName = cleanText_(opts.tabName);
   if (!tabName) throw new Error('Choose which tab to migrate.');
 
@@ -3746,6 +3878,8 @@ function migrateExistingTab(options) {
     duplicatesFound: 0,
     duplicates: [],
     ambiguousDates: [],
+    stoppedEarly: false,
+    remaining: 0,
     mapping: describeMapping_(table.headers),
     dryRun: !!opts.dryRun
   };
@@ -3756,102 +3890,141 @@ function migrateExistingTab(options) {
   const subSource = cleanText_(opts.subSource) || 'Pre-automation';
   const headers = table.headers.slice();
 
+  const budgetMs = 1000 * numberSetting_(
+    'Import Time Budget (seconds)', MIGRATE_TIME_BUDGET_SECONDS);
+
   const run = function () {
     if (!opts.dryRun) ensureHeaders_(sheet, LEAD_COLUMNS);
-    const idCol = headerMap_(sheet)[squashKey_('Lead ID')];
 
-    table.rows.forEach(function (row, i) {
-      const rowNumber = table.headerRow + 1 + i;
+    const width = sheet.getLastColumn();
+    const bound = fieldColumns_(sheet).byField;
+    const sheetHeaders = sheet.getRange(1, 1, 1, width).getValues()[0]
+      .map(function (h) { return cleanText_(h); });
+    const allLeads = opts.dryRun ? null : getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS);
+    const firstRow = table.headerRow + 1;
+    const lastRow = sheet.getLastRow();
 
-      const flat = {};
-      headers.forEach(function (header, c) {
-        const value = row[c];
-        if (!header || value === '' || value === null || value === undefined) return;
-        const key = flat[header] === undefined ? header : header + ' (' + (c + 1) + ')';
-        flat[key] = value;
-      });
-      if (!Object.keys(flat).length) {
-        summary.empty++;
-        return;
+    // Rows are read and written a chunk at a time. Touching one cell per field
+    // meant roughly fifty round trips per row, which runs out of Apps Script's
+    // six minutes somewhere around row seventy.
+    for (let start = firstRow; start <= lastRow; start += MIGRATE_CHUNK_ROWS) {
+      if (Date.now() - startedAt >= budgetMs) {
+        summary.stoppedEarly = true;
+        summary.remaining = lastRow - start + 1;
+        break;
       }
 
-      const existingId = idCol ? cleanText_(sheet.getRange(rowNumber, idCol).getValue()) : '';
-      if (existingId) {
-        summary.alreadyDone++;
-        return;
-      }
+      const height = Math.min(MIGRATE_CHUNK_ROWS, lastRow - start + 1);
+      const block = sheet.getRange(start, 1, height, width).getValues();
+      const newAllLeads = [];
+      const newDuplicates = [];
+      let touched = false;
 
-      const mapped = mapRecord_(flat);
-      const lead = buildLead_({
-        fields: mapped.fields,
-        extras: mapped.extras,
-        messages: mapped.messages,
-        source: source,
-        subSource: subSource,
-        receivedAt: normalizeDate_(mapped.fields.receivedAt) || '',
-        defaultEventType: opts.defaultEventType,
-        // Historical rows often carry their own Source and Sub-Source columns,
-        // and those are more accurate than anything chosen in the dialog.
-        preferRecordSource: true,
-        preferRecordSubSource: true
-      });
-      if (!lead.email && !lead.phone && !lead.fullName) {
-        summary.empty++;
-        return;
-      }
-      if (!cleanText_(lead.assignedTo)) lead.assignedTo = salesperson;
+      block.forEach(function (values, i) {
+        const rowNumber = start + i;
 
-      const dateInfo = classifyDate_(mapped.fields.eventDate);
-      if (dateInfo.status === 'ambiguous') {
-        summary.ambiguousDates.push({
-          row: rowNumber,
-          name: lead.fullName || lead.email || lead.phone,
-          value: dateInfo.original
+        const flat = {};
+        sheetHeaders.forEach(function (header, c) {
+          const value = values[c];
+          if (!header || value === '' || value === null || value === undefined) return;
+          const key = flat[header] === undefined ? header : header + ' (' + (c + 1) + ')';
+          flat[key] = value;
         });
-      }
+        if (!Object.keys(flat).length) {
+          summary.empty++;
+          return;
+        }
+        if (bound.leadId && cleanText_(values[bound.leadId - 1])) {
+          summary.alreadyDone++;
+          return;
+        }
 
-      const duplicate = findDuplicate_(lead);
-      if (duplicate) {
-        summary.duplicatesFound++;
-        summary.duplicates.push({
-          row: rowNumber,
-          name: lead.fullName || lead.email || lead.phone,
-          matchedOn: duplicate.matchedOn,
-          existsIn: duplicate.entry.tab
+        const mapped = mapRecord_(flat);
+        const lead = buildLead_({
+          fields: mapped.fields,
+          extras: mapped.extras,
+          messages: mapped.messages,
+          source: source,
+          subSource: subSource,
+          receivedAt: normalizeDate_(mapped.fields.receivedAt) || '',
+          defaultEventType: opts.defaultEventType,
+          // Historical rows often carry their own Source and Sub-Source columns,
+          // and those are more accurate than anything chosen in the dialog.
+          preferRecordSource: true,
+          preferRecordSubSource: true
         });
-      }
+        if (!lead.email && !lead.phone && !lead.fullName) {
+          summary.empty++;
+          return;
+        }
+        if (!cleanText_(lead.assignedTo)) lead.assignedTo = salesperson;
 
-      if (opts.dryRun) {
+        const dateInfo = classifyDate_(mapped.fields.eventDate);
+        if (dateInfo.status === 'ambiguous') {
+          summary.ambiguousDates.push({
+            row: rowNumber,
+            name: lead.fullName || lead.email || lead.phone,
+            value: dateInfo.original
+          });
+        }
+
+        const duplicate = findDuplicate_(lead);
+        if (duplicate) {
+          summary.duplicatesFound++;
+          summary.duplicates.push({
+            row: rowNumber,
+            name: lead.fullName || lead.email || lead.phone,
+            matchedOn: duplicate.matchedOn,
+            existsIn: duplicate.entry.tab
+          });
+        }
+
         summary.migrated++;
-        return;
-      }
+        if (opts.dryRun) return;
 
-      writeMigratedRow_(sheet, rowNumber, lead, dateInfo);
-      appendLead_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS), lead);
-      // Free keys still get indexed, so a row that duplicates another is at
-      // least findable by whichever contact detail is unique to it.
-      indexLead_(lead, tabName, rowNumber);
-      if (duplicate) {
-        recordDuplicate_(
-          Object.assign({}, lead, { status: 'Duplicate (pre-existing row)' }),
-          duplicate, duplicate.entry.leadId, duplicate.entry.tab
-        );
+        applyMigratedRow_(values, bound, lead, dateInfo);
+        touched = true;
+        newAllLeads.push(leadToRow_(allLeads, lead));
+        // Free keys still get indexed, so a row that duplicates another is at
+        // least findable by whichever contact detail is unique to it.
+        indexLead_(lead, tabName, rowNumber);
+        if (duplicate) {
+          newDuplicates.push(Object.assign({}, lead, {
+            status: 'Duplicate (pre-existing row)',
+            matchedOn: duplicate.matchedOn,
+            originalLeadId: duplicate.entry.leadId,
+            originalTab: duplicate.entry.tab
+          }));
+        }
+      });
+
+      if (opts.dryRun) continue;
+      if (touched) sheet.getRange(start, 1, height, width).setValues(block);
+      appendRows_(allLeads, newAllLeads);
+      if (newDuplicates.length) {
+        const dupSheet = getOrCreateSheet_(SHEETS.duplicates, LEAD_COLUMNS.concat(DUPLICATE_EXTRA_COLUMNS));
+        appendRows_(dupSheet, newDuplicates.map(function (record) {
+          return leadToRow_(dupSheet, record);
+        }));
       }
-      summary.migrated++;
-    });
+      flushIndex_();
+    }
+
+    if (!opts.dryRun) flushSubSources_();
   };
 
   if (opts.dryRun) {
     run();
   } else {
-    withLock_(run, 120000);
+    withLock_(run, 300000);
     protectTextColumns_(sheet);
   }
 
   log_('INFO', 'migrate', (opts.dryRun ? 'Previewed' : 'Migrated') + ' "' + tabName + '"', {
     rows: summary.rows, migrated: summary.migrated,
     alreadyDone: summary.alreadyDone, duplicatesFound: summary.duplicatesFound,
-    ambiguousDates: summary.ambiguousDates.length
+    ambiguousDates: summary.ambiguousDates.length,
+    stoppedEarly: summary.stoppedEarly, remaining: summary.remaining
   });
   return summary;
 }
@@ -3866,58 +4039,60 @@ function confirmMigratable_(tabName) {
 }
 
 /**
- * Writes the canonical columns of one historical row.
- * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
- * @param {number} rowNumber
+ * Fills the canonical columns of one historical row, in memory.
+ *
+ * The row is a plain array read from the sheet and written back with its
+ * chunk, so nothing here costs a round trip — which is the whole point.
+ *
+ * @param {!Array<*>} values The row, mutated in place.
+ * @param {!Object<string,number>} bound Field name -> 1-based column.
  * @param {!Object} lead
  * @param {{status: string, value: string, original: string}} dateInfo
  */
-function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
-  const map = headerMap_(sheet);
-  const updates = {};
+function applyMigratedRow_(values, bound, lead, dateInfo) {
+  const set = function (field, value) {
+    const col = bound[field];
+    if (!col) return;
+    if (value === '' || value === null || value === undefined) return;
+    values[col - 1] = value;
+  };
+  const fill = function (field, value) {
+    const col = bound[field];
+    if (!col) return;
+    if (cleanText_(values[col - 1])) return;
+    set(field, value);
+  };
 
   // The only value that may replace one already in the sheet, and only when the
   // date reads one way. An ambiguous one stays exactly as typed and stands out
   // against the normalised rows around it — which is the point.
   if (dateInfo && dateInfo.status === 'iso' && settingIsOn_('Normalise Event Dates On Import')) {
-    updates['Event Date'] = dateInfo.value;
+    set('eventDate', dateInfo.value);
   }
 
-  const fillIfBlank = {
-    'Presenter': lead.presenter,
-    'Lead ID': lead.leadId,
-    'Received At': lead.receivedAt,
-    'Source': lead.source,
-    'Sub-Source': lead.subSource,
-    'Event Type': lead.eventTypeLabel,
-    'Event Type (Raw)': lead.eventTypeRaw,
-    'Full Name': lead.fullName,
-    'First Name': lead.firstName,
-    'Last Name': lead.lastName,
-    'Company': lead.company,
-    'Event Date (Raw)': dateInfo ? dateInfo.original : '',
-    'Guest Count': lead.guestCount,
-    'Venue / Location': lead.venue,
-    'Budget': lead.budget,
-    'Message': lead.message,
-    'Campaign': lead.campaign,
-    'Assigned To': lead.assignedTo,
-    'Status': lead.status,
-    'Touches': lead.touches,
-    'First Seen At': lead.firstSeenAt,
-    'Last Touch At': lead.lastTouchAt,
-    'All Sub-Sources': lead.allSubSources
-  };
-  Object.keys(fillIfBlank).forEach(function (header) {
-    const col = map[squashKey_(header)];
-    if (!col) return;
-    const value = fillIfBlank[header];
-    if (value === '' || value === null || value === undefined) return;
-    if (cleanText_(sheet.getRange(rowNumber, col).getValue())) return;
-    updates[header] = value;
-  });
-
-  updateRowCells_(sheet, rowNumber, updates);
+  fill('presenter', lead.presenter);
+  fill('leadId', lead.leadId);
+  fill('receivedAt', lead.receivedAt);
+  fill('source', lead.source);
+  fill('subSource', lead.subSource);
+  fill('eventTypeLabel', lead.eventTypeLabel);
+  fill('eventTypeRaw', lead.eventTypeRaw);
+  fill('fullName', lead.fullName);
+  fill('firstName', lead.firstName);
+  fill('lastName', lead.lastName);
+  fill('company', lead.company);
+  fill('eventDateRaw', dateInfo ? dateInfo.original : '');
+  fill('guestCount', lead.guestCount);
+  fill('venue', lead.venue);
+  fill('budget', lead.budget);
+  fill('message', lead.message);
+  fill('campaign', lead.campaign);
+  fill('assignedTo', lead.assignedTo);
+  fill('status', lead.status);
+  fill('touches', lead.touches);
+  fill('firstSeenAt', lead.firstSeenAt);
+  fill('lastTouchAt', lead.lastTouchAt);
+  fill('allSubSources', lead.allSubSources);
 }
 
 // ==========================================================================
@@ -3950,7 +4125,7 @@ const DIGEST_MARK_KEY = 'DIGEST_MARK_ROW';
  */
 function maybeSendDigest_(createdCount) {
   if (!createdCount) return;
-  const every = Number(setting_('Digest Every N Leads', '0')) || 0;
+  const every = numberSetting_('Digest Every N Leads', 0);
   if (every <= 0) return;
 
   const pending = pendingDigestRows_();

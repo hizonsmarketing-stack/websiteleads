@@ -76,6 +76,7 @@ function seedSettings_() {
     'Promote Unassigned Leads': 'yes = move a lead out of Unassigned once a later form reveals the event type.',
     'Append Duplicate Notes': 'yes = add the repeat inquiry text to the original lead’s Message.',
     'Normalise Event Dates On Import': 'yes = rewrite unambiguous dates as YYYY-MM-DD when importing an existing tab. no = leave every date exactly as typed.',
+    'Import Time Budget (seconds)': 'How long an import works before stopping cleanly and asking to be run again. Apps Script kills a run at 360.',
     'Accept Test Leads': 'yes = store Google Ads test leads instead of only acknowledging them.',
     'Round Robin Assignment': 'yes = share leads across the _Team roster.',
     'Presenters': 'The default repeating sequence down the Presenter column, in order. Overridden per event type below.',

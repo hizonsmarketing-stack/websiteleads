@@ -315,9 +315,11 @@ Apps Script gives a consumer Google account roughly 20,000 URL-fetch-free
 executions and 6 minutes per execution — far beyond typical lead volume. The
 things to know:
 
-- A fair worksheet of a few hundred rows imports in one execution. A worksheet
-  of several thousand rows may hit the 6-minute limit; split it in half and
-  import twice — the second half will simply merge anything already loaded.
+- Importing an existing tab reads and writes a block of rows at a time, about
+  1.3 Sheets calls per row. A tab of a few thousand rows is fine; one bigger
+  than the six-minute limit allows stops cleanly, says how many are left, and
+  resumes when run again.
+- A fair worksheet of a few hundred rows imports in one execution.
 - Inbound webhooks are serialised with a document lock, so two forms submitted
   at the same instant can't both create the same lead.
 - `_Raw` and `_Log` self-trim to the retention settings above.

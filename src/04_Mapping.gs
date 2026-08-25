@@ -268,24 +268,19 @@ function buildLead_(input) {
   };
 }
 
+let SOURCES_CACHE_ = null;
+
 /**
- * Looks a form or fair up in the _Sources registry, adding it when it is new.
+ * Reads the _Sources registry once per execution.
  *
- * This is how sub-sources get added "along the way": the first lead from an
- * unrecognised form registers itself with the raw identifier as its name, and
- * the team can then give it a friendlier display name or a default event type
- * without touching any code.
+ * It used to be re-read for every single lead, which is fine for one webhook
+ * call and ruinous for an import of several hundred rows.
  *
- * @param {string} source One of SOURCES.
- * @param {string} rawSubSource The identifier as received.
- * @param {string=} seedEventType Default event type to store when this
- *     sub-source is being registered for the first time.
- * @return {{source: string, label: string, defaultEventType: string}}
+ * @return {!Object}
  */
-function resolveSubSource_(source, rawSubSource, seedEventType) {
-  const raw = cleanText_(rawSubSource) || 'Unknown Form';
+function loadSources_() {
+  if (SOURCES_CACHE_) return SOURCES_CACHE_;
   const sheet = getOrCreateSheet_(SHEETS.sources, SOURCES_COLUMNS);
-  const lastRow = sheet.getLastRow();
   const map = headerMap_(sheet);
   const col = {
     source: map[squashKey_('Source')],
@@ -298,34 +293,99 @@ function resolveSubSource_(source, rawSubSource, seedEventType) {
     count: map[squashKey_('Lead Count')]
   };
 
-  if (lastRow > 1) {
-    const values = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
-    for (let i = 0; i < values.length; i++) {
-      if (squashKey_(values[i][col.raw - 1]) !== squashKey_(raw)) continue;
-      const row = i + 2;
-      sheet.getRange(row, col.lastSeen).setValue(nowStamp_());
-      sheet.getRange(row, col.count).setValue((Number(values[i][col.count - 1]) || 0) + 1);
-      return {
-        source: cleanText_(values[i][col.source - 1]) || source,
-        label: cleanText_(values[i][col.label - 1]) || raw,
-        defaultEventType: cleanText_(values[i][col.eventType - 1])
+  const byKey = {};
+  if (sheet.getLastRow() > 1) {
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+    values.forEach(function (row, i) {
+      const raw = cleanText_(row[col.raw - 1]);
+      if (!raw) return;
+      byKey[squashKey_(raw)] = {
+        row: i + 2,
+        source: cleanText_(row[col.source - 1]),
+        label: cleanText_(row[col.label - 1]) || raw,
+        defaultEventType: cleanText_(row[col.eventType - 1]),
+        count: Number(row[col.count - 1]) || 0,
+        added: 0
       };
-    }
+    });
   }
 
-  const newRow = new Array(sheet.getLastColumn()).fill('');
-  newRow[col.source - 1] = source;
-  newRow[col.raw - 1] = raw;
-  newRow[col.label - 1] = raw;
-  newRow[col.eventType - 1] = cleanText_(seedEventType);
-  newRow[col.active - 1] = 'yes';
-  newRow[col.firstSeen - 1] = nowStamp_();
-  newRow[col.lastSeen - 1] = nowStamp_();
-  newRow[col.count - 1] = 1;
-  sheet.appendRow(newRow);
-  log_('INFO', 'sources', 'Registered new sub-source', { source: source, subSource: raw });
+  SOURCES_CACHE_ = { sheet: sheet, col: col, byKey: byKey, touched: {} };
+  return SOURCES_CACHE_;
+}
 
-  return { source: source, label: raw, defaultEventType: cleanText_(seedEventType) };
+/**
+ * Looks a form or fair up in the _Sources registry, adding it when it is new.
+ *
+ * This is how sub-sources get added "along the way": the first lead from an
+ * unrecognised form registers itself with the raw identifier as its name, and
+ * the team can then give it a friendlier display name or a default event type
+ * without touching any code.
+ *
+ * Counts are tallied in memory and written back by flushSubSources_ at the end
+ * of the batch, so importing four hundred leads writes one row, not eight
+ * hundred cells.
+ *
+ * @param {string} source One of SOURCES.
+ * @param {string} rawSubSource The identifier as received.
+ * @param {string=} seedEventType Default event type to store when this
+ *     sub-source is being registered for the first time.
+ * @return {{source: string, label: string, defaultEventType: string}}
+ */
+function resolveSubSource_(source, rawSubSource, seedEventType) {
+  const cache = loadSources_();
+  const raw = cleanText_(rawSubSource) || 'Unknown Form';
+  const key = squashKey_(raw);
+  let entry = cache.byKey[key];
+
+  if (!entry) {
+    const newRow = new Array(cache.sheet.getLastColumn()).fill('');
+    newRow[cache.col.source - 1] = source;
+    newRow[cache.col.raw - 1] = raw;
+    newRow[cache.col.label - 1] = raw;
+    newRow[cache.col.eventType - 1] = cleanText_(seedEventType);
+    newRow[cache.col.active - 1] = 'yes';
+    newRow[cache.col.firstSeen - 1] = nowStamp_();
+    newRow[cache.col.lastSeen - 1] = nowStamp_();
+    newRow[cache.col.count - 1] = 0;
+    cache.sheet.appendRow(newRow);
+
+    entry = {
+      row: cache.sheet.getLastRow(),
+      source: source,
+      label: raw,
+      defaultEventType: cleanText_(seedEventType),
+      count: 0,
+      added: 0
+    };
+    cache.byKey[key] = entry;
+    log_('INFO', 'sources', 'Registered new sub-source', { source: source, subSource: raw });
+  }
+
+  entry.added += 1;
+  cache.touched[key] = true;
+
+  return {
+    source: entry.source || source,
+    label: entry.label || raw,
+    defaultEventType: entry.defaultEventType
+  };
+}
+
+/** Writes the tallied Last Seen and Lead Count values back to _Sources. */
+function flushSubSources_() {
+  const cache = SOURCES_CACHE_;
+  if (!cache) return;
+  const stamp = nowStamp_();
+  Object.keys(cache.touched).forEach(function (key) {
+    const entry = cache.byKey[key];
+    if (!entry || !entry.added) return;
+    cache.sheet.getRange(entry.row, cache.col.lastSeen).setValue(stamp);
+    cache.sheet.getRange(entry.row, cache.col.count).setValue(entry.count + entry.added);
+    entry.count += entry.added;
+    entry.added = 0;
+  });
+  cache.touched = {};
 }
 
 /** Columns of the _Sources registry. */

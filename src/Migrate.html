@@ -140,6 +140,11 @@
             ? '<strong>' + result.duplicatesFound + ' row(s) match a lead elsewhere</strong> — ' +
               'they stay put; review them in the Duplicates tab.'
             : 'No cross-tab duplicates found.',
+          result.stoppedEarly
+            ? '<strong>Stopped after ' + result.migrated + ' to stay inside Google\'s time limit — ' +
+              result.remaining + ' row(s) still to go.</strong> Run the import again on this tab ' +
+              'to carry on; rows already done are skipped.'
+            : '',
           (result.ambiguousDates || []).length
             ? '<strong>' + result.ambiguousDates.length + ' date(s) could be read two ways</strong> — ' +
               'left exactly as typed, listed below for a human to settle.'

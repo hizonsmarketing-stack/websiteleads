@@ -24,7 +24,7 @@ const DIGEST_MARK_KEY = 'DIGEST_MARK_ROW';
  */
 function maybeSendDigest_(createdCount) {
   if (!createdCount) return;
-  const every = Number(setting_('Digest Every N Leads', '0')) || 0;
+  const every = numberSetting_('Digest Every N Leads', 0);
   if (every <= 0) return;
 
   const pending = pendingDigestRows_();

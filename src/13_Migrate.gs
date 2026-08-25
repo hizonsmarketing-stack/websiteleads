@@ -21,7 +21,19 @@
  *
  * A tab that already has a Presenter column keeps every value in it. The
  * repeating sequence only governs leads that arrive from here on.
+ *
+ * Rows are processed in chunks with a time budget. A tab too big to finish
+ * inside Apps Script's six minutes stops cleanly and says how many are left;
+ * running it again picks up where it stopped, because a row that already has a
+ * Lead ID is skipped.
  */
+
+/** Rows read, filled and written back in one go. */
+const MIGRATE_CHUNK_ROWS = 200;
+
+/** Default seconds to work for before stopping cleanly. Apps Script kills a
+ *  run at six minutes; stopping first is what makes the import resumable. */
+const MIGRATE_TIME_BUDGET_SECONDS = 240;
 
 /**
  * @param {!Object} options
@@ -37,6 +49,7 @@
  */
 function migrateExistingTab(options) {
   const opts = options || {};
+  const startedAt = Date.now();
   const tabName = cleanText_(opts.tabName);
   if (!tabName) throw new Error('Choose which tab to migrate.');
 
@@ -57,6 +70,8 @@ function migrateExistingTab(options) {
     duplicatesFound: 0,
     duplicates: [],
     ambiguousDates: [],
+    stoppedEarly: false,
+    remaining: 0,
     mapping: describeMapping_(table.headers),
     dryRun: !!opts.dryRun
   };
@@ -67,102 +82,141 @@ function migrateExistingTab(options) {
   const subSource = cleanText_(opts.subSource) || 'Pre-automation';
   const headers = table.headers.slice();
 
+  const budgetMs = 1000 * numberSetting_(
+    'Import Time Budget (seconds)', MIGRATE_TIME_BUDGET_SECONDS);
+
   const run = function () {
     if (!opts.dryRun) ensureHeaders_(sheet, LEAD_COLUMNS);
-    const idCol = headerMap_(sheet)[squashKey_('Lead ID')];
 
-    table.rows.forEach(function (row, i) {
-      const rowNumber = table.headerRow + 1 + i;
+    const width = sheet.getLastColumn();
+    const bound = fieldColumns_(sheet).byField;
+    const sheetHeaders = sheet.getRange(1, 1, 1, width).getValues()[0]
+      .map(function (h) { return cleanText_(h); });
+    const allLeads = opts.dryRun ? null : getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS);
+    const firstRow = table.headerRow + 1;
+    const lastRow = sheet.getLastRow();
 
-      const flat = {};
-      headers.forEach(function (header, c) {
-        const value = row[c];
-        if (!header || value === '' || value === null || value === undefined) return;
-        const key = flat[header] === undefined ? header : header + ' (' + (c + 1) + ')';
-        flat[key] = value;
-      });
-      if (!Object.keys(flat).length) {
-        summary.empty++;
-        return;
+    // Rows are read and written a chunk at a time. Touching one cell per field
+    // meant roughly fifty round trips per row, which runs out of Apps Script's
+    // six minutes somewhere around row seventy.
+    for (let start = firstRow; start <= lastRow; start += MIGRATE_CHUNK_ROWS) {
+      if (Date.now() - startedAt >= budgetMs) {
+        summary.stoppedEarly = true;
+        summary.remaining = lastRow - start + 1;
+        break;
       }
 
-      const existingId = idCol ? cleanText_(sheet.getRange(rowNumber, idCol).getValue()) : '';
-      if (existingId) {
-        summary.alreadyDone++;
-        return;
-      }
+      const height = Math.min(MIGRATE_CHUNK_ROWS, lastRow - start + 1);
+      const block = sheet.getRange(start, 1, height, width).getValues();
+      const newAllLeads = [];
+      const newDuplicates = [];
+      let touched = false;
 
-      const mapped = mapRecord_(flat);
-      const lead = buildLead_({
-        fields: mapped.fields,
-        extras: mapped.extras,
-        messages: mapped.messages,
-        source: source,
-        subSource: subSource,
-        receivedAt: normalizeDate_(mapped.fields.receivedAt) || '',
-        defaultEventType: opts.defaultEventType,
-        // Historical rows often carry their own Source and Sub-Source columns,
-        // and those are more accurate than anything chosen in the dialog.
-        preferRecordSource: true,
-        preferRecordSubSource: true
-      });
-      if (!lead.email && !lead.phone && !lead.fullName) {
-        summary.empty++;
-        return;
-      }
-      if (!cleanText_(lead.assignedTo)) lead.assignedTo = salesperson;
+      block.forEach(function (values, i) {
+        const rowNumber = start + i;
 
-      const dateInfo = classifyDate_(mapped.fields.eventDate);
-      if (dateInfo.status === 'ambiguous') {
-        summary.ambiguousDates.push({
-          row: rowNumber,
-          name: lead.fullName || lead.email || lead.phone,
-          value: dateInfo.original
+        const flat = {};
+        sheetHeaders.forEach(function (header, c) {
+          const value = values[c];
+          if (!header || value === '' || value === null || value === undefined) return;
+          const key = flat[header] === undefined ? header : header + ' (' + (c + 1) + ')';
+          flat[key] = value;
         });
-      }
+        if (!Object.keys(flat).length) {
+          summary.empty++;
+          return;
+        }
+        if (bound.leadId && cleanText_(values[bound.leadId - 1])) {
+          summary.alreadyDone++;
+          return;
+        }
 
-      const duplicate = findDuplicate_(lead);
-      if (duplicate) {
-        summary.duplicatesFound++;
-        summary.duplicates.push({
-          row: rowNumber,
-          name: lead.fullName || lead.email || lead.phone,
-          matchedOn: duplicate.matchedOn,
-          existsIn: duplicate.entry.tab
+        const mapped = mapRecord_(flat);
+        const lead = buildLead_({
+          fields: mapped.fields,
+          extras: mapped.extras,
+          messages: mapped.messages,
+          source: source,
+          subSource: subSource,
+          receivedAt: normalizeDate_(mapped.fields.receivedAt) || '',
+          defaultEventType: opts.defaultEventType,
+          // Historical rows often carry their own Source and Sub-Source columns,
+          // and those are more accurate than anything chosen in the dialog.
+          preferRecordSource: true,
+          preferRecordSubSource: true
         });
-      }
+        if (!lead.email && !lead.phone && !lead.fullName) {
+          summary.empty++;
+          return;
+        }
+        if (!cleanText_(lead.assignedTo)) lead.assignedTo = salesperson;
 
-      if (opts.dryRun) {
+        const dateInfo = classifyDate_(mapped.fields.eventDate);
+        if (dateInfo.status === 'ambiguous') {
+          summary.ambiguousDates.push({
+            row: rowNumber,
+            name: lead.fullName || lead.email || lead.phone,
+            value: dateInfo.original
+          });
+        }
+
+        const duplicate = findDuplicate_(lead);
+        if (duplicate) {
+          summary.duplicatesFound++;
+          summary.duplicates.push({
+            row: rowNumber,
+            name: lead.fullName || lead.email || lead.phone,
+            matchedOn: duplicate.matchedOn,
+            existsIn: duplicate.entry.tab
+          });
+        }
+
         summary.migrated++;
-        return;
-      }
+        if (opts.dryRun) return;
 
-      writeMigratedRow_(sheet, rowNumber, lead, dateInfo);
-      appendLead_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS), lead);
-      // Free keys still get indexed, so a row that duplicates another is at
-      // least findable by whichever contact detail is unique to it.
-      indexLead_(lead, tabName, rowNumber);
-      if (duplicate) {
-        recordDuplicate_(
-          Object.assign({}, lead, { status: 'Duplicate (pre-existing row)' }),
-          duplicate, duplicate.entry.leadId, duplicate.entry.tab
-        );
+        applyMigratedRow_(values, bound, lead, dateInfo);
+        touched = true;
+        newAllLeads.push(leadToRow_(allLeads, lead));
+        // Free keys still get indexed, so a row that duplicates another is at
+        // least findable by whichever contact detail is unique to it.
+        indexLead_(lead, tabName, rowNumber);
+        if (duplicate) {
+          newDuplicates.push(Object.assign({}, lead, {
+            status: 'Duplicate (pre-existing row)',
+            matchedOn: duplicate.matchedOn,
+            originalLeadId: duplicate.entry.leadId,
+            originalTab: duplicate.entry.tab
+          }));
+        }
+      });
+
+      if (opts.dryRun) continue;
+      if (touched) sheet.getRange(start, 1, height, width).setValues(block);
+      appendRows_(allLeads, newAllLeads);
+      if (newDuplicates.length) {
+        const dupSheet = getOrCreateSheet_(SHEETS.duplicates, LEAD_COLUMNS.concat(DUPLICATE_EXTRA_COLUMNS));
+        appendRows_(dupSheet, newDuplicates.map(function (record) {
+          return leadToRow_(dupSheet, record);
+        }));
       }
-      summary.migrated++;
-    });
+      flushIndex_();
+    }
+
+    if (!opts.dryRun) flushSubSources_();
   };
 
   if (opts.dryRun) {
     run();
   } else {
-    withLock_(run, 120000);
+    withLock_(run, 300000);
     protectTextColumns_(sheet);
   }
 
   log_('INFO', 'migrate', (opts.dryRun ? 'Previewed' : 'Migrated') + ' "' + tabName + '"', {
     rows: summary.rows, migrated: summary.migrated,
     alreadyDone: summary.alreadyDone, duplicatesFound: summary.duplicatesFound,
-    ambiguousDates: summary.ambiguousDates.length
+    ambiguousDates: summary.ambiguousDates.length,
+    stoppedEarly: summary.stoppedEarly, remaining: summary.remaining
   });
   return summary;
 }
@@ -177,56 +231,58 @@ function confirmMigratable_(tabName) {
 }
 
 /**
- * Writes the canonical columns of one historical row.
- * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
- * @param {number} rowNumber
+ * Fills the canonical columns of one historical row, in memory.
+ *
+ * The row is a plain array read from the sheet and written back with its
+ * chunk, so nothing here costs a round trip — which is the whole point.
+ *
+ * @param {!Array<*>} values The row, mutated in place.
+ * @param {!Object<string,number>} bound Field name -> 1-based column.
  * @param {!Object} lead
  * @param {{status: string, value: string, original: string}} dateInfo
  */
-function writeMigratedRow_(sheet, rowNumber, lead, dateInfo) {
-  const map = headerMap_(sheet);
-  const updates = {};
+function applyMigratedRow_(values, bound, lead, dateInfo) {
+  const set = function (field, value) {
+    const col = bound[field];
+    if (!col) return;
+    if (value === '' || value === null || value === undefined) return;
+    values[col - 1] = value;
+  };
+  const fill = function (field, value) {
+    const col = bound[field];
+    if (!col) return;
+    if (cleanText_(values[col - 1])) return;
+    set(field, value);
+  };
 
   // The only value that may replace one already in the sheet, and only when the
   // date reads one way. An ambiguous one stays exactly as typed and stands out
   // against the normalised rows around it — which is the point.
   if (dateInfo && dateInfo.status === 'iso' && settingIsOn_('Normalise Event Dates On Import')) {
-    updates['Event Date'] = dateInfo.value;
+    set('eventDate', dateInfo.value);
   }
 
-  const fillIfBlank = {
-    'Presenter': lead.presenter,
-    'Lead ID': lead.leadId,
-    'Received At': lead.receivedAt,
-    'Source': lead.source,
-    'Sub-Source': lead.subSource,
-    'Event Type': lead.eventTypeLabel,
-    'Event Type (Raw)': lead.eventTypeRaw,
-    'Full Name': lead.fullName,
-    'First Name': lead.firstName,
-    'Last Name': lead.lastName,
-    'Company': lead.company,
-    'Event Date (Raw)': dateInfo ? dateInfo.original : '',
-    'Guest Count': lead.guestCount,
-    'Venue / Location': lead.venue,
-    'Budget': lead.budget,
-    'Message': lead.message,
-    'Campaign': lead.campaign,
-    'Assigned To': lead.assignedTo,
-    'Status': lead.status,
-    'Touches': lead.touches,
-    'First Seen At': lead.firstSeenAt,
-    'Last Touch At': lead.lastTouchAt,
-    'All Sub-Sources': lead.allSubSources
-  };
-  Object.keys(fillIfBlank).forEach(function (header) {
-    const col = map[squashKey_(header)];
-    if (!col) return;
-    const value = fillIfBlank[header];
-    if (value === '' || value === null || value === undefined) return;
-    if (cleanText_(sheet.getRange(rowNumber, col).getValue())) return;
-    updates[header] = value;
-  });
-
-  updateRowCells_(sheet, rowNumber, updates);
+  fill('presenter', lead.presenter);
+  fill('leadId', lead.leadId);
+  fill('receivedAt', lead.receivedAt);
+  fill('source', lead.source);
+  fill('subSource', lead.subSource);
+  fill('eventTypeLabel', lead.eventTypeLabel);
+  fill('eventTypeRaw', lead.eventTypeRaw);
+  fill('fullName', lead.fullName);
+  fill('firstName', lead.firstName);
+  fill('lastName', lead.lastName);
+  fill('company', lead.company);
+  fill('eventDateRaw', dateInfo ? dateInfo.original : '');
+  fill('guestCount', lead.guestCount);
+  fill('venue', lead.venue);
+  fill('budget', lead.budget);
+  fill('message', lead.message);
+  fill('campaign', lead.campaign);
+  fill('assignedTo', lead.assignedTo);
+  fill('status', lead.status);
+  fill('touches', lead.touches);
+  fill('firstSeenAt', lead.firstSeenAt);
+  fill('lastTouchAt', lead.lastTouchAt);
+  fill('allSubSources', lead.allSubSources);
 }

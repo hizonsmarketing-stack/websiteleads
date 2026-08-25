@@ -410,6 +410,31 @@ const second = api.migrateExistingTab({ tabName: 'Iris' });
 check('re-running the migration is a no-op', second.migrated, 0);
 check('already-migrated rows are recognised', second.alreadyDone, 4);
 
+// A tab too big to finish inside Google's limit stops cleanly and resumes.
+const big = book.insertSheet('Tonio');
+const bigRows = [['Full name', 'Email', 'Contact number', 'Event']];
+for (let i = 1; i <= 6; i++) {
+  bigRows.push(['Big ' + i, 'big' + i + '@example.com', '0917 300 ' + (1000 + i), 'Wedding']);
+}
+big.getRange(1, 1, bigRows.length, 4).setValues(bigRows);
+tab('_Team').appendRow(['Tonio', 'Tonio', 'Wedding', '', 'yes', 0, '', '']);
+setSetting('Import Time Budget (seconds)', '0');
+api.resetCaches();
+
+const halted = api.migrateExistingTab({ tabName: 'Tonio' });
+check('it stops rather than being killed', halted.stoppedEarly, 'true');
+check('and says how many are left', halted.remaining, 6);
+check('writing nothing it cannot finish', halted.migrated, 0);
+check('so no row is left half-migrated', rows('Tonio'), 6);
+
+setSetting('Import Time Budget (seconds)', '240');
+api.resetCaches();
+const resumed = api.migrateExistingTab({ tabName: 'Tonio' });
+check('running it again finishes the job', resumed.migrated, 6);
+check('and does not stop early this time', resumed.stoppedEarly, 'false');
+check('every row now has a lead id',
+  String(cellOf('Tonio', 7, 'Lead ID')).slice(0, 3), 'LD-');
+
 realLog('\n--- a caller tab that uses its own column names ---');
 silence(quiet);
 // A tab that has been in use for years does not use our column names. Its

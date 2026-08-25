@@ -118,6 +118,8 @@ function intakeBatch_(records, context) {
       merged: summary.merged, skipped: summary.skipped, byTab: summary.byTab
     });
 
+    flushIndex_();
+    flushSubSources_();
     housekeeping_();
     maybeSendDigest_(summary.created);
     return summary;
@@ -127,8 +129,8 @@ function intakeBatch_(records, context) {
 /** Keeps the archive tabs from growing without bound. */
 function housekeeping_() {
   try {
-    trimSheet_(SHEETS.raw, Number(setting_('Raw Payload Retention (rows)', '2000')) || 2000);
-    trimSheet_(SHEETS.log, Number(setting_('Log Retention (rows)', '5000')) || 5000);
+    trimSheet_(SHEETS.raw, numberSetting_('Raw Payload Retention (rows)', 2000));
+    trimSheet_(SHEETS.log, numberSetting_('Log Retention (rows)', 5000));
   } catch (err) {
     console.error('Housekeeping failed: ' + err);
   }
