@@ -118,6 +118,18 @@ function runSelfTest() {
     mapRecord_({ 'What venue have you chosen?': 'N/A' }).extras.length, 1);
   check('map: "No" reads correctly as free text',
     mapRecord_({ 'Notes': 'No' }).fields.message, 'No');
+
+  // --- the unassigned alert -----------------------------------------------
+  check('notify: off while nobody is listed',
+    maybeNotifyUnassigned_([{ action: 'created', tab: SHEETS.unassigned, row: 2 }]), 0);
+  check('notify: a routed lead is not a routing failure',
+    (function () {
+      const before = setting_('Notify Unassigned To', '');
+      return before === '' ? maybeNotifyUnassigned_(
+        [{ action: 'created', tab: 'Wedding', row: 2 }]) : 0;
+    })(), 0);
+  check('notify: a merge is not a new problem',
+    maybeNotifyUnassigned_([{ action: 'merged', tab: SHEETS.unassigned, row: 2 }]), 0);
   check('route: blank falls back', resolveEventType_('').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: context used when field is blank',

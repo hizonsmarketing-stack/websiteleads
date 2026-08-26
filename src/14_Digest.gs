@@ -238,6 +238,88 @@ function escapeHtml_(text) {
 }
 
 /**
+ * Tells someone a lead could not be routed.
+ *
+ * An Unassigned lead is the one case where the automation has done all it can
+ * and a person has to look: the wording on the form matched no event type, so
+ * nobody owns it and no presenter is set. Waiting for someone to notice the
+ * tab is how a lead goes cold, so this says so at the moment it happens.
+ *
+ * Sent per batch rather than per lead, for the same reason the digest is: a
+ * fair worksheet with forty unroutable rows is one problem to look at, not
+ * forty emails. It is deliberately independent of "Notify On New Lead" —
+ * wanting to hear about routing failures is not the same as wanting a mail for
+ * every lead — and, like every other alert here, it ignores merged duplicates.
+ *
+ * The raw wording is the useful part: it is what to add to a keyword list in
+ * 00_Config.gs so the next lead like it routes itself.
+ *
+ * @param {!Array<!Object>} results Per-record results from intakeBatch_.
+ * @return {number} How many leads were reported.
+ */
+function maybeNotifyUnassigned_(results) {
+  const recipients = String(setting_('Notify Unassigned To', ''))
+    .split(/[,;]/)
+    .map(function (address) { return address.trim(); })
+    .filter(function (address) { return address !== ''; });
+  if (!recipients.length) return 0;
+
+  const landed = (results || []).filter(function (result) {
+    return result.action === 'created' && result.tab === SHEETS.unassigned && result.row;
+  });
+  if (!landed.length) return 0;
+
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.unassigned);
+  if (!sheet) return 0;
+  const columns = fieldColumns_(sheet).byField;
+  const read = function (row, field) {
+    const col = columns[field];
+    return col ? cleanText_(sheet.getRange(row, col).getValue()) : '';
+  };
+
+  const lines = landed.map(function (result) {
+    const wording = read(result.row, 'eventTypeRaw');
+    return [
+      read(result.row, 'fullName') || '(no name given)',
+      '  wording on the form: ' + (wording ? '"' + wording + '"' : '(nothing sent)'),
+      '  from: ' + (read(result.row, 'subSource') || 'unknown form'),
+      '  contact: ' + (read(result.row, 'email') || read(result.row, 'phone') || '(none)')
+    ].join('\n');
+  });
+
+  const count = landed.length;
+  const subject = count === 1
+    ? '[Unassigned lead] ' + (read(landed[0].row, 'fullName') || 'needs an event type')
+    : '[' + count + ' unassigned leads] nobody could be assigned';
+
+  try {
+    MailApp.sendEmail({
+      to: recipients.join(','),
+      subject: subject,
+      body: [
+        count === 1
+          ? 'A lead arrived without an event type, so nobody has been assigned to it:'
+          : count + ' leads arrived without an event type, so nobody has been assigned to them:',
+        '',
+        lines.join('\n\n'),
+        '',
+        'They are waiting on the ' + SHEETS.unassigned + ' tab. Set the event type and they',
+        'route themselves; if the same wording keeps arriving, add it to that event',
+        'type\'s keyword list so it is handled next time.',
+        '',
+        getSpreadsheet_().getUrl()
+      ].join('\n')
+    });
+  } catch (err) {
+    log_('WARN', 'notify', 'Could not send the unassigned alert', { error: String(err) });
+    return 0;
+  }
+
+  log_('INFO', 'notify', 'Reported unassigned leads', { count: count });
+  return count;
+}
+
+/**
  * Menu action: send a digest now, whatever the count is at.
  * @return {string} What happened, for the alert.
  */

@@ -126,6 +126,7 @@ All in the `_Settings` tab. Changes take effect on the next submission.
 | `Presenters` | `AJ, Pam, Mhay, Vanessa` | The default sequence down the Presenter column, in order |
 | `Presenters - <Event Type>` | blank, or `caller`, or a list | Overrides the default for that event type. Corporate ships as `caller` |
 | `Notify On New Lead` | `no` | Email the addresses in the Notify rows |
+| `Notify Unassigned To` | blank | Addresses told when a lead arrives with no event type. One mail per batch, independent of the row above |
 | `Raw Payload Retention (rows)` | `2000` | How much of `_Raw` to keep |
 | `Log Retention (rows)` | `5000` | How much of `_Log` to keep |
 | `Notify - <Tab>` | blank | Extra addresses copied on new leads of that event type, on top of the assignee |
@@ -213,6 +214,34 @@ Three things it deliberately does not do:
   covering all fifty.
 - **Importing your history never triggers it.** Migrating years of past leads
   would otherwise fire a digest for every ten of them.
+
+### When a lead can't be routed
+
+A lead whose event type couldn't be worked out goes to **Unassigned** with no
+owner and no presenter — the one case where the automation has done all it can
+and a person has to look. Waiting for someone to notice the tab is how a lead
+goes cold, so put addresses in `Notify Unassigned To` and they are told at the
+moment it happens.
+
+The mail names the wording the form actually sent, which is the useful part:
+it is what to add to a keyword list so the next lead like it routes itself.
+
+```
+Subject: [Unassigned lead] Vague Vera
+
+A lead arrived without an event type, so nobody has been assigned to it:
+
+Vague Vera
+  wording on the form: "Something we do not recognise"
+  from: Homepage Inquiry
+  contact: vera@example.com
+```
+
+It follows the same two rules as the digest: **a returning client is not a new
+problem**, so merges are silent, and **a bulk import sends one mail, not
+forty** — a fair worksheet with twelve unroutable rows is one thing to look at.
+It works whether or not `Notify On New Lead` is on, because wanting to hear
+about routing failures is not the same as wanting a mail for every lead.
 
 ### Email alerts
 

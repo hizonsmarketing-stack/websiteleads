@@ -81,6 +81,7 @@ function seedSettings_() {
     'Round Robin Assignment': 'yes = share leads across the _Team roster.',
     'Presenters': 'The default repeating sequence down the Presenter column, in order. Overridden per event type below.',
     'Notify On New Lead': 'yes = email the assignee, and the Notify rows below, as each lead arrives.',
+    'Notify Unassigned To': 'Comma-separated addresses told when a lead arrives with no event type, so nobody has to watch the Unassigned tab. One mail per batch. Works whether or not "Notify On New Lead" is on; blank turns it off.',
     'Digest Every N Leads': 'Send the sales team a summary email every this many new leads. 0 turns it off.',
     'Digest Recipients': 'Comma-separated addresses the digest goes to. Blank means it is never sent.',
     'Raw Payload Retention (rows)': 'Oldest rows in _Raw are trimmed beyond this count.',

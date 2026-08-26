@@ -131,6 +131,7 @@ function intakeBatch_(records, context) {
     flushSubSources_();
     housekeeping_();
     maybeSendDigest_(summary.created);
+    maybeNotifyUnassigned_(summary.results);
     return summary;
   }, 120000);
 }
