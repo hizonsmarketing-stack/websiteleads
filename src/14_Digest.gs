@@ -10,6 +10,16 @@
  * ten new leads forty times over — the migration never triggers a digest.
  */
 
+/**
+ * How many leads the digest lists individually.
+ *
+ * The counts always cover everything; only the roll call is capped. A single
+ * batch can be large — a fair worksheet lands hundreds at once — and Gmail
+ * refuses a body past its size limit outright, so an uncapped list turns the
+ * busiest day of the year into no digest at all.
+ */
+const DIGEST_MAX_LISTED = 50;
+
 /** Script property holding the last All Leads row a digest covered. */
 const DIGEST_MARK_KEY = 'DIGEST_MARK_ROW';
 
@@ -47,10 +57,20 @@ function pendingDigestRows_() {
 
   const lastRow = sheet.getLastRow();
   const props = PropertiesService.getScriptProperties();
-  let mark = Number(props.getProperty(DIGEST_MARK_KEY) || 1);
+  const stored = props.getProperty(DIGEST_MARK_KEY);
 
+  // First time out, start counting from now. Otherwise switching the digest on
+  // would try to summarise every lead the sheet has ever held — which on a
+  // workbook carrying migrated history is thousands of rows and an email Gmail
+  // refuses to send.
+  if (stored === null || stored === '') {
+    props.setProperty(DIGEST_MARK_KEY, String(lastRow));
+    return null;
+  }
+
+  let mark = Number(stored);
   // Rows can be deleted by hand; never look further back than the sheet goes.
-  if (mark < 1 || mark > lastRow) {
+  if (!isFinite(mark) || mark < 1 || mark > lastRow) {
     mark = lastRow;
     props.setProperty(DIGEST_MARK_KEY, String(mark));
   }
@@ -140,6 +160,9 @@ function readDigestLeads_(pending) {
  * @return {{subject: string, text: string, html: string}}
  */
 function buildDigest_(leads) {
+  // Tallies count every lead; the roll call below is capped.
+  const listed = leads.slice(0, DIGEST_MAX_LISTED);
+  const hidden = leads.length - listed.length;
   const byType = tally_(leads, function (lead) { return lead.eventType; });
   const byCaller = tally_(leads, function (lead) { return lead.caller || 'Unassigned'; });
   const bySource = tally_(leads, function (lead) { return lead.source || 'Unknown'; });
@@ -155,7 +178,7 @@ function buildDigest_(leads) {
     'By source:      ' + describeTally_(bySource),
     ''
   ];
-  leads.forEach(function (lead) {
+  listed.forEach(function (lead) {
     textLines.push([
       lead.name,
       lead.eventType,
@@ -166,9 +189,12 @@ function buildDigest_(leads) {
       lead.source + (lead.subSource ? ' / ' + lead.subSource : '')
     ].filter(String).join(' · '));
   });
+  if (hidden) {
+    textLines.push('', '… and ' + hidden + ' more, on the sheet.');
+  }
   textLines.push('', getSpreadsheet_().getUrl());
 
-  const rows = leads.map(function (lead) {
+  const rows = listed.map(function (lead) {
     return '<tr>' + [
       escapeHtml_(lead.name),
       escapeHtml_(lead.eventType),
@@ -204,6 +230,10 @@ function buildDigest_(leads) {
       escapeHtml_(describeTally_(bySource)) + '</p>' +
     '<table style="border-collapse:collapse;width:100%"><thead><tr>' + head +
       '</tr></thead><tbody>' + rows + '</tbody></table>' +
+    (hidden
+      ? '<p style="margin:10px 0 0;color:#5b6c67;font-size:13px">Showing the ' +
+        listed.length + ' most recent. ' + hidden + ' more are on the sheet.</p>'
+      : '') +
     '<p style="margin:18px 0 0;font-size:13px"><a href="' + getSpreadsheet_().getUrl() +
       '">Open the sales worksheet</a></p></div>';
 
@@ -324,8 +354,15 @@ function maybeNotifyUnassigned_(results) {
  * @return {string} What happened, for the alert.
  */
 function sendDigestNow() {
+  const first = PropertiesService.getScriptProperties().getProperty(DIGEST_MARK_KEY);
   const pending = pendingDigestRows_();
-  if (!pending) return 'No new leads since the last digest.';
+  if (!pending) {
+    return (first === null || first === '')
+      ? 'Counting starts from now — the digest covers leads that arrive from ' +
+        'here, not the ones already on the sheet. Run this again after the ' +
+        'next one comes in.'
+      : 'No new leads since the last digest.';
+  }
   if (!digestRecipients_().length) {
     return 'Nobody to send it to. Add addresses to the "Digest Recipients" row of ' +
       SHEETS.settings + ' first.';

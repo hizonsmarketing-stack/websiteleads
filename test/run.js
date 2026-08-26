@@ -632,6 +632,23 @@ check('with the lead columns ready', tab('Dana').getRange(1, 2).getValue(), 'Lea
 check('and none for someone not taking leads', !!tab('Resting Rey'), 'false');
 api.resetCaches();
 
+realLog('\n--- the digest does not try to summarise history ---');
+{
+  const many = [];
+  for (let i = 0; i < 120; i++) {
+    many.push({ name: 'Bulk ' + i, eventType: 'Wedding', source: 'Website',
+      eventDate: '', caller: 'Bea', presenter: 'AJ', phone: '',
+      email: 'bulk' + i + '@example.com', subSource: 'Fair', guestCount: '' });
+  }
+  const d = api.buildDigest_(many);
+  check('the subject counts every lead', /^120 new leads/.test(d.subject), 'true');
+  check('the roll call is capped', (d.text.match(/^Bulk /gm) || []).length, 50);
+  check('and says how many it left out', /and 70 more/.test(d.text), 'true');
+  const tbody = d.html.slice(d.html.indexOf('<tbody>'), d.html.indexOf('</tbody>'));
+  check('the html table is capped too', (tbody.match(/<tr>/g) || []).length, 50);
+  check('the body stays sendable', d.html.length < 100000, 'true');
+}
+
 realLog('\n--- the Source column is colour-coded ---');
 {
   const rulesFor = name => {

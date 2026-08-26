@@ -232,6 +232,17 @@ Set `Digest Recipients` in `_Settings` to switch it on, and `Digest Every N
 Leads` to change the interval — `0` turns it off. **Leads → Send lead digest
 now** sends one immediately, which is how to check the addresses work.
 
+**Counting starts the first time it looks.** Switching the digest on does not
+summarise the leads already on the sheet — on a workbook carrying migrated
+history that would be thousands of rows and an email Gmail refuses to send.
+The first *Send lead digest now* says so and sends nothing; run it again once
+a new lead has arrived.
+
+A digest lists at most 50 leads individually. The counts always cover
+everything, and the mail says how many more are waiting on the sheet — a fair
+worksheet landing hundreds at once should still produce a digest rather than
+an error.
+
 Three things it deliberately does not do:
 
 - **A returning client is not a new lead.** A submission merged into a row
