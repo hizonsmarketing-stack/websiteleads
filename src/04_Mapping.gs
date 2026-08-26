@@ -57,7 +57,11 @@ function isNoiseKey_(key) {
   if (!squashed) return true;
   return NOISE_KEYS.some(function (noise) {
     const n = squashKey_(noise);
-    return squashed === n || squashed.indexOf(n) !== -1;
+    if (squashed === n) return true;
+    // Short words only count as an exact match. "id" and "key" appear inside
+    // plenty of real field names, and dropping those would be worse than the
+    // noise they let through.
+    return n.length >= 5 && squashed.indexOf(n) !== -1;
   });
 }
 

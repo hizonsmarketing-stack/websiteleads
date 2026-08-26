@@ -98,7 +98,10 @@ const EVENT_TYPES = [
       'wedding', 'bridal', 'bride', 'groom', 'engagement', 'nuptial',
       'church wedding', 'civil wedding', 'garden wedding', 'destination wedding',
       'prenup', 'pre-nup', 'wedding reception', 'kasal', 'renewal of vows',
-      'wedding anniversary party'
+      'wedding anniversary party',
+      // Offered as one option on the website forms, so it belongs to the
+      // wedding team. A bare "wedding anniversary" is still a private event.
+      'wedding/wedding anniversary', 'wedding / wedding anniversary'
     ]
   },
   {
@@ -291,6 +294,19 @@ const FIELD_SUFFIX_RULES = [
 ];
 
 /**
+ * Object shapes that are really one labelled answer.
+ *
+ * Wix posts each form answer as {label, value} inside a submissions array, so
+ * without pairing them the label and the answer arrive as two unrelated lines
+ * and the field is never recognised at all.
+ */
+const LABEL_KEYS = ['label', 'question', 'title', 'fieldname', 'displayname', 'fieldlabel'];
+const VALUE_KEYS = ['value', 'answer', 'response', 'text', 'fieldvalue', 'stringvalue'];
+
+/** Keys allowed to sit alongside a label/value pair without spoiling it. */
+const PAIR_INCIDENTAL_KEYS = ['id', 'fieldid', 'type', 'fieldtype', 'order', 'index', 'key'];
+
+/**
  * Calling codes recognised on a number typed without a leading + or 00.
  *
  * A guest who writes "65 9123 4567" means Singapore, not a Philippine number
@@ -334,6 +350,13 @@ const GOOGLE_ADS_MARKERS = ['user_column_data', 'google_key', 'lead_id'];
  */
 const NOISE_KEYS = [
   'conso date',
+  // Wix sends the whole contact record and a pile of internal identifiers
+  // alongside the answers. None of it means anything to a rep, and all of it
+  // would otherwise pile up in the Message column.
+  'meta site id', 'activation id', 'user id', 'form field mask', 'locale',
+  'items', 'image url', 'download url', 'file name', 'created date',
+  'updated date', 'address line', 'formatted address', 'postal code',
+  'subdivision', 'country', 'job title', 'id', 'key', 'revision', 'uuid',
   'google key', 'api version', 'is test', 'gcl id', 'lead id', 'form id',
   'submission id', 'recaptcha', 'captcha', 'token', 'ip address', 'user agent',
   'consent', 'terms', 'privacy policy', 'submit', 'g recaptcha response',

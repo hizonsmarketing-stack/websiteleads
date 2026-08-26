@@ -194,6 +194,11 @@ function flatten_(value, prefix, out) {
   }
 
   if (typeof value === 'object' && !(value instanceof Date)) {
+    const paired = asLabelledAnswer_(value);
+    if (paired) {
+      out[paired.label] = paired.value;
+      return out;
+    }
     Object.keys(value).forEach(function (key) {
       flatten_(value[key], prefix ? prefix + '.' + key : key, out);
     });
@@ -202,6 +207,43 @@ function flatten_(value, prefix, out) {
 
   out[prefix] = value;
   return out;
+}
+
+/**
+ * Reads an object that is really one labelled answer.
+ *
+ * {label: "First name", value: "Jaime"} means First name = Jaime, but
+ * flattened naively it becomes two unrelated entries and the answer is lost.
+ * The shape has to be unambiguous to qualify: exactly one label, exactly one
+ * value, and nothing else but incidental bookkeeping.
+ *
+ * @param {!Object} obj
+ * @return {?{label: string, value: *}}
+ */
+function asLabelledAnswer_(obj) {
+  let label = null;
+  let value = null;
+
+  const keys = Object.keys(obj);
+  if (!keys.length) return null;
+
+  for (let i = 0; i < keys.length; i++) {
+    const squashed = squashKey_(keys[i]);
+    const entry = obj[keys[i]];
+    if (LABEL_KEYS.indexOf(squashed) !== -1) {
+      if (label !== null || typeof entry !== 'string' || !cleanText_(entry)) return null;
+      label = cleanText_(entry);
+    } else if (VALUE_KEYS.indexOf(squashed) !== -1) {
+      if (value !== null) return null;
+      value = entry;
+    } else if (PAIR_INCIDENTAL_KEYS.indexOf(squashed) === -1) {
+      return null;
+    }
+  }
+
+  if (label === null || value === null) return null;
+  if (value !== null && typeof value === 'object') return null;
+  return { label: label, value: value };
 }
 
 /**

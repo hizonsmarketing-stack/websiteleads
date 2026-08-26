@@ -46,6 +46,11 @@ sales team has asked not to carry over. Both live in `NOISE_KEYS` in
 `src/00_Config.gs` — add a header there to stop it reaching the sales tabs at
 all.
 
+**Answers that arrive as label/value pairs are paired up first.** Wix posts
+each form answer as `{"label": "First name", "value": "Jaime"}`; read naively
+that is two unrelated entries and the answer is lost. The pair is recognised
+and read as `First name = Jaime` before any matching happens.
+
 ## The canonical fields
 
 | Field | Recognised as, among others |

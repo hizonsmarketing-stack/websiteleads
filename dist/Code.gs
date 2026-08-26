@@ -124,7 +124,10 @@ const EVENT_TYPES = [
       'wedding', 'bridal', 'bride', 'groom', 'engagement', 'nuptial',
       'church wedding', 'civil wedding', 'garden wedding', 'destination wedding',
       'prenup', 'pre-nup', 'wedding reception', 'kasal', 'renewal of vows',
-      'wedding anniversary party'
+      'wedding anniversary party',
+      // Offered as one option on the website forms, so it belongs to the
+      // wedding team. A bare "wedding anniversary" is still a private event.
+      'wedding/wedding anniversary', 'wedding / wedding anniversary'
     ]
   },
   {
@@ -317,6 +320,19 @@ const FIELD_SUFFIX_RULES = [
 ];
 
 /**
+ * Object shapes that are really one labelled answer.
+ *
+ * Wix posts each form answer as {label, value} inside a submissions array, so
+ * without pairing them the label and the answer arrive as two unrelated lines
+ * and the field is never recognised at all.
+ */
+const LABEL_KEYS = ['label', 'question', 'title', 'fieldname', 'displayname', 'fieldlabel'];
+const VALUE_KEYS = ['value', 'answer', 'response', 'text', 'fieldvalue', 'stringvalue'];
+
+/** Keys allowed to sit alongside a label/value pair without spoiling it. */
+const PAIR_INCIDENTAL_KEYS = ['id', 'fieldid', 'type', 'fieldtype', 'order', 'index', 'key'];
+
+/**
  * Calling codes recognised on a number typed without a leading + or 00.
  *
  * A guest who writes "65 9123 4567" means Singapore, not a Philippine number
@@ -360,6 +376,13 @@ const GOOGLE_ADS_MARKERS = ['user_column_data', 'google_key', 'lead_id'];
  */
 const NOISE_KEYS = [
   'conso date',
+  // Wix sends the whole contact record and a pile of internal identifiers
+  // alongside the answers. None of it means anything to a rep, and all of it
+  // would otherwise pile up in the Message column.
+  'meta site id', 'activation id', 'user id', 'form field mask', 'locale',
+  'items', 'image url', 'download url', 'file name', 'created date',
+  'updated date', 'address line', 'formatted address', 'postal code',
+  'subdivision', 'country', 'job title', 'id', 'key', 'revision', 'uuid',
   'google key', 'api version', 'is test', 'gcl id', 'lead id', 'form id',
   'submission id', 'recaptcha', 'captcha', 'token', 'ip address', 'user agent',
   'consent', 'terms', 'privacy policy', 'submit', 'g recaptcha response',
@@ -569,6 +592,11 @@ function flatten_(value, prefix, out) {
   }
 
   if (typeof value === 'object' && !(value instanceof Date)) {
+    const paired = asLabelledAnswer_(value);
+    if (paired) {
+      out[paired.label] = paired.value;
+      return out;
+    }
     Object.keys(value).forEach(function (key) {
       flatten_(value[key], prefix ? prefix + '.' + key : key, out);
     });
@@ -577,6 +605,43 @@ function flatten_(value, prefix, out) {
 
   out[prefix] = value;
   return out;
+}
+
+/**
+ * Reads an object that is really one labelled answer.
+ *
+ * {label: "First name", value: "Jaime"} means First name = Jaime, but
+ * flattened naively it becomes two unrelated entries and the answer is lost.
+ * The shape has to be unambiguous to qualify: exactly one label, exactly one
+ * value, and nothing else but incidental bookkeeping.
+ *
+ * @param {!Object} obj
+ * @return {?{label: string, value: *}}
+ */
+function asLabelledAnswer_(obj) {
+  let label = null;
+  let value = null;
+
+  const keys = Object.keys(obj);
+  if (!keys.length) return null;
+
+  for (let i = 0; i < keys.length; i++) {
+    const squashed = squashKey_(keys[i]);
+    const entry = obj[keys[i]];
+    if (LABEL_KEYS.indexOf(squashed) !== -1) {
+      if (label !== null || typeof entry !== 'string' || !cleanText_(entry)) return null;
+      label = cleanText_(entry);
+    } else if (VALUE_KEYS.indexOf(squashed) !== -1) {
+      if (value !== null) return null;
+      value = entry;
+    } else if (PAIR_INCIDENTAL_KEYS.indexOf(squashed) === -1) {
+      return null;
+    }
+  }
+
+  if (label === null || value === null) return null;
+  if (value !== null && typeof value === 'object') return null;
+  return { label: label, value: value };
 }
 
 /**
@@ -1318,7 +1383,11 @@ function isNoiseKey_(key) {
   if (!squashed) return true;
   return NOISE_KEYS.some(function (noise) {
     const n = squashKey_(noise);
-    return squashed === n || squashed.indexOf(n) !== -1;
+    if (squashed === n) return true;
+    // Short words only count as an exact match. "id" and "key" appear inside
+    // plenty of real field names, and dropping those would be worse than the
+    // noise they let through.
+    return n.length >= 5 && squashed.indexOf(n) !== -1;
   });
 }
 
@@ -3796,6 +3865,8 @@ function runSelfTest() {
     resolveEventType_('Corporate Anniversary').tab, 'Corporate');
   check('route: wedding anniversary is private',
     resolveEventType_('Wedding Anniversary').tab, 'Private Event');
+  check('route: but the combined form option is a wedding',
+    resolveEventType_('Wedding/Wedding Anniversary').tab, 'Wedding');
   check('route: private wording', resolveEventType_('Intimate family gathering').tab, 'Private Event');
   check('route: blank falls back', resolveEventType_('').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);
@@ -3919,6 +3990,37 @@ function runSelfTest() {
     Object.keys(unfilled.fields).length, 0);
   check('placeholder: and it is counted so the reason can say so',
     unfilled.placeholders, 2);
+
+  // --- The shape Wix actually posts ----------------------------------------
+  // Answers arrive as {label, value} pairs inside a submissions array. Read
+  // naively the label and the answer become two unrelated entries and the
+  // field is never recognised at all.
+  const wixPayload = flatten_({
+    formName: 'INSTAQUOTE',
+    submissions: [
+      { id: 'a1', label: 'First name', value: 'Jaime' },
+      { id: 'a2', label: 'Contact number', value: '0955 589 6692' }
+    ],
+    contact: { jobTitle: 'CEO', addressLine: '123 Main Street', country: 'US' },
+    submissionPdf: { fileName: 'x.pdf', downloadUrl: 'https://static.wixstatic.com/x.gif' }
+  });
+  check('wix: an answer is paired with its label', wixPayload['First name'], 'Jaime');
+  check('wix: and so is the next one', wixPayload['Contact number'], '0955 589 6692');
+  check('wix: the label is not left stranded', wixPayload['submissions.0.label'], 'undefined');
+
+  const wixMapped = mapRecord_(wixPayload);
+  check('wix: the paired answer reaches its field', wixMapped.fields.firstName, 'Jaime');
+  check('wix: and the phone reaches its own', wixMapped.fields.phone, '0955 589 6692');
+  check('wix: the contact record does not reach the notes',
+    wixMapped.extras.some(function (e) { return e.value === 'CEO' || e.value === 'US'; }), 'false');
+  check('wix: nor does the attached pdf',
+    wixMapped.extras.some(function (e) { return /wixstatic/.test(e.value); }), 'false');
+
+  check('wix: an object that is not a pair is left alone',
+    JSON.stringify(flatten_({ contact: { label: 'x' } })), '{"contact.label":"x"}');
+  check('wix: a value that is itself an object is not paired',
+    JSON.stringify(flatten_({ a: { label: 'x', value: { deep: 1 } } })),
+    '{"a.label":"x","a.value.deep":1}');
 
   // --- Columns competing for one destination -------------------------------
   const notesRecord = mapRecord_({

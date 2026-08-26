@@ -101,6 +101,12 @@ the problem is in what Wix has; a sign-in page means access is restricted; a
      checkbox placeholders — is ignored.
 5. Save and activate.
 
+Wix posts each answer as a `{label, value}` pair inside a `submissions` array,
+which is read as `label = value`. Everything else it sends — the whole contact
+record, the attached PDF, `metaSiteId`, `activationId`, `userId`, `locale`,
+`formFieldMask` — is bookkeeping and is ignored, so it does not pile up in the
+lead's Message column.
+
 Whatever shape Wix ends up sending is accepted — nested or flat, any field
 names. If a field doesn't land where you expect, **Leads → Show last received
 payload** prints exactly what arrived, which is what to work from.

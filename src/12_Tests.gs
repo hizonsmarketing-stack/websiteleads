@@ -93,6 +93,8 @@ function runSelfTest() {
     resolveEventType_('Corporate Anniversary').tab, 'Corporate');
   check('route: wedding anniversary is private',
     resolveEventType_('Wedding Anniversary').tab, 'Private Event');
+  check('route: but the combined form option is a wedding',
+    resolveEventType_('Wedding/Wedding Anniversary').tab, 'Wedding');
   check('route: private wording', resolveEventType_('Intimate family gathering').tab, 'Private Event');
   check('route: blank falls back', resolveEventType_('').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);
@@ -216,6 +218,37 @@ function runSelfTest() {
     Object.keys(unfilled.fields).length, 0);
   check('placeholder: and it is counted so the reason can say so',
     unfilled.placeholders, 2);
+
+  // --- The shape Wix actually posts ----------------------------------------
+  // Answers arrive as {label, value} pairs inside a submissions array. Read
+  // naively the label and the answer become two unrelated entries and the
+  // field is never recognised at all.
+  const wixPayload = flatten_({
+    formName: 'INSTAQUOTE',
+    submissions: [
+      { id: 'a1', label: 'First name', value: 'Jaime' },
+      { id: 'a2', label: 'Contact number', value: '0955 589 6692' }
+    ],
+    contact: { jobTitle: 'CEO', addressLine: '123 Main Street', country: 'US' },
+    submissionPdf: { fileName: 'x.pdf', downloadUrl: 'https://static.wixstatic.com/x.gif' }
+  });
+  check('wix: an answer is paired with its label', wixPayload['First name'], 'Jaime');
+  check('wix: and so is the next one', wixPayload['Contact number'], '0955 589 6692');
+  check('wix: the label is not left stranded', wixPayload['submissions.0.label'], 'undefined');
+
+  const wixMapped = mapRecord_(wixPayload);
+  check('wix: the paired answer reaches its field', wixMapped.fields.firstName, 'Jaime');
+  check('wix: and the phone reaches its own', wixMapped.fields.phone, '0955 589 6692');
+  check('wix: the contact record does not reach the notes',
+    wixMapped.extras.some(function (e) { return e.value === 'CEO' || e.value === 'US'; }), 'false');
+  check('wix: nor does the attached pdf',
+    wixMapped.extras.some(function (e) { return /wixstatic/.test(e.value); }), 'false');
+
+  check('wix: an object that is not a pair is left alone',
+    JSON.stringify(flatten_({ contact: { label: 'x' } })), '{"contact.label":"x"}');
+  check('wix: a value that is itself an object is not paired',
+    JSON.stringify(flatten_({ a: { label: 'x', value: { deep: 1 } } })),
+    '{"a.label":"x","a.value.deep":1}');
 
   // --- Columns competing for one destination -------------------------------
   const notesRecord = mapRecord_({
