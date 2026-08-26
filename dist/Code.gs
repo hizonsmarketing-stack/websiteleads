@@ -3684,6 +3684,59 @@ function menuShowWebhookUrl() {
   );
 }
 
+/**
+ * Menu action: print the most recent request exactly as it arrived.
+ *
+ * The first thing to reach for when a form submits but a field lands in the
+ * wrong place: the alias dictionary can only match what was actually sent, and
+ * the difference between what a form builder shows you and what it posts is
+ * where the surprises live. Pretty-printed when it is JSON, raw otherwise.
+ */
+function menuShowLastPayload() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.raw);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    ui.alert(
+      'Nothing received yet',
+      'No request has reached the webhook. Submit a test lead, then run this ' +
+      'again. If a form has been submitted and nothing is here, the request ' +
+      'never arrived — see the ' + SHEETS.log + ' tab.',
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+
+  const map = headerMap_(sheet);
+  const row = sheet.getLastRow();
+  const at = function (header) {
+    const col = map[squashKey_(header)];
+    return col ? String(sheet.getRange(row, col).getValue()) : '';
+  };
+
+  let body = at('Payload');
+  try {
+    body = JSON.stringify(JSON.parse(body), null, 2);
+  } catch (err) {
+    // Form-encoded or already plain text: show it as it came.
+  }
+
+  // The dialog is not a text editor; a very long payload is better truncated
+  // than refused, and the whole thing is on the _Raw tab either way.
+  const LIMIT = 12000;
+  const clipped = body.length > LIMIT
+    ? body.slice(0, LIMIT) + '\n\n… truncated. The whole payload is on the ' +
+      SHEETS.raw + ' tab, row ' + row + '.'
+    : body;
+
+  ui.alert(
+    'Last received payload',
+    at('Ref') + ' · ' + at('Received At') + '\n' +
+    at('Source') + ' / ' + at('Sub-Source') + '\n\n' + clipped,
+    ui.ButtonSet.OK
+  );
+}
+
 function menuSetWebhookToken() {
   const ui = SpreadsheetApp.getUi();
   // Nobody should have to invent a secret on the spot, so offer one.

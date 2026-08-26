@@ -632,6 +632,20 @@ check('with the lead columns ready', tab('Dana').getRange(1, 2).getValue(), 'Lea
 check('and none for someone not taking leads', !!tab('Resting Rey'), 'false');
 api.resetCaches();
 
+realLog('\n--- the Leads menu is wired to real functions ---');
+// A menu item names its handler as a string, so a missing or renamed function
+// is invisible until someone clicks it and Apps Script says "Script function
+// not found". Read the handlers straight out of the menu and check each one.
+{
+  const menuSource = fs.readFileSync(path.join(dir, '11_Menu.gs'), 'utf8');
+  const handlers = [...menuSource.matchAll(/addItem\(\s*'[^']*'\s*,\s*'([^']+)'/g)]
+    .map(m => m[1]);
+  check('every menu item was found', handlers.length > 0, 'true');
+  const missing = handlers.filter(name => typeof global[name] !== 'function' &&
+    !new RegExp('function\\s+' + name + '\\s*\\(').test(src));
+  check('every menu item has a function behind it', missing.join(', ') || 'none', 'none');
+}
+
 realLog('\n--- auth and payload shapes ---');
 silence(quiet);
 PropertiesService.getScriptProperties().setProperty('WEBHOOK_TOKEN', 's3cret');
