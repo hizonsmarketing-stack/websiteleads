@@ -130,6 +130,7 @@ function intakeBatch_(records, context) {
     flushIndex_();
     flushSubSources_();
     housekeeping_();
+    maybeNotifyTabs_(summary.byTab);
     maybeSendDigest_(summary.created);
     maybeNotifyUnassigned_(summary.results);
     return summary;

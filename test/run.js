@@ -272,7 +272,34 @@ check('four leads went to four different people', new Set(socialTabs).size, 4);
 check('inactive rep skipped', socialTabs.indexOf('Ella'), -1);
 
 check('roster counts kept', tab('_Team').getRange(2, 6).getValue(), 1);
-check('assignee emailed', global.__mails.some(m => m.to.indexOf('bea@example.com') > -1), 'true');
+check('no alert while every tab is under the threshold',
+  global.__mails.some(m => m.to.indexOf('bea@example.com') > -1), 'false');
+
+// --- the per-tab alert fires on the fifth, and covers all five -------------
+realLog('\n--- new-lead alerts, batched per caller ---');
+setSetting('Notify On New Lead', 'yes');
+api.resetCaches();
+function alertLead(i) {
+  api.resetCaches();
+  post({ formName: 'Homepage Inquiry', name: 'Alert ' + i, email: 'alert' + i + '@example.com',
+    'Contact Number': '0917 44' + (4000 + i), 'Type of Event': 'Church Wedding' },
+    { source: 'website', form: 'Homepage Inquiry' });
+}
+// The first lead per tab only seeds that tab's marker — switching alerts on
+// must not mail anyone their back catalogue.
+for (let i = 1; i <= 4; i++) alertLead(i);
+const beaBefore = global.__mails.length;
+check('turning alerts on does not mail the back catalogue',
+  global.__mails.filter(m => /^\[\d+ new lead/.test(m.subject)).length, 0);
+// Weddings are shared by four callers, so twenty more puts five on each tab.
+for (let i = 5; i <= 24; i++) alertLead(i);
+const notices = global.__mails.filter(m => /^\[\d+ new lead/.test(m.subject));
+check('a tab reaching five is told', notices.length > 0, 'true');
+check('and the mail covers the batch, not one lead',
+  /^\[5 new leads\]/.test(notices[0].subject), 'true');
+check('the tab is named in the subject', /waiting on /.test(notices[0].subject), 'true');
+setSetting('Notify On New Lead', 'no');
+api.resetCaches();
 // Everything that is not corporate runs the AJ / Pam / Mhay / Vanessa sequence.
 check('a non-corporate lead starts the sequence', cellOf(s1.tab, 2, 'Presenter'), 'AJ');
 check('and so does the first lead in another tab', cellOf(s2.tab, 2, 'Presenter'), 'AJ');
@@ -527,7 +554,7 @@ PropertiesService.getScriptProperties()
 api.resetCaches();
 
 function digests() {
-  return global.__mails.filter(m => /new lead/.test(m.subject));
+  return global.__mails.filter(m => /^\d+ new lead/.test(m.subject));
 }
 const digestsBefore = digests().length;
 

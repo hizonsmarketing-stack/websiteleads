@@ -125,7 +125,8 @@ All in the `_Settings` tab. Changes take effect on the next submission.
 | `Round Robin Assignment` | `yes` | Share leads out across the `_Team` roster. `no` sends everything to the shared event-type tabs instead |
 | `Presenters` | `AJ, Pam, Mhay, Vanessa` | The default sequence down the Presenter column, in order |
 | `Presenters - <Event Type>` | blank, or `caller`, or a list | Overrides the default for that event type. Corporate ships as `caller` |
-| `Notify On New Lead` | `no` | Email the addresses in the Notify rows |
+| `Notify On New Lead` | `no` | Email each caller once their tab has collected new leads |
+| `Notify Every N Leads` | `5` | How many a tab collects first. `1` tells them about every lead |
 | `Notify Unassigned To` | blank | Addresses told when a lead arrives with no event type. One mail per batch, independent of the row above |
 | `Raw Payload Retention (rows)` | `2000` | How much of `_Raw` to keep |
 | `Log Retention (rows)` | `5000` | How much of `_Log` to keep |
@@ -245,9 +246,36 @@ about routing failures is not the same as wanting a mail for every lead.
 
 ### Email alerts
 
-Set `Notify On New Lead` to `yes` and fill in `Notify - Wedding` etc. with the
-addresses to alert. Only new leads trigger a mail — merged duplicates don't, so
-one person filling in three forms doesn't produce three alerts.
+Set `Notify On New Lead` to `yes` and each caller is told when their own tab
+has collected leads — not one mail per lead. `Notify Every N Leads` sets how
+many first; it ships as `5`, which is one mail to sit down to rather than five
+interruptions across a morning. Set it to `1` to hear about every lead as it
+lands.
+
+```
+Subject: [5 new leads] waiting on Bea
+
+5 new leads are waiting on your Bea tab:
+
+Maria Santos — Wedding
+  event date: 2026-12-14   guests: 180
+  contact: maria@example.com   0917 111 2233
+  from: Homepage Inquiry   presenter: AJ
+```
+
+The count is per tab, so a caller who reaches five is told while everyone else
+keeps accumulating. Nothing is lost below the threshold — those leads stay
+counted and go out with the mail that crosses it.
+
+`Notify - Wedding` and the rest still work: those addresses are copied in
+alongside the caller, for whichever event types appear in the batch.
+
+Two things it deliberately does not do:
+
+- **A returning client is not a new lead**, so merged duplicates never trigger
+  a mail — one person filling in three forms doesn't produce three alerts.
+- **Switching it on doesn't mail anyone their back catalogue.** A tab starts
+  counting from wherever it already is, not from row 2.
 
 Mail is sent from the account that deployed the script and counts against that
 account's daily Gmail quota.

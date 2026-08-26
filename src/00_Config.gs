@@ -181,6 +181,7 @@ const DEFAULT_SETTINGS = {
   'Round Robin Assignment': 'yes',
   'Presenters': 'AJ, Pam, Mhay, Vanessa',
   'Notify On New Lead': 'no',
+  'Notify Every N Leads': '5',
   'Notify Unassigned To': '',
   'Digest Every N Leads': '10',
   'Digest Recipients': '',

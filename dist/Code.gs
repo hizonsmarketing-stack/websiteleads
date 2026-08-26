@@ -207,6 +207,7 @@ const DEFAULT_SETTINGS = {
   'Round Robin Assignment': 'yes',
   'Presenters': 'AJ, Pam, Mhay, Vanessa',
   'Notify On New Lead': 'no',
+  'Notify Every N Leads': '5',
   'Notify Unassigned To': '',
   'Digest Every N Leads': '10',
   'Digest Recipients': '',
@@ -2046,7 +2047,6 @@ function routeLead_(lead) {
   indexLead_(lead, tabName, row);
 
   if (assignment) recordAssignment_(assignment);
-  notifyTeam_(lead, tabName, assignment);
   return { tab: tabName, row: row };
 }
 
@@ -2216,52 +2216,171 @@ function recordAssignment_(member) {
 }
 
 /**
- * Emails the new lead to whoever should act on it: the assignee, plus any
- * watchers configured for the destination tab or the event type.
- * Failures are logged, never thrown — a mail quota must not lose a lead.
- * @param {!Object} lead
- * @param {string} tabName
- * @param {?Object=} assignment The roster entry the lead went to, if any.
+ * Tells each caller their new leads are waiting.
+ *
+ * Sent once a tab has collected "Notify Every N Leads" of them rather than one
+ * mail per lead: five arriving over a morning is one thing to sit down to, not
+ * five interruptions. Set that to 1 to be told about every lead as it lands,
+ * or turn "Notify On New Lead" off entirely.
+ *
+ * Called once per intake batch, and the count is per tab — so a caller who
+ * reaches five is told while everyone else keeps accumulating. Nothing is lost
+ * when the threshold is not met: the leads stay counted and go out with the
+ * next batch that crosses it.
+ *
+ * Like every other alert here it ignores merged duplicates, because a
+ * returning client is not a new lead to work.
+ *
+ * @param {!Object<string,number>} byTab Tabs touched by the batch just run.
+ * @return {number} How many tabs were mailed.
  */
-function notifyTeam_(lead, tabName, assignment) {
-  if (!settingIsOn_('Notify On New Lead')) return;
+function maybeNotifyTabs_(byTab) {
+  if (!settingIsOn_('Notify On New Lead')) return 0;
+  const every = numberSetting_('Notify Every N Leads', 5);
+  if (every <= 0) return 0;
+
+  let sent = 0;
+  Object.keys(byTab || {}).forEach(function (tabName) {
+    const pending = pendingNotifyRows_(tabName);
+    if (!pending || pending.count < every) return;
+    try {
+      if (sendTabNotice_(tabName, pending)) sent++;
+    } catch (err) {
+      log_('WARN', 'notify', 'Could not send the new-lead alert', {
+        tab: tabName, error: String(err)
+      });
+    }
+  });
+  return sent;
+}
+
+/** Script property prefix holding the last row of a tab that was notified. */
+const NOTIFY_MARK_PREFIX = 'NOTIFY_MARK_';
+
+/**
+ * Which rows of a tab have landed since its last alert.
+ *
+ * Rows get deleted and moved by hand, so the marker is never allowed to point
+ * past the end of the sheet — exactly as the digest guards its own. A tab seen
+ * for the first time starts counting from where it already is, so switching
+ * notifications on does not mail everyone their back catalogue.
+ *
+ * @param {string} tabName
+ * @return {?{from: number, to: number, count: number}}
+ */
+function pendingNotifyRows_(tabName) {
+  const sheet = getSpreadsheet_().getSheetByName(tabName);
+  if (!sheet) return null;
+
+  const key = NOTIFY_MARK_PREFIX + squashKey_(tabName);
+  const props = PropertiesService.getScriptProperties();
+  const lastRow = sheet.getLastRow();
+  const stored = props.getProperty(key);
+
+  // First time this tab is seen, start counting from now. Otherwise switching
+  // notifications on would mail every caller their entire back catalogue.
+  if (stored === null || stored === '') {
+    props.setProperty(key, String(lastRow));
+    return null;
+  }
+
+  let mark = Number(stored);
+  if (!isFinite(mark) || mark < 1 || mark > lastRow) {
+    mark = lastRow;
+    props.setProperty(key, String(mark));
+  }
+  if (lastRow <= mark) return null;
+
+  return { from: mark + 1, to: lastRow, count: lastRow - mark };
+}
+
+/**
+ * Mails one tab's waiting leads and moves its marker forward.
+ *
+ * The marker moves whether or not anyone was listening, so a tab with no
+ * recipients does not build up a backlog that floods the day somebody adds an
+ * address to it.
+ *
+ * @param {string} tabName
+ * @param {{from: number, to: number, count: number}} pending
+ * @return {boolean} True when a mail actually went out.
+ */
+function sendTabNotice_(tabName, pending) {
+  const props = PropertiesService.getScriptProperties();
+  const markKey = NOTIFY_MARK_PREFIX + squashKey_(tabName);
+  const sheet = getSpreadsheet_().getSheetByName(tabName);
+  const columns = fieldColumns_(sheet).byField;
+  const read = function (row, field) {
+    const col = columns[field];
+    return col ? cleanText_(sheet.getRange(row, col).getValue()) : '';
+  };
+
+  const leads = [];
+  for (let row = pending.from; row <= pending.to; row++) {
+    leads.push({
+      name: read(row, 'fullName') || read(row, 'email') || read(row, 'phone') || '(no name given)',
+      eventType: read(row, 'eventType'),
+      eventDate: read(row, 'eventDate'),
+      guests: read(row, 'guestCount'),
+      presenter: read(row, 'presenter'),
+      email: read(row, 'email'),
+      phone: read(row, 'phone'),
+      subSource: read(row, 'subSource')
+    });
+  }
 
   const recipients = [];
-  if (assignment && assignment.email) recipients.push(assignment.email);
-  [tabName, lead.eventTypeTab].forEach(function (key) {
-    if (!key) return;
-    String(setting_('Notify - ' + key, '')).split(/[,;]/).forEach(function (address) {
-      const trimmed = address.trim();
-      if (trimmed && recipients.indexOf(trimmed) === -1) recipients.push(trimmed);
-    });
+  const add = function (address) {
+    const trimmed = cleanText_(address);
+    if (trimmed && recipients.indexOf(trimmed) === -1) recipients.push(trimmed);
+  };
+  loadTeam_().forEach(function (member) {
+    if (member.tab === tabName) add(member.email);
   });
-  if (!recipients.length) return;
+  const notifyKeys = [tabName];
+  leads.forEach(function (lead) {
+    const type = resolveEventType_(lead.eventType);
+    if (type && notifyKeys.indexOf(type.tab) === -1) notifyKeys.push(type.tab);
+  });
+  notifyKeys.forEach(function (key) {
+    String(setting_('Notify - ' + key, '')).split(/[,;]/).forEach(add);
+  });
 
-  const lines = [
-    'Event type: ' + lead.eventTypeLabel,
-    lead.presenter ? 'Presenter: ' + lead.presenter : '',
-    'Name: ' + (lead.fullName || '(not given)'),
-    'Email: ' + (lead.email || '(not given)'),
-    'Phone: ' + (lead.phone || '(not given)'),
-    'Event date: ' + (lead.eventDate || '(not given)'),
-    'Guests: ' + (lead.guestCount || '(not given)'),
-    'Source: ' + lead.source + ' / ' + lead.subSource,
-    lead.assignedTo ? 'Assigned to: ' + lead.assignedTo : '',
-    '',
-    lead.message || '',
-    '',
-    getSpreadsheet_().getUrl()
-  ].filter(function (line) { return line !== undefined; });
+  // Move the marker even with nobody listening, so adding an address later
+  // does not deliver a month of backlog in one mail.
+  props.setProperty(markKey, String(pending.to));
+  if (!recipients.length) return false;
 
-  try {
-    MailApp.sendEmail({
-      to: recipients.join(','),
-      subject: '[New ' + lead.eventTypeLabel + ' lead] ' + (lead.fullName || lead.email || lead.phone),
-      body: lines.join('\n')
-    });
-  } catch (err) {
-    log_('WARN', 'notify', 'Could not send notification', { tab: tabName, error: String(err) });
-  }
+  const lines = leads.map(function (lead) {
+    return [
+      lead.name + (lead.eventType ? ' — ' + lead.eventType : ''),
+      '  event date: ' + (lead.eventDate || '(not given)') +
+        (lead.guests ? '   guests: ' + lead.guests : ''),
+      '  contact: ' + (lead.email || '(no email)') + '   ' + (lead.phone || '(no phone)'),
+      '  from: ' + (lead.subSource || 'unknown form') +
+        (lead.presenter ? '   presenter: ' + lead.presenter : '')
+    ].join('\n');
+  });
+
+  MailApp.sendEmail({
+    to: recipients.join(','),
+    subject: '[' + pending.count + ' new lead' + (pending.count === 1 ? '' : 's') +
+      '] waiting on ' + tabName,
+    body: [
+      pending.count === 1
+        ? 'A new lead is waiting on your ' + tabName + ' tab:'
+        : pending.count + ' new leads are waiting on your ' + tabName + ' tab:',
+      '',
+      lines.join('\n\n'),
+      '',
+      getSpreadsheet_().getUrl()
+    ].join('\n')
+  });
+
+  log_('INFO', 'notify', 'Told a tab about its new leads', {
+    tab: tabName, count: pending.count
+  });
+  return true;
 }
 
 /**
@@ -2431,7 +2550,6 @@ function maybePromote_(sheet, row, original, incoming, leadId) {
     'Presenter': moved.presenter || ''
   });
   if (assignment) recordAssignment_(assignment);
-  notifyTeam_(moved, targetTab, assignment);
 
   log_('INFO', 'router', 'Promoted lead out of ' + FALLBACK_EVENT_TYPE.tab, {
     leadId: leadId, to: targetTab, assignedTo: moved.assignedTo
@@ -2587,6 +2705,7 @@ function intakeBatch_(records, context) {
     flushIndex_();
     flushSubSources_();
     housekeeping_();
+    maybeNotifyTabs_(summary.byTab);
     maybeSendDigest_(summary.created);
     maybeNotifyUnassigned_(summary.results);
     return summary;
@@ -3157,7 +3276,8 @@ function seedSettings_() {
     'Accept Test Leads': 'yes = store Google Ads test leads instead of only acknowledging them.',
     'Round Robin Assignment': 'yes = share leads across the _Team roster.',
     'Presenters': 'The default repeating sequence down the Presenter column, in order. Overridden per event type below.',
-    'Notify On New Lead': 'yes = email the assignee, and the Notify rows below, as each lead arrives.',
+    'Notify On New Lead': 'yes = email each caller when their tab has collected new leads. The Notify rows below are copied in.',
+    'Notify Every N Leads': 'How many leads a tab collects before its caller is told. 5 keeps it to one mail a morning rather than one an hour; 1 tells them about every lead.',
     'Notify Unassigned To': 'Comma-separated addresses told when a lead arrives with no event type, so nobody has to watch the Unassigned tab. One mail per batch. Works whether or not "Notify On New Lead" is on; blank turns it off.',
     'Digest Every N Leads': 'Send the sales team a summary email every this many new leads. 0 turns it off.',
     'Digest Recipients': 'Comma-separated addresses the digest goes to. Blank means it is never sent.',
