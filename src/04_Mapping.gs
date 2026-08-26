@@ -51,6 +51,26 @@ function isPlaceholderValue_(key, value) {
   return false;
 }
 
+/**
+ * Spots an answer that says nothing.
+ *
+ * "N/A" is not a venue, and TRUE/FALSE is not a phone number, but both match
+ * their column's aliases perfectly well and would take the slot from a real
+ * answer arriving under a vaguer name. A guest who has not chosen a venue is
+ * better served by a blank cell than by the word "No" sitting where a venue
+ * should be — so these are demoted into the Message column, where the reply is
+ * still visible to whoever works the lead.
+ *
+ * Message itself is exempt: there, "No" is the answer to a question and reads
+ * correctly next to it.
+ *
+ * @param {string} value Already passed through cleanText_().
+ * @return {boolean}
+ */
+function isNonAnswer_(value) {
+  return NON_ANSWERS.indexOf(squashKey_(value)) !== -1;
+}
+
 /** @return {boolean} True for plumbing keys that should never reach a sales rep. */
 function isNoiseKey_(key) {
   const squashed = squashKey_(key);
@@ -139,6 +159,12 @@ function mapRecord_(flat) {
     const match = matchField_(label);
 
     if (!match.field) {
+      extras.push({ label: pretty, value: value });
+      return;
+    }
+
+    // A non-answer never occupies a real column, but is still worth reading.
+    if (match.field !== 'message' && isNonAnswer_(value)) {
       extras.push({ label: pretty, value: value });
       return;
     }

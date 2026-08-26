@@ -254,6 +254,7 @@ const FIELD_ALIASES = {
     'wedding date', 'date of wedding', 'affair date', 'date of affair',
     'celebration date', 'party date', 'debut date', 'reception date',
     'tentative date', 'date', 'schedule', 'when is your event',
+    'date of your event', 'date of the event', 'what date',
     'when', 'proposed date', 'function date'
   ],
   guestCount: [
@@ -351,6 +352,18 @@ const INTERNATIONAL_DIAL_CODES = [
   '262', '263', '264', '265', '266', '267', '268', '269'
 ];
 
+/**
+ * Answers that mean "nothing to tell you": a blank by another name.
+ *
+ * Compared after squashKey_(), so "N/A", "n.a." and "NA" are one entry.
+ */
+const NON_ANSWERS = [
+  'na', 'nan', 'none', 'nil', 'null', 'nothing', 'blank', 'empty',
+  'tbd', 'tba', 'tbc', 'notyet', 'notsure', 'unsure', 'undecided', 'unknown',
+  'notapplicable', 'notavailable', 'noneyet', 'wala',
+  'true', 'false', 'yes', 'no'
+];
+
 /** Keys carried by a Google Ads lead-form webhook payload. */
 const GOOGLE_ADS_MARKERS = ['user_column_data', 'google_key', 'lead_id'];
 
@@ -367,7 +380,10 @@ const NOISE_KEYS = [
   // Wix bookkeeping. "contact id" matters: it is a UUID, and without this it
   // reads as a phone number because it contains "contact".
   'contact id', 'contact identity', 'submissions link', 'submission pdf',
-  'form field mask', 'form field', 'form revision', 'namespace'
+  'form field mask', 'form field', 'form revision', 'namespace',
+  // Google Ads bookkeeping. "phone number verified" matters: it carries
+  // TRUE/FALSE and outscores "user phone" for the Phone column.
+  'phone number verified', 'email verified', 'lead stage'
 ];
 
 // ==========================================================================
@@ -1313,6 +1329,26 @@ function isPlaceholderValue_(key, value) {
   return false;
 }
 
+/**
+ * Spots an answer that says nothing.
+ *
+ * "N/A" is not a venue, and TRUE/FALSE is not a phone number, but both match
+ * their column's aliases perfectly well and would take the slot from a real
+ * answer arriving under a vaguer name. A guest who has not chosen a venue is
+ * better served by a blank cell than by the word "No" sitting where a venue
+ * should be — so these are demoted into the Message column, where the reply is
+ * still visible to whoever works the lead.
+ *
+ * Message itself is exempt: there, "No" is the answer to a question and reads
+ * correctly next to it.
+ *
+ * @param {string} value Already passed through cleanText_().
+ * @return {boolean}
+ */
+function isNonAnswer_(value) {
+  return NON_ANSWERS.indexOf(squashKey_(value)) !== -1;
+}
+
 /** @return {boolean} True for plumbing keys that should never reach a sales rep. */
 function isNoiseKey_(key) {
   const squashed = squashKey_(key);
@@ -1401,6 +1437,12 @@ function mapRecord_(flat) {
     const match = matchField_(label);
 
     if (!match.field) {
+      extras.push({ label: pretty, value: value });
+      return;
+    }
+
+    // A non-answer never occupies a real column, but is still worth reading.
+    if (match.field !== 'message' && isNonAnswer_(value)) {
       extras.push({ label: pretty, value: value });
       return;
     }
@@ -3802,6 +3844,26 @@ function runSelfTest() {
   check('route: a plain anniversary is still private',
     resolveEventType_('Anniversary party').tab, 'Private Event');
   check('route: private wording', resolveEventType_('Intimate family gathering').tab, 'Private Event');
+
+  // --- Google Ads lead forms carry bookkeeping alongside the answers -------
+  check('ads: verification flag does not claim the phone column',
+    mapRecord_({ 'User Phone': '+639273450662', 'Phone Number Verified': 'FALSE' })
+      .fields.phone, '+639273450662');
+  check('ads: the date question is a date, not an event type',
+    matchField_('What is the date of your event?').field, 'eventDate');
+  check('ads: the type question still wins the event type',
+    mapRecord_({ 'What is the date of your event?': 'September 27,2026',
+                 'What type of event are you having?': 'Debut' }).fields.eventType, 'Debut');
+  check('map: N/A is not a venue',
+    mapRecord_({ 'What venue have you chosen?': 'N/A' }).fields.venue, undefined);
+  check('map: a yes/no answer is not a venue either',
+    mapRecord_({ 'Do you already have a venue?': 'No' }).fields.venue, undefined);
+  check('map: a real venue still lands',
+    mapRecord_({ 'What venue have you chosen?': 'Alta Veranda' }).fields.venue, 'Alta Veranda');
+  check('map: a non-answer is kept in Message, not dropped',
+    mapRecord_({ 'What venue have you chosen?': 'N/A' }).extras.length, 1);
+  check('map: "No" reads correctly as free text',
+    mapRecord_({ 'Notes': 'No' }).fields.message, 'No');
   check('route: blank falls back', resolveEventType_('').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: context used when field is blank',

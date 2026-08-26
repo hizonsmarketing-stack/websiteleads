@@ -98,6 +98,26 @@ function runSelfTest() {
   check('route: a plain anniversary is still private',
     resolveEventType_('Anniversary party').tab, 'Private Event');
   check('route: private wording', resolveEventType_('Intimate family gathering').tab, 'Private Event');
+
+  // --- Google Ads lead forms carry bookkeeping alongside the answers -------
+  check('ads: verification flag does not claim the phone column',
+    mapRecord_({ 'User Phone': '+639273450662', 'Phone Number Verified': 'FALSE' })
+      .fields.phone, '+639273450662');
+  check('ads: the date question is a date, not an event type',
+    matchField_('What is the date of your event?').field, 'eventDate');
+  check('ads: the type question still wins the event type',
+    mapRecord_({ 'What is the date of your event?': 'September 27,2026',
+                 'What type of event are you having?': 'Debut' }).fields.eventType, 'Debut');
+  check('map: N/A is not a venue',
+    mapRecord_({ 'What venue have you chosen?': 'N/A' }).fields.venue, undefined);
+  check('map: a yes/no answer is not a venue either',
+    mapRecord_({ 'Do you already have a venue?': 'No' }).fields.venue, undefined);
+  check('map: a real venue still lands',
+    mapRecord_({ 'What venue have you chosen?': 'Alta Veranda' }).fields.venue, 'Alta Veranda');
+  check('map: a non-answer is kept in Message, not dropped',
+    mapRecord_({ 'What venue have you chosen?': 'N/A' }).extras.length, 1);
+  check('map: "No" reads correctly as free text',
+    mapRecord_({ 'Notes': 'No' }).fields.message, 'No');
   check('route: blank falls back', resolveEventType_('').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: context used when field is blank',

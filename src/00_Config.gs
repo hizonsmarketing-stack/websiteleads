@@ -228,6 +228,7 @@ const FIELD_ALIASES = {
     'wedding date', 'date of wedding', 'affair date', 'date of affair',
     'celebration date', 'party date', 'debut date', 'reception date',
     'tentative date', 'date', 'schedule', 'when is your event',
+    'date of your event', 'date of the event', 'what date',
     'when', 'proposed date', 'function date'
   ],
   guestCount: [
@@ -325,6 +326,18 @@ const INTERNATIONAL_DIAL_CODES = [
   '262', '263', '264', '265', '266', '267', '268', '269'
 ];
 
+/**
+ * Answers that mean "nothing to tell you": a blank by another name.
+ *
+ * Compared after squashKey_(), so "N/A", "n.a." and "NA" are one entry.
+ */
+const NON_ANSWERS = [
+  'na', 'nan', 'none', 'nil', 'null', 'nothing', 'blank', 'empty',
+  'tbd', 'tba', 'tbc', 'notyet', 'notsure', 'unsure', 'undecided', 'unknown',
+  'notapplicable', 'notavailable', 'noneyet', 'wala',
+  'true', 'false', 'yes', 'no'
+];
+
 /** Keys carried by a Google Ads lead-form webhook payload. */
 const GOOGLE_ADS_MARKERS = ['user_column_data', 'google_key', 'lead_id'];
 
@@ -341,5 +354,8 @@ const NOISE_KEYS = [
   // Wix bookkeeping. "contact id" matters: it is a UUID, and without this it
   // reads as a phone number because it contains "contact".
   'contact id', 'contact identity', 'submissions link', 'submission pdf',
-  'form field mask', 'form field', 'form revision', 'namespace'
+  'form field mask', 'form field', 'form revision', 'namespace',
+  // Google Ads bookkeeping. "phone number verified" matters: it carries
+  // TRUE/FALSE and outscores "user phone" for the Phone column.
+  'phone number verified', 'email verified', 'lead stage'
 ];
