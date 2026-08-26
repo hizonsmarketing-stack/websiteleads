@@ -91,8 +91,12 @@ function runSelfTest() {
   check('route: plain birthday is private', resolveEventType_('Birthday celebration').tab, 'Private Event');
   check('route: corporate anniversary stays corporate',
     resolveEventType_('Corporate Anniversary').tab, 'Corporate');
-  check('route: wedding anniversary is private',
-    resolveEventType_('Wedding Anniversary').tab, 'Private Event');
+  check('route: wedding anniversary is a wedding',
+    resolveEventType_('Wedding Anniversary').tab, 'Wedding');
+  check('route: the combined dropdown option is a wedding',
+    resolveEventType_('Wedding/Wedding Anniversary').tab, 'Wedding');
+  check('route: a plain anniversary is still private',
+    resolveEventType_('Anniversary party').tab, 'Private Event');
   check('route: private wording', resolveEventType_('Intimate family gathering').tab, 'Private Event');
   check('route: blank falls back', resolveEventType_('').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);

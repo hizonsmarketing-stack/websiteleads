@@ -107,7 +107,8 @@ const DUPLICATE_EXTRA_COLUMNS = ['Matched On', 'Original Lead ID', 'Original Tab
  * `keywords` are matched against whatever the form or worksheet supplied. The
  * longest matching keyword wins, so the most specific reading is used: "18th
  * birthday" is a Debut rather than a generic birthday, "kiddie party" is a
- * Kid's Party, "corporate anniversary" is Corporate rather than an anniversary.
+ * Kid's Party, "wedding anniversary" is a Wedding rather than a generic
+ * anniversary, and "corporate anniversary" is Corporate rather than either.
  *
  * A plain "birthday" with nothing else to go on is treated as a Private Event —
  * an adult's birthday party. Move the word to another type's list if that is
@@ -124,7 +125,7 @@ const EVENT_TYPES = [
       'wedding', 'bridal', 'bride', 'groom', 'engagement', 'nuptial',
       'church wedding', 'civil wedding', 'garden wedding', 'destination wedding',
       'prenup', 'pre-nup', 'wedding reception', 'kasal', 'renewal of vows',
-      'wedding anniversary party'
+      'wedding anniversary', 'wedding anniversary party'
     ]
   },
   {
@@ -3794,8 +3795,12 @@ function runSelfTest() {
   check('route: plain birthday is private', resolveEventType_('Birthday celebration').tab, 'Private Event');
   check('route: corporate anniversary stays corporate',
     resolveEventType_('Corporate Anniversary').tab, 'Corporate');
-  check('route: wedding anniversary is private',
-    resolveEventType_('Wedding Anniversary').tab, 'Private Event');
+  check('route: wedding anniversary is a wedding',
+    resolveEventType_('Wedding Anniversary').tab, 'Wedding');
+  check('route: the combined dropdown option is a wedding',
+    resolveEventType_('Wedding/Wedding Anniversary').tab, 'Wedding');
+  check('route: a plain anniversary is still private',
+    resolveEventType_('Anniversary party').tab, 'Private Event');
   check('route: private wording', resolveEventType_('Intimate family gathering').tab, 'Private Event');
   check('route: blank falls back', resolveEventType_('').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);

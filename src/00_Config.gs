@@ -81,7 +81,8 @@ const DUPLICATE_EXTRA_COLUMNS = ['Matched On', 'Original Lead ID', 'Original Tab
  * `keywords` are matched against whatever the form or worksheet supplied. The
  * longest matching keyword wins, so the most specific reading is used: "18th
  * birthday" is a Debut rather than a generic birthday, "kiddie party" is a
- * Kid's Party, "corporate anniversary" is Corporate rather than an anniversary.
+ * Kid's Party, "wedding anniversary" is a Wedding rather than a generic
+ * anniversary, and "corporate anniversary" is Corporate rather than either.
  *
  * A plain "birthday" with nothing else to go on is treated as a Private Event —
  * an adult's birthday party. Move the word to another type's list if that is
@@ -98,7 +99,7 @@ const EVENT_TYPES = [
       'wedding', 'bridal', 'bride', 'groom', 'engagement', 'nuptial',
       'church wedding', 'civil wedding', 'garden wedding', 'destination wedding',
       'prenup', 'pre-nup', 'wedding reception', 'kasal', 'renewal of vows',
-      'wedding anniversary party'
+      'wedding anniversary', 'wedding anniversary party'
     ]
   },
   {
