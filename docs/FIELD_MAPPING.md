@@ -175,7 +175,7 @@ wording:
 | `Company Christmas Party` | Corporate | `christmas party` beats `party` |
 | `Corporate Anniversary` | Corporate | `corporate anniversary` beats `anniversary` |
 | `Church Wedding Reception` | Wedding | `church wedding` beats `wedding` |
-| `Wedding Anniversary` | Private Event | `anniversary` beats `wedding` — it isn't a wedding |
+| `Wedding Anniversary` | Wedding | `wedding anniversary` beats a plain `anniversary` |
 | `Debut / 18th Birthday` | Debut | `18th birthday` beats `birthday` |
 | `Kiddie Party` / `Christening` / `1st Birthday` | Kid's Party | the specific wording wins |
 | `Birthday celebration` | Private Event | a plain birthday, with nothing else to go on |
@@ -187,10 +187,19 @@ birthday is treated as an adult's party — a Private Event. If most of your
 birthday enquiries are children's parties, move `birthday` and `bday` from the
 `private` keyword list to the `kids` list in `src/00_Config.gs`.
 
-If the event-type field is blank, the **sub-source name and the message body**
-are searched as weaker evidence — so a lead from a form called *Wedding Package
-Inquiry*, or one who wrote "looking for a venue for our wedding reception",
-still routes correctly.
+### The answer on the form always wins
+
+Whatever the event-type field says decides the routing, whenever it says
+anything the keyword lists recognise. Only when it is blank, or matches
+nothing, are the **sub-source name and the message body** searched as weaker
+evidence — so a lead from a form called *Wedding Package Inquiry*, or one who
+wrote "looking for a venue for our wedding reception", still routes correctly.
+
+That order matters when leads are collected at a named fair. A registrant at
+*WEB EXHIBIT - WEDDING LIBRARY* who answers **Kiddie** is a kid's party: the
+fair's name is where you met them, not what they are planning. Were the two
+weighed together, the longer `wedding` in the fair's name would outvote the
+shorter `kiddie` they actually typed.
 
 Failing all that, the lead goes to **Unassigned**, and gets moved to a real team
 tab automatically if a later submission from the same person names the event

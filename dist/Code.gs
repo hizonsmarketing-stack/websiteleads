@@ -1245,17 +1245,37 @@ function resolveEventType_(raw, extraContext) {
     }
   }
 
-  const haystacks = [primary].concat(
-    (extraContext || []).map(function (t) { return cleanText_(t).toLowerCase(); })
-  ).filter(String);
+  // What the form was actually asked decides, whenever it says anything at all.
+  // Otherwise a lead collected at "WEB EXHIBIT - WEDDING LIBRARY" who answered
+  // "Kiddie" would be filed as a wedding, because the fair's name carries the
+  // longer keyword. The surrounding wording is evidence only when the answer
+  // is not.
+  const answered = matchByKeyword_([primary]);
+  if (answered) return answered;
 
+  const context = (extraContext || []).map(function (t) {
+    return cleanText_(t).toLowerCase();
+  });
+  return matchByKeyword_(context) || FALLBACK_EVENT_TYPE;
+}
+
+/**
+ * Best keyword match across some haystacks, or null.
+ *
+ * Longer keywords are more specific, so "18th birthday" beats "birthday";
+ * earlier haystacks are stronger evidence, which only separates two matches of
+ * the same length.
+ *
+ * @param {!Array<string>} haystacks Already lowercased.
+ * @return {?Object} An entry of EVENT_TYPES.
+ */
+function matchByKeyword_(haystacks) {
   let best = null;
   let bestScore = 0;
-  haystacks.forEach(function (haystack, depth) {
+  haystacks.filter(String).forEach(function (haystack, depth) {
     EVENT_TYPES.forEach(function (type) {
       type.keywords.forEach(function (keyword) {
         if (haystack.indexOf(keyword) === -1) return;
-        // Longer keywords are more specific; later haystacks are weaker evidence.
         const score = keyword.length * 10 - depth;
         if (score > bestScore) {
           bestScore = score;
@@ -1264,8 +1284,7 @@ function resolveEventType_(raw, extraContext) {
       });
     });
   });
-
-  return best || FALLBACK_EVENT_TYPE;
+  return best;
 }
 
 /** @return {!Object} The event type whose tab matches `tabName`, or the fallback. */
@@ -4003,6 +4022,13 @@ function runSelfTest() {
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: context used when field is blank',
     resolveEventType_('', ['Looking for a venue for our wedding reception']).tab, 'Wedding');
+  // A fair's name is evidence, but never over the answer on the form.
+  check('route: the answer beats the fair it was collected at',
+    resolveEventType_('Kiddie', ['WEB EXHIBIT - WEDDING LIBRARY']).tab, "Kid's Party");
+  check('route: and a debut stays a debut at a wedding fair',
+    resolveEventType_('Debut', ['WEB EXHIBIT - WEDDING LIBRARY']).tab, 'Debut');
+  check('route: the fair still decides when nothing was asked',
+    resolveEventType_('', ['WEB EXHIBIT - WEDDING LIBRARY']).tab, 'Wedding');
 
   // --- Field mapping -------------------------------------------------------
   check('map: contact no -> phone', matchField_('Contact No.').field, 'phone');

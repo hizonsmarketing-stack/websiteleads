@@ -134,6 +134,13 @@ function runSelfTest() {
   check('route: unknown falls back', resolveEventType_('Bar mitzvah').tab, FALLBACK_EVENT_TYPE.tab);
   check('route: context used when field is blank',
     resolveEventType_('', ['Looking for a venue for our wedding reception']).tab, 'Wedding');
+  // A fair's name is evidence, but never over the answer on the form.
+  check('route: the answer beats the fair it was collected at',
+    resolveEventType_('Kiddie', ['WEB EXHIBIT - WEDDING LIBRARY']).tab, "Kid's Party");
+  check('route: and a debut stays a debut at a wedding fair',
+    resolveEventType_('Debut', ['WEB EXHIBIT - WEDDING LIBRARY']).tab, 'Debut');
+  check('route: the fair still decides when nothing was asked',
+    resolveEventType_('', ['WEB EXHIBIT - WEDDING LIBRARY']).tab, 'Wedding');
 
   // --- Field mapping -------------------------------------------------------
   check('map: contact no -> phone', matchField_('Contact No.').field, 'phone');

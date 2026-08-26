@@ -259,17 +259,37 @@ function resolveEventType_(raw, extraContext) {
     }
   }
 
-  const haystacks = [primary].concat(
-    (extraContext || []).map(function (t) { return cleanText_(t).toLowerCase(); })
-  ).filter(String);
+  // What the form was actually asked decides, whenever it says anything at all.
+  // Otherwise a lead collected at "WEB EXHIBIT - WEDDING LIBRARY" who answered
+  // "Kiddie" would be filed as a wedding, because the fair's name carries the
+  // longer keyword. The surrounding wording is evidence only when the answer
+  // is not.
+  const answered = matchByKeyword_([primary]);
+  if (answered) return answered;
 
+  const context = (extraContext || []).map(function (t) {
+    return cleanText_(t).toLowerCase();
+  });
+  return matchByKeyword_(context) || FALLBACK_EVENT_TYPE;
+}
+
+/**
+ * Best keyword match across some haystacks, or null.
+ *
+ * Longer keywords are more specific, so "18th birthday" beats "birthday";
+ * earlier haystacks are stronger evidence, which only separates two matches of
+ * the same length.
+ *
+ * @param {!Array<string>} haystacks Already lowercased.
+ * @return {?Object} An entry of EVENT_TYPES.
+ */
+function matchByKeyword_(haystacks) {
   let best = null;
   let bestScore = 0;
-  haystacks.forEach(function (haystack, depth) {
+  haystacks.filter(String).forEach(function (haystack, depth) {
     EVENT_TYPES.forEach(function (type) {
       type.keywords.forEach(function (keyword) {
         if (haystack.indexOf(keyword) === -1) return;
-        // Longer keywords are more specific; later haystacks are weaker evidence.
         const score = keyword.length * 10 - depth;
         if (score > bestScore) {
           bestScore = score;
@@ -278,8 +298,7 @@ function resolveEventType_(raw, extraContext) {
       });
     });
   });
-
-  return best || FALLBACK_EVENT_TYPE;
+  return best;
 }
 
 /** @return {!Object} The event type whose tab matches `tabName`, or the fallback. */
