@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: "Google Sans", Roboto, Arial, sans-serif;
+        font-size: 13px;
+        color: #202124;
+        margin: 0;
+        padding: 16px 18px 24px;
+      }
+      h2 { font-size: 15px; margin: 0 0 4px; }
+      p.hint { color: #5f6368; margin: 0 0 16px; line-height: 1.45; }
+      label { display: block; font-weight: 500; margin: 12px 0 4px; }
+      input, select {
+        width: 100%; box-sizing: border-box; padding: 7px 8px;
+        border: 1px solid #dadce0; border-radius: 4px; font-size: 13px;
+      }
+      .row { display: flex; gap: 12px; }
+      .row > div { flex: 1; }
+      .note { color: #5f6368; font-size: 11.5px; margin-top: 3px; }
+      .actions { margin-top: 20px; display: flex; gap: 8px; align-items: center; }
+      button {
+        padding: 8px 16px; border-radius: 4px; border: 1px solid #dadce0;
+        background: #fff; font-size: 13px; cursor: pointer;
+      }
+      button.primary { background: #1a73e8; border-color: #1a73e8; color: #fff; }
+      button[disabled] { opacity: .5; cursor: default; }
+      #output {
+        margin-top: 16px; padding: 12px; border-radius: 4px;
+        background: #f1f3f4; white-space: pre-wrap; display: none;
+        max-height: 220px; overflow: auto; font-size: 12px; line-height: 1.5;
+      }
+      #output.error { background: #fce8e6; color: #b3261e; }
+      table.map { border-collapse: collapse; width: 100%; font-size: 12px; }
+      table.map td { padding: 2px 6px 2px 0; vertical-align: top; }
+      table.map td.to { color: #1a73e8; }
+      table.map td.ignored { color: #9aa0a6; }
+    </style>
+  </head>
+  <body>
+    <h2>Import bridal fair worksheet</h2>
+    <p class="hint">
+      Every row becomes an <strong>Exhibit</strong> lead tagged with the fair name as its
+      sub-source, deduped against leads you already have from the website and Google Ads,
+      then filed in the team tab for its event type.
+    </p>
+
+    <label for="fairName">Fair name (required)</label>
+    <input id="fairName" placeholder="e.g. Wedding Expo Manila 2026">
+    <div class="note">This is the sub-source recorded on every lead in this import.</div>
+
+    <label for="spreadsheetUrl">Organiser's Google Sheets link (optional)</label>
+    <input id="spreadsheetUrl" placeholder="Leave blank to import from a tab in this file">
+    <div class="note">An .xlsx from the organiser: upload it to Drive and open it with Google Sheets first.</div>
+
+    <label for="sheetName">Tab to read</label>
+    <input id="sheetName" list="tabs" placeholder="Leave blank for the first tab">
+    <datalist id="tabs"></datalist>
+
+    <div class="row">
+      <div>
+        <label for="defaultEventType">Event type when the sheet doesn't say</label>
+        <select id="defaultEventType"></select>
+      </div>
+      <div>
+        <label for="fairDate">Fair date (optional)</label>
+        <input id="fairDate" type="date">
+      </div>
+    </div>
+
+    <label for="headerRow">Header row (optional)</label>
+    <input id="headerRow" type="number" min="1" placeholder="Blank = detect automatically">
+
+    <div class="actions">
+      <button id="previewBtn" onclick="preview()">Preview</button>
+      <button id="importBtn" class="primary" onclick="runImport()">Import</button>
+      <span id="status" class="note"></span>
+    </div>
+
+    <div id="output"></div>
+
+    <script>
+      var out = document.getElementById('output');
+      var statusEl = document.getElementById('status');
+
+      google.script.run.withSuccessHandler(function (ctx) {
+        var list = document.getElementById('tabs');
+        ctx.tabs.forEach(function (name) {
+          var option = document.createElement('option');
+          option.value = name;
+          list.appendChild(option);
+        });
+        var select = document.getElementById('defaultEventType');
+        ctx.eventTypes.forEach(function (label) {
+          var option = document.createElement('option');
+          option.value = label;
+          option.textContent = label;
+          if (label === 'Wedding') option.selected = true;
+          select.appendChild(option);
+        });
+      }).getImportContext();
+
+      function form() {
+        return {
+          fairName: document.getElementById('fairName').value.trim(),
+          spreadsheetUrl: document.getElementById('spreadsheetUrl').value.trim(),
+          sheetName: document.getElementById('sheetName').value.trim(),
+          fairDate: document.getElementById('fairDate').value,
+          defaultEventType: document.getElementById('defaultEventType').value,
+          headerRow: document.getElementById('headerRow').value
+        };
+      }
+
+      function busy(on, message) {
+        document.getElementById('previewBtn').disabled = on;
+        document.getElementById('importBtn').disabled = on;
+        statusEl.textContent = on ? message : '';
+      }
+
+      function show(html, isError) {
+        out.style.display = 'block';
+        out.className = isError ? 'error' : '';
+        out.innerHTML = html;
+      }
+
+      function escapeHtml(text) {
+        return String(text).replace(/[&<>]/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+        });
+      }
+
+      function onError(err) {
+        busy(false);
+        show(escapeHtml(err.message || err), true);
+      }
+
+      function preview() {
+        busy(true, 'Reading…');
+        google.script.run
+          .withSuccessHandler(function (result) {
+            busy(false);
+            var rows = Object.keys(result.mapping).map(function (header) {
+              var target = result.mapping[header];
+              var cls = target === '(ignored)' ? 'ignored' : 'to';
+              return '<tr><td>' + escapeHtml(header) + '</td><td class="' + cls + '">&rarr; ' +
+                escapeHtml(target) + '</td></tr>';
+            }).join('');
+            show(
+              '<strong>' + escapeHtml(result.sheetName) + '</strong> — header on row ' +
+              result.headerRow + ', ' + result.rowCount + ' data rows.<br><br>' +
+              '<table class="map">' + rows + '</table>' +
+              '<br>Columns marked <em>(notes)</em> are kept in the Message column.'
+            );
+          })
+          .withFailureHandler(onError)
+          .previewFairImport(form());
+      }
+
+      function runImport() {
+        var values = form();
+        if (!values.fairName) {
+          show('Enter the fair name first — it is what tags every lead in this import.', true);
+          return;
+        }
+        busy(true, 'Importing…');
+        google.script.run
+          .withSuccessHandler(function (result) {
+            busy(false);
+            var byTab = Object.keys(result.byTab).map(function (tab) {
+              return tab + ': ' + result.byTab[tab];
+            }).join('\n');
+            show(escapeHtml(result.summary + (byTab ? '\n\nRouted to\n' + byTab : '')));
+          })
+          .withFailureHandler(onError)
+          .runFairImport(values);
+      }
+    </script>
+  </body>
+</html>
