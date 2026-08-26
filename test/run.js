@@ -632,6 +632,41 @@ check('with the lead columns ready', tab('Dana').getRange(1, 2).getValue(), 'Lea
 check('and none for someone not taking leads', !!tab('Resting Rey'), 'false');
 api.resetCaches();
 
+realLog('\n--- the Source column is colour-coded ---');
+{
+  const rulesFor = name => {
+    const s = tab(name);
+    return (s ? s.getConditionalFormatRules() : []).filter(r => r.__text);
+  };
+  const byText = name => {
+    const out = {};
+    rulesFor(name).forEach(r => { out[r.__text] = r.__background; });
+    return out;
+  };
+  // Colour is applied by Setup / repair tabs, like every other bit of styling —
+  // a tab created mid-flight by a lead arriving is left alone until then.
+  api.resetCaches();
+  api.setupWorkbook();
+  const bea = byText('Bea');
+  check('website is forest green on a caller tab', bea['Website'], '#1B5E20');
+  check('exhibit is pastel purple', bea['Exhibit'], '#D6C7E8');
+  check('google ads gets its own colour', bea['Google Ads'], '#CFE0F3');
+  check('all three sources are covered', Object.keys(bea).length, 3);
+  check('_Sources is coloured too', byText('_Sources')['Website'], '#1B5E20');
+  check('All Leads is coloured too', byText('All Leads')['Exhibit'], '#D6C7E8');
+
+  // The rule must cover the whole column, not the rows that happen to exist.
+  const s = tab('Bea');
+  const rule = rulesFor('Bea')[0];
+  const covers = rule.getRanges()[0].numRows;
+  check('the rule covers unwritten rows too', covers >= s.getMaxRows() - 1, 'true');
+
+  // Re-running setup must not stack duplicates.
+  api.resetCaches();
+  api.setupWorkbook();
+  check('setup run twice does not stack rules', rulesFor('Bea').length, 3);
+}
+
 realLog('\n--- the Leads menu is wired to real functions ---');
 // A menu item names its handler as a string, so a missing or renamed function
 // is invisible until someone clicks it and Apps Script says "Script function

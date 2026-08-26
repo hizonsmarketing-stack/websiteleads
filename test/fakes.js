@@ -6,6 +6,16 @@ class FakeRange {
   constructor(sheet, row, col, numRows, numCols) {
     Object.assign(this, { sheet, row, col, numRows, numCols });
   }
+  getA1Notation() {
+    const letter = n => {
+      let s = '';
+      while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26; }
+      return s;
+    };
+    const from = letter(this.col) + this.row;
+    const to = letter(this.col + this.numCols - 1) + (this.row + this.numRows - 1);
+    return from === to ? from : from + ':' + to;
+  }
   getValues() {
     const out = [];
     for (let r = 0; r < this.numRows; r++) {
@@ -101,6 +111,8 @@ class FakeSheet {
   setRowHeight() { return this; }
   setColumnWidth() { return this; }
   getBandings() { return this._bandings; }
+  getConditionalFormatRules() { return this._cfRules || (this._cfRules = []); }
+  setConditionalFormatRules(rules) { this._cfRules = rules.slice(); }
   hideSheet() { this._hidden = true; }
   isSheetHidden() { return this._hidden; }
   clear() { this.grid = []; }
@@ -153,6 +165,23 @@ function installFakes(global, options) {
       requireValueInList() { return this; },
       setAllowInvalid() { return this; },
       build() { return {}; }
+    }),
+    newConditionalFormatRule: () => ({
+      _r: { text: '', background: '', font: '', ranges: [] },
+      whenTextEqualTo(v) { this._r.text = v; return this; },
+      setBackground(v) { this._r.background = v; return this; },
+      setFontColor(v) { this._r.font = v; return this; },
+      setRanges(v) { this._r.ranges = v; return this; },
+      build() {
+        const r = this._r;
+        return {
+          getBooleanCondition: () => ({ getCriteriaValues: () => [r.text] }),
+          getRanges: () => r.ranges,
+          __background: r.background,
+          __font: r.font,
+          __text: r.text
+        };
+      }
     }),
     BandingTheme: { LIGHT_GREY: 'LIGHT_GREY' },
     WrapStrategy: { CLIP: 'CLIP' },

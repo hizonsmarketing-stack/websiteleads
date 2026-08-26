@@ -185,6 +185,25 @@ const FALLBACK_EVENT_TYPE = {
   keywords: []
 };
 
+/**
+ * How each source is coloured wherever it is written.
+ *
+ * A caller scanning their tab should be able to see where a lead came from
+ * without reading the column, so the Source cell carries the colour rather
+ * than the whole row — the row already has banding, and two backgrounds
+ * fighting reads as a mistake.
+ *
+ * Each entry sets its own font colour, because a background dark enough to
+ * read as forest green needs light text and a pastel does not.
+ */
+const SOURCE_COLOURS = {
+  website: { background: '#1B5E20', font: '#FFFFFF' },   // forest green
+  googleAds: { background: '#CFE0F3', font: '#14375E' }, // a quieter blue, so
+                                                         // the three are told
+                                                         // apart at a glance
+  exhibit: { background: '#D6C7E8', font: '#3B2A52' }    // pastel purple
+};
+
 /** The three lead sources, tagged on every row. */
 const SOURCES = {
   website: 'Website',
@@ -3245,7 +3264,7 @@ function setupWorkbook() {
     styleLeadSheet_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS));
     styleLeadSheet_(getOrCreateSheet_(SHEETS.duplicates, LEAD_COLUMNS.concat(DUPLICATE_EXTRA_COLUMNS)));
 
-    getOrCreateSheet_(SHEETS.sources, SOURCES_COLUMNS);
+    colourSourceColumn_(getOrCreateSheet_(SHEETS.sources, SOURCES_COLUMNS));
     const detected = seedTeamTab_();
     getOrCreateSheet_(SHEETS.index, INDEX_COLUMNS);
     getOrCreateSheet_(SHEETS.raw, RAW_COLUMNS);
@@ -3254,6 +3273,16 @@ function setupWorkbook() {
     seedSettings_();
     TEAM_CACHE_ = null;
     const rosterTabs = createRosterTabs_();
+
+    // Every caller's tab gets the Source colouring, new or not. Setup leaves an
+    // existing tab's layout alone on purpose, but this is one additive rule on
+    // one column rather than a restyle, and a colour that reached only tabs
+    // created after today would be no use to anyone.
+    loadTeam_().forEach(function (member) {
+      if (!member.tab) return;
+      const sheet = getSpreadsheet_().getSheetByName(member.tab);
+      if (sheet) colourSourceColumn_(sheet);
+    });
     buildDashboard_();
     hideInternalTabs_();
     SETTINGS_CACHE_ = null;
@@ -3417,6 +3446,42 @@ function seedTeamTab_() {
  * message text, a Status dropdown and alternating rows.
  * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
  */
+/**
+ * Colours the Source cell by its value, on any sheet that has the column.
+ *
+ * Conditional formatting rather than painted cells: the rule covers the whole
+ * column, so a lead landing next week is coloured without anyone running
+ * anything, and sorting a tab keeps each colour with its row.
+ *
+ * Rules already on the sheet that touch other columns are kept — a team's own
+ * highlighting is not ours to remove.
+ *
+ * @param {!Sheet} sheet
+ */
+function colourSourceColumn_(sheet) {
+  const col = headerMap_(sheet)[squashKey_('Source')];
+  if (!col) return;
+
+  const range = sheet.getRange(2, col, Math.max(sheet.getMaxRows() - 1, 1), 1);
+  const a1 = range.getA1Notation();
+
+  const kept = sheet.getConditionalFormatRules().filter(function (rule) {
+    return !rule.getRanges().some(function (r) { return r.getA1Notation() === a1; });
+  });
+
+  const rules = Object.keys(SOURCE_COLOURS).map(function (key) {
+    const colour = SOURCE_COLOURS[key];
+    return SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(SOURCES[key])
+      .setBackground(colour.background)
+      .setFontColor(colour.font)
+      .setRanges([range])
+      .build();
+  });
+
+  sheet.setConditionalFormatRules(kept.concat(rules));
+}
+
 function styleLeadSheet_(sheet) {
   const map = headerMap_(sheet);
   const widths = {
@@ -3449,6 +3514,7 @@ function styleLeadSheet_(sheet) {
     sheet.getRange(2, statusCol, sheet.getMaxRows() - 1, 1).setDataValidation(rule);
   }
 
+  colourSourceColumn_(sheet);
   protectTextColumns_(sheet);
   formatHeaderRow_(sheet, Math.max(sheet.getLastColumn(), 1));
   if (!sheet.getBandings().length) {
