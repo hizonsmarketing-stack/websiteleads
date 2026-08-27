@@ -135,6 +135,26 @@ sets its own background and font colour, because a background dark enough to
 read as forest green needs light text and a pastel does not. Any conditional
 formatting you have added yourself on other columns is left alone.
 
+## The Dashboard
+
+Live counts, rebuilt by **Leads → Setup / repair tabs** and updating by
+themselves after that — the cells are formulas, not a snapshot.
+
+**Leads by status counts the caller tabs, not `All Leads`.** Status is the one
+column a person edits by hand, and they edit it where they work. The `All
+Leads` copy of a lead is written when it arrives and afterwards only ever
+updated by the automation itself, so its Status column shows how each lead
+looked on the day it landed. Counting it would report a pile of `New` for ever.
+
+Everything else — by source, by event type, the totals — is counted from `All
+Leads`, because those columns are the automation's to change and it keeps both
+copies in step.
+
+One consequence worth knowing: **the Status column on `All Leads` is not
+reliable.** Filter a caller's own tab when you want to know where their leads
+stand. Adding a salesperson means running *Setup / repair tabs* again so the
+status formulas learn about their tab.
+
 ## Settings
 
 All in the `_Settings` tab. Changes take effect on the next submission.

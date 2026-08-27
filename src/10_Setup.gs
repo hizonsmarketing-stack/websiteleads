@@ -297,7 +297,6 @@ function buildDashboard_() {
   const all = a1SheetRef_(SHEETS.allLeads);
   const sourceCol = columnLetter_('Source');
   const subSourceCol = columnLetter_('Sub-Source');
-  const statusCol = columnLetter_('Status');
   const eventTypeCol = columnLetter_('Event Type');
   const rows = [];
   rows.push(['Website Leads Automation', '', '']);
@@ -326,8 +325,14 @@ function buildDashboard_() {
   });
   rows.push(['', '', '']);
   rows.push(['Leads by status', 'Count', '']);
+  const statusRefs = statusCountRefs_();
   STATUS_OPTIONS.forEach(function (status) {
-    rows.push([status, '=IFERROR(COUNTIF(' + all + '!' + statusCol + '2:' + statusCol + ',"' + status + '"),0)', '']);
+    // Counted across the tabs people actually work in, not the All Leads copy.
+    const terms = statusRefs.map(function (r) {
+      return 'COUNTIF(' + r.ref + '!' + r.letter + '2:' + r.letter + ',"' + status + '")';
+    });
+    rows.push([status,
+      terms.length ? '=IFERROR(' + terms.join('+') + ',0)' : 0, '']);
   });
   rows.push(['', '', '']);
   rows.push(['Leads by sub-source', '', '']);
@@ -376,15 +381,59 @@ function a1SheetRef_(name) {
  * @return {string}
  */
 function columnLetter_(header) {
-  let index = LEAD_COLUMNS.indexOf(header) + 1;
-  if (index < 1) index = 1;
+  const index = LEAD_COLUMNS.indexOf(header) + 1;
+  return columnLetterFromIndex_(index < 1 ? 1 : index);
+}
+
+/**
+ * A1 column letter for a 1-based column number.
+ * @param {number} index
+ * @return {string}
+ */
+function columnLetterFromIndex_(index) {
+  let n = index;
   let letter = '';
-  while (index > 0) {
-    const remainder = (index - 1) % 26;
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
     letter = String.fromCharCode(65 + remainder) + letter;
-    index = Math.floor((index - 1) / 26);
+    n = Math.floor((n - 1) / 26);
   }
   return letter;
+}
+
+/**
+ * Every tab a lead can be sitting on, with that tab's own Status column.
+ *
+ * Status is the one column a person edits by hand, and they edit it where they
+ * work — on their own tab. The All Leads copy is written when the lead arrives
+ * and only ever updated by the automation itself, so counting statuses there
+ * reports how leads looked on the day they landed, not where they are now.
+ *
+ * Each tab is asked for its own Status column rather than assumed: a team's
+ * pre-existing tab keeps its own layout, and setup never restyles it.
+ *
+ * @return {!Array<{ref: string, letter: string}>}
+ */
+function statusCountRefs_() {
+  const names = [];
+  teamTabNames_().forEach(function (name) { names.push(name); });
+  loadTeam_().forEach(function (member) {
+    if (member.tab) names.push(member.tab);
+  });
+
+  const seen = {};
+  const refs = [];
+  names.forEach(function (name) {
+    const key = squashKey_(name);
+    if (seen[key]) return;
+    seen[key] = true;
+    const sheet = getSpreadsheet_().getSheetByName(name);
+    if (!sheet) return;
+    const col = fieldColumns_(sheet).byField['status'];
+    if (!col) return;
+    refs.push({ ref: a1SheetRef_(name), letter: columnLetterFromIndex_(col) });
+  });
+  return refs;
 }
 
 /** Hides the machinery tabs so the sales team sees only what they work in. */

@@ -649,6 +649,28 @@ realLog('\n--- the digest does not try to summarise history ---');
   check('the body stays sendable', d.html.length < 100000, 'true');
 }
 
+realLog('\n--- the dashboard counts statuses where people edit them ---');
+{
+  const dash = tab('Dashboard');
+  const formulaFor = label => {
+    for (let r = 1; r <= dash.getLastRow(); r++) {
+      if (String(dash.getRange(r, 1).getValue()) === label) {
+        return String(dash.getRange(r, 2).getValue());
+      }
+    }
+    return '(not found)';
+  };
+  const contacted = formulaFor('Contacted');
+  // Status is edited on a caller's own tab; the All Leads copy is only ever
+  // updated by the automation, so counting it reports the day leads landed.
+  check('status is not counted from All Leads', /All Leads/.test(contacted), 'false');
+  check('status is counted from a caller tab', /COUNTIF\('Bea'!/.test(contacted), 'true');
+  check('and from the shared event tabs', /COUNTIF\('Wedding'!/.test(contacted), 'true');
+  check('every status row has a formula', formulaFor('Booked').charAt(0), '=');
+  // The columns the automation owns still come from the master list.
+  check('source still counted from All Leads', /All Leads/.test(formulaFor('Website')), 'true');
+}
+
 realLog('\n--- the Source column is colour-coded ---');
 {
   const rulesFor = name => {
