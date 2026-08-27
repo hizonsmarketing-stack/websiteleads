@@ -159,25 +159,6 @@ const FALLBACK_EVENT_TYPE = {
   keywords: []
 };
 
-/**
- * How each source is coloured wherever it is written.
- *
- * A caller scanning their tab should be able to see where a lead came from
- * without reading the column, so the Source cell carries the colour rather
- * than the whole row — the row already has banding, and two backgrounds
- * fighting reads as a mistake.
- *
- * Each entry sets its own font colour, because a background dark enough to
- * read as forest green needs light text and a pastel does not.
- */
-const SOURCE_COLOURS = {
-  website: { background: '#1B5E20', font: '#FFFFFF' },   // forest green
-  googleAds: { background: '#CFE0F3', font: '#14375E' }, // a quieter blue, so
-                                                         // the three are told
-                                                         // apart at a glance
-  exhibit: { background: '#D6C7E8', font: '#3B2A52' }    // pastel purple
-};
-
 /** The three lead sources, tagged on every row. */
 const SOURCES = {
   website: 'Website',

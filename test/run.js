@@ -671,39 +671,25 @@ realLog('\n--- the dashboard counts statuses where people edit them ---');
   check('source still counted from All Leads', /All Leads/.test(formulaFor('Website')), 'true');
 }
 
-realLog('\n--- the Source column is colour-coded ---');
+realLog('\n--- setup clears the Source colouring that was dropped ---');
 {
-  const rulesFor = name => {
-    const s = tab(name);
-    return (s ? s.getConditionalFormatRules() : []).filter(r => r.__text);
-  };
-  const byText = name => {
-    const out = {};
-    rulesFor(name).forEach(r => { out[r.__text] = r.__background; });
-    return out;
-  };
-  // Colour is applied by Setup / repair tabs, like every other bit of styling —
-  // a tab created mid-flight by a lead arriving is left alone until then.
+  const sheet = tab('Bea');
+  const col = api.fieldColumns_(sheet).byField['source'];
+  const range = sheet.getRange(2, col, sheet.getMaxRows() - 1, 1);
+  const stray = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('Website').setBackground('#1B5E20').setFontColor('#FFFFFF')
+    .setRanges([range]).build();
+  const mine = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('MINE').setBackground('#FFEB3B').setFontColor('#000000')
+    .setRanges([sheet.getRange(2, 1, sheet.getMaxRows() - 1, 1)]).build();
+  sheet.setConditionalFormatRules([stray, mine]);
+
   api.resetCaches();
   api.setupWorkbook();
-  const bea = byText('Bea');
-  check('website is forest green on a caller tab', bea['Website'], '#1B5E20');
-  check('exhibit is pastel purple', bea['Exhibit'], '#D6C7E8');
-  check('google ads gets its own colour', bea['Google Ads'], '#CFE0F3');
-  check('all three sources are covered', Object.keys(bea).length, 3);
-  check('_Sources is coloured too', byText('_Sources')['Website'], '#1B5E20');
-  check('All Leads is coloured too', byText('All Leads')['Exhibit'], '#D6C7E8');
 
-  // The rule must cover the whole column, not the rows that happen to exist.
-  const s = tab('Bea');
-  const rule = rulesFor('Bea')[0];
-  const covers = rule.getRanges()[0].numRows;
-  check('the rule covers unwritten rows too', covers >= s.getMaxRows() - 1, 'true');
-
-  // Re-running setup must not stack duplicates.
-  api.resetCaches();
-  api.setupWorkbook();
-  check('setup run twice does not stack rules', rulesFor('Bea').length, 3);
+  const after = sheet.getConditionalFormatRules().map(r => r.__text);
+  check('an old Source rule is cleared', after.indexOf('Website'), -1);
+  check('a rule on another column is kept', after.indexOf('MINE') > -1, 'true');
 }
 
 realLog('\n--- the Leads menu is wired to real functions ---');
