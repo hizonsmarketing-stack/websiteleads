@@ -6,6 +6,22 @@
  */
 
 /** Status values offered in the Status column. */
+/**
+ * The Status column's options, in the order a lead moves through them.
+ *
+ * "Valid" is the sales team's own word and is narrower than "I rang them": the
+ * client answered *and* has a real inquiry. A lead nobody has reached yet is
+ * not Valid however many times it has been called, and neither is a wrong
+ * number or somebody who turned out not to be asking about anything.
+ *
+ * "Needs Contact Info" is set by the automation, not by a person: a submission
+ * arrived with no email and no phone. The rest are a caller's to choose.
+ *
+ * Renaming one of these changes both the dropdown on every lead tab and the
+ * Dashboard's own rows, which read from this list. Leads already carrying the
+ * old word keep it — the dropdown allows values outside the list on purpose —
+ * so they need a find-and-replace, or they are counted under nothing.
+ */
 const STATUS_OPTIONS = [
   'New', 'Valid', 'Qualified', 'Quoted', 'Booked', 'Lost',
   'Nurturing', 'Needs Contact Info', 'Duplicate'
