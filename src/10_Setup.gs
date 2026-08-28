@@ -12,11 +12,21 @@
  * These are call dispositions rather than a sales pipeline: the caller's part
  * ends when the lead is handed on, and the presenter carries it from there.
  *
- * "Valid" is the sales team's own word and is narrower than "I rang them": the
- * client answered *and* has a real inquiry. A lead nobody has reached is not
- * Valid however many times it has been called — that is "No Response" — and
- * neither is a wrong number or somebody who turned out not to be asking about
- * anything.
+ * The team's own definitions, which are narrower than the words look:
+ *
+ *   New          Nobody has worked it yet.
+ *   Valid        The client answered *and* has a real inquiry. Both, not
+ *                either — a wrong number or somebody not actually asking
+ *                about anything is not Valid.
+ *   No Response  Tried three times and still nothing back.
+ *   Lost         The client said no — found another caterer, or filled the
+ *                form in by mistake — or the venue is too far to serve.
+ *   Transferred  Moved to another team: socials to corporate or back, or
+ *                handed to the food order team.
+ *
+ * The distinction worth keeping straight is Lost against No Response: Lost is
+ * for a decision, whether the client's or ours. Not reaching someone is not a
+ * decision.
  *
  * Renaming one of these changes both the dropdown on every lead tab and the
  * Dashboard's own rows, which read from this list. Leads already carrying the
