@@ -649,39 +649,63 @@ realLog('\n--- the digest does not try to summarise history ---');
   check('the body stays sendable', d.html.length < 100000, 'true');
 }
 
-realLog('\n--- the Source column is colour-coded ---');
+realLog('\n--- the dashboard counts statuses where people edit them ---');
 {
-  const rulesFor = name => {
-    const s = tab(name);
-    return (s ? s.getConditionalFormatRules() : []).filter(r => r.__text);
+  const dash = tab('Dashboard');
+  const formulaFor = label => {
+    for (let r = 1; r <= dash.getLastRow(); r++) {
+      if (String(dash.getRange(r, 1).getValue()) === label) {
+        return String(dash.getRange(r, 2).getValue());
+      }
+    }
+    return '(not found)';
   };
-  const byText = name => {
-    const out = {};
-    rulesFor(name).forEach(r => { out[r.__text] = r.__background; });
-    return out;
-  };
-  // Colour is applied by Setup / repair tabs, like every other bit of styling —
-  // a tab created mid-flight by a lead arriving is left alone until then.
+  const contacted = formulaFor('Contacted');
+  // Status is edited on a caller's own tab; the All Leads copy is only ever
+  // updated by the automation, so counting it reports the day leads landed.
+  check('status is not counted from All Leads', /All Leads/.test(contacted), 'false');
+  check('status is counted from a caller tab', /COUNTIF\('Bea'!/.test(contacted), 'true');
+  check('and from the shared event tabs', /COUNTIF\('Wedding'!/.test(contacted), 'true');
+  check('every status row has a formula', formulaFor('Booked').charAt(0), '=');
+  // The columns the automation owns still come from the master list.
+  check('source still counted from All Leads', /All Leads/.test(formulaFor('Website')), 'true');
+}
+
+realLog('\n--- setup clears the Source colouring that was dropped ---');
+{
+  const sheet = tab('Bea');
+  const col = api.fieldColumns_(sheet).byField['source'];
+  const rule = (text, range, bg) => SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo(text).setBackground(bg).setFontColor('#FFFFFF')
+    .setRanges([range]).build();
+
+  // Written when the tab was 200 rows tall; it has grown since, so the stored
+  // range no longer matches what the Source column spans today.
+  const asWritten = sheet.getRange(2, col, 199, 1);
+  const today = sheet.getRange(2, col, sheet.getMaxRows() - 1, 1);
+  check('the sheet has outgrown the old range',
+    asWritten.getA1Notation() === today.getA1Notation(), 'false');
+
+  const mineOnSource = rule('Booked', sheet.getRange(2, col, 40, 1), '#FFEB3B');
+  const mineElsewhere = rule('MINE', sheet.getRange(2, 1, 40, 1), '#FFEB3B');
+  sheet.setConditionalFormatRules([
+    rule('Website', asWritten, '#1B5E20'),
+    rule('Exhibit', asWritten, '#D6C7E8'),
+    rule('Google Ads', asWritten, '#CFE0F3'),
+    mineOnSource,
+    mineElsewhere
+  ]);
+
   api.resetCaches();
   api.setupWorkbook();
-  const bea = byText('Bea');
-  check('website is forest green on a caller tab', bea['Website'], '#1B5E20');
-  check('exhibit is pastel purple', bea['Exhibit'], '#D6C7E8');
-  check('google ads gets its own colour', bea['Google Ads'], '#CFE0F3');
-  check('all three sources are covered', Object.keys(bea).length, 3);
-  check('_Sources is coloured too', byText('_Sources')['Website'], '#1B5E20');
-  check('All Leads is coloured too', byText('All Leads')['Exhibit'], '#D6C7E8');
 
-  // The rule must cover the whole column, not the rows that happen to exist.
-  const s = tab('Bea');
-  const rule = rulesFor('Bea')[0];
-  const covers = rule.getRanges()[0].numRows;
-  check('the rule covers unwritten rows too', covers >= s.getMaxRows() - 1, 'true');
-
-  // Re-running setup must not stack duplicates.
-  api.resetCaches();
-  api.setupWorkbook();
-  check('setup run twice does not stack rules', rulesFor('Bea').length, 3);
+  const after = sheet.getConditionalFormatRules().map(r => r.__text);
+  check('all three colour rules are cleared',
+    ['Website', 'Exhibit', 'Google Ads'].some(t => after.indexOf(t) > -1), 'false');
+  check('a rule on another column is kept', after.indexOf('MINE') > -1, 'true');
+  check('a rule of yours on the Source column is kept', after.indexOf('Booked') > -1, 'true');
+  check('running setup again is a no-op', (api.setupWorkbook(),
+    sheet.getConditionalFormatRules().length), after.length);
 }
 
 realLog('\n--- the Leads menu is wired to real functions ---');

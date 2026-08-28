@@ -4,7 +4,7 @@
 
 | Item | What it does |
 | --- | --- |
-| **Setup / repair tabs** | Creates anything missing and re-applies formatting, including the Source colours. Safe on a live workbook; run it after adding an event type. |
+| **Setup / repair tabs** | Creates anything missing and re-applies formatting. Safe on a live workbook; run it after adding an event type or a salesperson. |
 | **Import bridal fair worksheet…** | See [BRIDAL_FAIRS.md](BRIDAL_FAIRS.md). |
 | **Open team roster** | Jumps to `_Team`, where you say who covers what. |
 | **Import existing leads from a tab…** | One-time, per salesperson tab. See [EXISTING_LEADS.md](EXISTING_LEADS.md). |
@@ -108,32 +108,6 @@ OK — Corporate: called by Shane, Abi, presented by the caller
 A lead sitting in a shared event-type tab or in **Unassigned** has no presenter
 yet — it has no caller either. It gets one at the moment it reaches a caller's
 tab.
-
-## Reading a tab at a glance
-
-The **Source** cell is coloured by where the lead came from, so a caller can
-see the mix on their tab without reading the column:
-
-| Source | Colour |
-| --- | --- |
-| Website | forest green |
-| Exhibit | pastel purple |
-| Google Ads | a quieter blue, so the three are told apart |
-
-It is conditional formatting on the whole column, not painted cells, so leads
-arriving next week are coloured with nothing run and sorting a tab keeps each
-colour with its row. Only the Source cell is coloured — the row already has
-banding, and two backgrounds fighting reads as a mistake.
-
-Applied by **Leads → Setup / repair tabs** to every caller's tab, the shared
-event-type tabs, `All Leads`, `Duplicates` and `_Sources`. Run it once after
-updating the script; a tab created later by a lead arriving picks the colours
-up the next time you run it.
-
-To change a colour, edit `SOURCE_COLOURS` in `src/00_Config.gs` — each source
-sets its own background and font colour, because a background dark enough to
-read as forest green needs light text and a pastel does not. Any conditional
-formatting you have added yourself on other columns is left alone.
 
 ## Settings
 

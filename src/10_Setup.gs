@@ -30,7 +30,7 @@ function setupWorkbook() {
     styleLeadSheet_(getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS));
     styleLeadSheet_(getOrCreateSheet_(SHEETS.duplicates, LEAD_COLUMNS.concat(DUPLICATE_EXTRA_COLUMNS)));
 
-    colourSourceColumn_(getOrCreateSheet_(SHEETS.sources, SOURCES_COLUMNS));
+    clearSourceColours_(getOrCreateSheet_(SHEETS.sources, SOURCES_COLUMNS));
     const detected = seedTeamTab_();
     getOrCreateSheet_(SHEETS.index, INDEX_COLUMNS);
     getOrCreateSheet_(SHEETS.raw, RAW_COLUMNS);
@@ -40,14 +40,11 @@ function setupWorkbook() {
     TEAM_CACHE_ = null;
     const rosterTabs = createRosterTabs_();
 
-    // Every caller's tab gets the Source colouring, new or not. Setup leaves an
-    // existing tab's layout alone on purpose, but this is one additive rule on
-    // one column rather than a restyle, and a colour that reached only tabs
-    // created after today would be no use to anyone.
+    // Existing caller tabs carry the colouring too, so they need clearing.
     loadTeam_().forEach(function (member) {
       if (!member.tab) return;
       const sheet = getSpreadsheet_().getSheetByName(member.tab);
-      if (sheet) colourSourceColumn_(sheet);
+      if (sheet) clearSourceColours_(sheet);
     });
     buildDashboard_();
     hideInternalTabs_();
@@ -213,39 +210,41 @@ function seedTeamTab_() {
  * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
  */
 /**
- * Colours the Source cell by its value, on any sheet that has the column.
+ * Removes the Source colouring this script used to apply.
  *
- * Conditional formatting rather than painted cells: the rule covers the whole
- * column, so a lead landing next week is coloured without anyone running
- * anything, and sorting a tab keeps each colour with its row.
+ * The colours were dropped, but rules already written to a live workbook do not
+ * disappear with the code — so setup clears them, and a single run tidies every
+ * tab instead of someone deleting three rules per sheet by hand.
  *
- * Rules already on the sheet that touch other columns are kept — a team's own
- * highlighting is not ours to remove.
+ * Matched on the column and the condition rather than the rule's exact range: a
+ * sheet grows as leads are appended, so the range recorded when the colouring
+ * was applied no longer describes the same block of cells. A rule goes only if
+ * it covers the Source column alone and tests for one of our own source names,
+ * which is precisely what the colouring wrote. A team's own highlighting sits
+ * on other columns or asks a different question, and stays.
  *
  * @param {!Sheet} sheet
  */
-function colourSourceColumn_(sheet) {
+function clearSourceColours_(sheet) {
   const col = headerMap_(sheet)[squashKey_('Source')];
   if (!col) return;
 
-  const range = sheet.getRange(2, col, Math.max(sheet.getMaxRows() - 1, 1), 1);
-  const a1 = range.getA1Notation();
+  const ours = {};
+  Object.keys(SOURCES).forEach(function (key) { ours[squashKey_(SOURCES[key])] = true; });
 
-  const kept = sheet.getConditionalFormatRules().filter(function (rule) {
-    return !rule.getRanges().some(function (r) { return r.getA1Notation() === a1; });
+  const rules = sheet.getConditionalFormatRules();
+  const kept = rules.filter(function (rule) {
+    const onSourceColumn = rule.getRanges().some(function (r) {
+      return r.getColumn() === col && r.getNumColumns() === 1;
+    });
+    if (!onSourceColumn) return true;
+
+    const condition = rule.getBooleanCondition && rule.getBooleanCondition();
+    const values = (condition && condition.getCriteriaValues()) || [];
+    return !values.some(function (v) { return ours[squashKey_(v)]; });
   });
 
-  const rules = Object.keys(SOURCE_COLOURS).map(function (key) {
-    const colour = SOURCE_COLOURS[key];
-    return SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo(SOURCES[key])
-      .setBackground(colour.background)
-      .setFontColor(colour.font)
-      .setRanges([range])
-      .build();
-  });
-
-  sheet.setConditionalFormatRules(kept.concat(rules));
+  if (kept.length !== rules.length) sheet.setConditionalFormatRules(kept);
 }
 
 function styleLeadSheet_(sheet) {
@@ -280,7 +279,7 @@ function styleLeadSheet_(sheet) {
     sheet.getRange(2, statusCol, sheet.getMaxRows() - 1, 1).setDataValidation(rule);
   }
 
-  colourSourceColumn_(sheet);
+  clearSourceColours_(sheet);
   protectTextColumns_(sheet);
   formatHeaderRow_(sheet, Math.max(sheet.getLastColumn(), 1));
   if (!sheet.getBandings().length) {
@@ -297,7 +296,6 @@ function buildDashboard_() {
   const all = a1SheetRef_(SHEETS.allLeads);
   const sourceCol = columnLetter_('Source');
   const subSourceCol = columnLetter_('Sub-Source');
-  const statusCol = columnLetter_('Status');
   const eventTypeCol = columnLetter_('Event Type');
   const rows = [];
   rows.push(['Website Leads Automation', '', '']);
@@ -326,8 +324,14 @@ function buildDashboard_() {
   });
   rows.push(['', '', '']);
   rows.push(['Leads by status', 'Count', '']);
+  const statusRefs = statusCountRefs_();
   STATUS_OPTIONS.forEach(function (status) {
-    rows.push([status, '=IFERROR(COUNTIF(' + all + '!' + statusCol + '2:' + statusCol + ',"' + status + '"),0)', '']);
+    // Counted across the tabs people actually work in, not the All Leads copy.
+    const terms = statusRefs.map(function (r) {
+      return 'COUNTIF(' + r.ref + '!' + r.letter + '2:' + r.letter + ',"' + status + '")';
+    });
+    rows.push([status,
+      terms.length ? '=IFERROR(' + terms.join('+') + ',0)' : 0, '']);
   });
   rows.push(['', '', '']);
   rows.push(['Leads by sub-source', '', '']);
@@ -376,15 +380,59 @@ function a1SheetRef_(name) {
  * @return {string}
  */
 function columnLetter_(header) {
-  let index = LEAD_COLUMNS.indexOf(header) + 1;
-  if (index < 1) index = 1;
+  const index = LEAD_COLUMNS.indexOf(header) + 1;
+  return columnLetterFromIndex_(index < 1 ? 1 : index);
+}
+
+/**
+ * A1 column letter for a 1-based column number.
+ * @param {number} index
+ * @return {string}
+ */
+function columnLetterFromIndex_(index) {
+  let n = index;
   let letter = '';
-  while (index > 0) {
-    const remainder = (index - 1) % 26;
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
     letter = String.fromCharCode(65 + remainder) + letter;
-    index = Math.floor((index - 1) / 26);
+    n = Math.floor((n - 1) / 26);
   }
   return letter;
+}
+
+/**
+ * Every tab a lead can be sitting on, with that tab's own Status column.
+ *
+ * Status is the one column a person edits by hand, and they edit it where they
+ * work — on their own tab. The All Leads copy is written when the lead arrives
+ * and only ever updated by the automation itself, so counting statuses there
+ * reports how leads looked on the day they landed, not where they are now.
+ *
+ * Each tab is asked for its own Status column rather than assumed: a team's
+ * pre-existing tab keeps its own layout, and setup never restyles it.
+ *
+ * @return {!Array<{ref: string, letter: string}>}
+ */
+function statusCountRefs_() {
+  const names = [];
+  teamTabNames_().forEach(function (name) { names.push(name); });
+  loadTeam_().forEach(function (member) {
+    if (member.tab) names.push(member.tab);
+  });
+
+  const seen = {};
+  const refs = [];
+  names.forEach(function (name) {
+    const key = squashKey_(name);
+    if (seen[key]) return;
+    seen[key] = true;
+    const sheet = getSpreadsheet_().getSheetByName(name);
+    if (!sheet) return;
+    const col = fieldColumns_(sheet).byField['status'];
+    if (!col) return;
+    refs.push({ ref: a1SheetRef_(name), letter: columnLetterFromIndex_(col) });
+  });
+  return refs;
 }
 
 /** Hides the machinery tabs so the sales team sees only what they work in. */
