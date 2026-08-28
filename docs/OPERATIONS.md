@@ -330,6 +330,53 @@ To review what's being caught, sort the Duplicates tab by **Received At**.
   clients legitimately book multiple separate events.
 - `email` — loosest; misses people who give a phone but a different email.
 
+## Statuses
+
+Five words, one per lead, picked from a dropdown on the **Status** column. They
+are what the Dashboard's headline counts read.
+
+- **New** — the lead landed and nobody has called it yet. The automation sets
+  this on arrival.
+- **Valid** — the client answered and has a real inquiry: someone worth
+  quoting, not merely someone you reached.
+- **No Response** — contact was tried three times and the client answered none
+  of them.
+- **Lost** — the client said no. They booked another caterer, or filled the
+  form in by mistake. A service location too far to serve counts as a loss too.
+- **Transferred** — handed to the presenter, or passed to another caller:
+  socials to corporate and back, or over to the food-order team.
+
+**Needs Contact Info** is written by the automation and never picked from the
+dropdown: the form arrived with no email and no phone, so there is no way to
+reach the person. The Dashboard counts it alongside the five so those leads
+stay visible rather than sitting unnoticed in a tab.
+
+### Shorthand
+
+`NR` in the Status column counts as **No Response**. Matching is Sheets' own, so
+`nr` and `Nr` count too. Shorthand is deliberately kept out of the dropdown —
+one name per status there — and lives in `STATUS_ALIASES` in `src/10_Setup.gs`.
+Adding another is one line.
+
+### Change a status on the caller's own tab
+
+The Dashboard counts every salesperson tab and every event-type tab, resolving
+each tab's own Status column rather than assuming a position. It does *not*
+count **All Leads**, which is the automation's own copy of every row: edits made
+there are not carried back to the caller's tab, so a status typed into All Leads
+changes nothing anybody sees.
+
+### Renaming or adding one
+
+Edit `STATUS_OPTIONS` in `src/10_Setup.gs`, push, then run **Setup / repair
+tabs** — the dropdown on every lead tab and the Dashboard's own rows both read
+from that one list.
+
+Leads already carrying the old word keep it, because the dropdown permits values
+outside the list on purpose, and they then count under nothing. After a rename,
+find-and-replace the retired word across all sheets with *Match entire cell
+contents* ticked.
+
 ## Troubleshooting
 
 **A test submission landed on top of the previous one.**
@@ -386,6 +433,20 @@ deleted or reordered rows by hand, run **Rebuild dedupe index**.
 Family members sometimes share a phone number. Split the row by hand and run
 **Rebuild dedupe index**. If it's a recurring problem, switch `Dedupe On` to
 `email`.
+
+**The Dashboard's status counts never move.**
+They used to read **All Leads** only, which nobody edits. The counts now come
+from the salesperson and event-type tabs, where callers actually work. If yours
+still sit still, the deployment predates the fix: push, reload, then run
+**Setup / repair tabs**, which is what rewrites the formulas. A count stuck at
+zero while rows plainly say otherwise usually means those rows carry a retired
+word — see [Statuses](#statuses).
+
+**Source cells are still coloured.**
+Colouring by source was tried and dropped. **Setup / repair tabs** removes the
+rules it created, matching them by column and condition rather than by exact
+range, so it still finds them on tabs that have grown since. Conditional
+formatting you added by hand is left alone.
 
 **The webhook returns an error in the browser.**
 A `GET` to the URL should return `{"status":"ok",…}`. If you get Google's

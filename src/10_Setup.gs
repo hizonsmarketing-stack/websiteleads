@@ -12,11 +12,21 @@
  * These are call dispositions rather than a sales pipeline: the caller's part
  * ends when the lead is handed on, and the presenter carries it from there.
  *
- * "Valid" is the sales team's own word and is narrower than "I rang them": the
- * client answered *and* has a real inquiry. A lead nobody has reached is not
- * Valid however many times it has been called — that is "No Response" — and
- * neither is a wrong number or somebody who turned out not to be asking about
- * anything.
+ * The team's own definitions, which are narrower than the words look:
+ *
+ *   New          Nobody has worked it yet.
+ *   Valid        The client answered *and* has a real inquiry. Both, not
+ *                either — a wrong number or somebody not actually asking
+ *                about anything is not Valid.
+ *   No Response  Tried three times and still nothing back.
+ *   Lost         The client said no — found another caterer, or filled the
+ *                form in by mistake — or the venue is too far to serve.
+ *   Transferred  Moved to another team: socials to corporate or back, or
+ *                handed to the food order team.
+ *
+ * The distinction worth keeping straight is Lost against No Response: Lost is
+ * for a decision, whether the client's or ours. Not reaching someone is not a
+ * decision.
  *
  * Renaming one of these changes both the dropdown on every lead tab and the
  * Dashboard's own rows, which read from this list. Leads already carrying the
@@ -37,6 +47,22 @@ const STATUS_OPTIONS = ['New', 'Valid', 'No Response', 'Lost', 'Transferred'];
  * nobody works and the Dashboard does not count.)
  */
 const AUTOMATIC_STATUSES = ['Needs Contact Info'];
+
+/**
+ * Shorthand a caller might type instead of the full status.
+ *
+ * The Dashboard counts on exact text, so "NR" scribbled into the Status column
+ * would otherwise fall under no row at all — the lead looks unworked in every
+ * count while the caller believes they have marked it. Counting the shorthand
+ * alongside the full word means the sheet reads what people actually write.
+ *
+ * Matching is Sheets' own, so it ignores case: "nr", "Nr" and "NR" all count.
+ * These are deliberately not offered in the dropdown — one name per status
+ * there, so nobody has to choose between two ways of saying the same thing.
+ */
+const STATUS_ALIASES = {
+  'No Response': ['NR']
+};
 
 /**
  * Creates or repairs every tab. Safe to run at any time.
@@ -354,8 +380,13 @@ function buildDashboard_() {
   const statusRefs = statusCountRefs_();
   STATUS_OPTIONS.concat(AUTOMATIC_STATUSES).forEach(function (status) {
     // Counted across the tabs people actually work in, not the All Leads copy.
-    const terms = statusRefs.map(function (r) {
-      return 'COUNTIF(' + r.ref + '!' + r.letter + '2:' + r.letter + ',"' + status + '")';
+    const spellings = [status].concat(STATUS_ALIASES[status] || []);
+    const terms = [];
+    statusRefs.forEach(function (r) {
+      spellings.forEach(function (spelling) {
+        terms.push('COUNTIF(' + r.ref + '!' + r.letter + '2:' + r.letter +
+          ',"' + spelling + '")');
+      });
     });
     rows.push([status,
       terms.length ? '=IFERROR(' + terms.join('+') + ',0)' : 0, '']);
