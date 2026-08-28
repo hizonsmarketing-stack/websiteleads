@@ -3222,25 +3222,36 @@ function describeMapping_(headers) {
 
 /** Status values offered in the Status column. */
 /**
- * The Status column's options, in the order a lead moves through them.
+ * What a caller can set the Status column to, in the order a lead moves.
+ *
+ * These are call dispositions rather than a sales pipeline: the caller's part
+ * ends when the lead is handed on, and the presenter carries it from there.
  *
  * "Valid" is the sales team's own word and is narrower than "I rang them": the
- * client answered *and* has a real inquiry. A lead nobody has reached yet is
- * not Valid however many times it has been called, and neither is a wrong
- * number or somebody who turned out not to be asking about anything.
- *
- * "Needs Contact Info" is set by the automation, not by a person: a submission
- * arrived with no email and no phone. The rest are a caller's to choose.
+ * client answered *and* has a real inquiry. A lead nobody has reached is not
+ * Valid however many times it has been called — that is "No Response" — and
+ * neither is a wrong number or somebody who turned out not to be asking about
+ * anything.
  *
  * Renaming one of these changes both the dropdown on every lead tab and the
  * Dashboard's own rows, which read from this list. Leads already carrying the
  * old word keep it — the dropdown allows values outside the list on purpose —
  * so they need a find-and-replace, or they are counted under nothing.
  */
-const STATUS_OPTIONS = [
-  'New', 'Valid', 'Qualified', 'Quoted', 'Booked', 'Lost',
-  'Nurturing', 'Needs Contact Info', 'Duplicate'
-];
+const STATUS_OPTIONS = ['New', 'Valid', 'No Response', 'Lost', 'Transferred'];
+
+/**
+ * Statuses the automation sets, which nobody picks from a dropdown.
+ *
+ * "Needs Contact Info" marks a submission that arrived with no email and no
+ * phone — a form filled in with no way to reach the person. It is not a
+ * disposition a caller chooses, but those leads still need to be visible, so
+ * the Dashboard counts them alongside the list above.
+ *
+ * ("Duplicate" is written too, but only onto rows in the Duplicates tab, which
+ * nobody works and the Dashboard does not count.)
+ */
+const AUTOMATIC_STATUSES = ['Needs Contact Info'];
 
 /**
  * Creates or repairs every tab. Safe to run at any time.
@@ -3556,7 +3567,7 @@ function buildDashboard_() {
   rows.push(['', '', '']);
   rows.push(['Leads by status', 'Count', '']);
   const statusRefs = statusCountRefs_();
-  STATUS_OPTIONS.forEach(function (status) {
+  STATUS_OPTIONS.concat(AUTOMATIC_STATUSES).forEach(function (status) {
     // Counted across the tabs people actually work in, not the All Leads copy.
     const terms = statusRefs.map(function (r) {
       return 'COUNTIF(' + r.ref + '!' + r.letter + '2:' + r.letter + ',"' + status + '")';
