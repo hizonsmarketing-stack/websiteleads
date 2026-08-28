@@ -3264,6 +3264,22 @@ const STATUS_OPTIONS = ['New', 'Valid', 'No Response', 'Lost', 'Transferred'];
 const AUTOMATIC_STATUSES = ['Needs Contact Info'];
 
 /**
+ * Shorthand a caller might type instead of the full status.
+ *
+ * The Dashboard counts on exact text, so "NR" scribbled into the Status column
+ * would otherwise fall under no row at all — the lead looks unworked in every
+ * count while the caller believes they have marked it. Counting the shorthand
+ * alongside the full word means the sheet reads what people actually write.
+ *
+ * Matching is Sheets' own, so it ignores case: "nr", "Nr" and "NR" all count.
+ * These are deliberately not offered in the dropdown — one name per status
+ * there, so nobody has to choose between two ways of saying the same thing.
+ */
+const STATUS_ALIASES = {
+  'No Response': ['NR']
+};
+
+/**
  * Creates or repairs every tab. Safe to run at any time.
  * @return {string} A human-readable summary.
  */
@@ -3579,8 +3595,13 @@ function buildDashboard_() {
   const statusRefs = statusCountRefs_();
   STATUS_OPTIONS.concat(AUTOMATIC_STATUSES).forEach(function (status) {
     // Counted across the tabs people actually work in, not the All Leads copy.
-    const terms = statusRefs.map(function (r) {
-      return 'COUNTIF(' + r.ref + '!' + r.letter + '2:' + r.letter + ',"' + status + '")';
+    const spellings = [status].concat(STATUS_ALIASES[status] || []);
+    const terms = [];
+    statusRefs.forEach(function (r) {
+      spellings.forEach(function (spelling) {
+        terms.push('COUNTIF(' + r.ref + '!' + r.letter + '2:' + r.letter +
+          ',"' + spelling + '")');
+      });
     });
     rows.push([status,
       terms.length ? '=IFERROR(' + terms.join('+') + ',0)' : 0, '']);

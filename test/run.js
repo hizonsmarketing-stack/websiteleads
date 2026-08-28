@@ -671,6 +671,15 @@ realLog('\n--- the dashboard counts statuses where people edit them ---');
   check('leads with no contact details stay visible',
     formulaFor('Needs Contact Info').charAt(0), '=');
   check('a dropped status has no row', formulaFor('Booked'), '(not found)');
+  // A caller writing NR by hand should land under No Response, not nowhere.
+  const nr = formulaFor('No Response');
+  check('NR is counted as No Response', /,"NR"\)/.test(nr), 'true');
+  check('the full wording is counted too', /,"No Response"\)/.test(nr), 'true');
+  check('both spellings on every tab',
+    (nr.match(/COUNTIF\(/g) || []).length,
+    (formulaFor('Valid').match(/COUNTIF\(/g) || []).length * 2);
+  check('a status with no shorthand is unaffected',
+    /"NR"/.test(formulaFor('Valid')), 'false');
   // The columns the automation owns still come from the master list.
   check('source still counted from All Leads', /All Leads/.test(formulaFor('Website')), 'true');
 }
