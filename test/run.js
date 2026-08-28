@@ -660,7 +660,7 @@ realLog('\n--- the dashboard counts statuses where people edit them ---');
     }
     return '(not found)';
   };
-  const contacted = formulaFor('Contacted');
+  const contacted = formulaFor('Valid');
   // Status is edited on a caller's own tab; the All Leads copy is only ever
   // updated by the automation, so counting it reports the day leads landed.
   check('status is not counted from All Leads', /All Leads/.test(contacted), 'false');

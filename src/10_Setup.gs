@@ -7,7 +7,7 @@
 
 /** Status values offered in the Status column. */
 const STATUS_OPTIONS = [
-  'New', 'Contacted', 'Qualified', 'Quoted', 'Booked', 'Lost',
+  'New', 'Valid', 'Qualified', 'Quoted', 'Booked', 'Lost',
   'Nurturing', 'Needs Contact Info', 'Duplicate'
 ];
 
