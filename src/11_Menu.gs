@@ -21,6 +21,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Send lead digest now', 'menuSendDigest')
     .addSeparator()
+    .addItem('Move selected lead to…', 'menuMoveLead')
     .addItem('Rebuild dedupe index', 'menuRebuildIndex')
     .addItem('Run self-test', 'menuRunTests')
     .addToUi();
@@ -215,6 +216,59 @@ function menuSetGoogleAdsKey() {
 
 function menuSendDigest() {
   SpreadsheetApp.getUi().alert('Lead digest', sendDigestNow(), SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Hands the lead on the selected row to somebody else.
+ *
+ * The manual version of this is a copy-paste between tabs, which leaves the
+ * dedupe index pointing at the old row, the roster tallies untouched and — if
+ * the original is not deleted — the same lead counted twice. One menu item is
+ * easier to get right than a five-step drill nobody remembers under pressure.
+ */
+function menuMoveLead() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getActiveSheet();
+  const row = sheet.getActiveRange() ? sheet.getActiveRange().getRow() : 0;
+
+  const found = leadAtRow_(sheet.getName(), row);
+  if (!found.ok) {
+    ui.alert('Nothing to move', found.problem, ui.ButtonSet.OK);
+    return;
+  }
+
+  const people = loadTeam_().filter(function (m) { return m.active && m.tab; })
+    .map(function (m) { return m.name; });
+  const shared = teamTabNames_();
+  const who = cleanText_(found.lead.fullName) || cleanText_(found.lead.email) || found.leadId;
+
+  const response = ui.prompt(
+    'Move lead to…',
+    'Moving ' + who + ', currently on ' + sheet.getName() + '.\n\n' +
+    'Type who gets it:\n  ' + (people.join(', ') || '(nobody active on the roster)') + '\n\n' +
+    'Or a shared tab:\n  ' + shared.join(', ') + '\n\n' +
+    'The row moves, duplicate matching follows it, All Leads is corrected and ' +
+    'the rotation tallies are adjusted so nobody is fed twice.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  const result = moveLead(sheet.getName(), row, response.getResponseText());
+  if (!result.ok) {
+    ui.alert('Not moved', result.problem, ui.ButtonSet.OK);
+    return;
+  }
+
+  getSpreadsheet_().setActiveSheet(getSpreadsheet_().getSheetByName(result.to));
+  ui.alert(
+    'Moved',
+    result.name + ' is now on ' + result.to + ', row ' + result.row +
+    (result.assignedTo ? ', assigned to ' + result.assignedTo : ', with nobody named') +
+    '.\n\nEvent type: ' + result.eventType +
+    '\n\nDuplicate matching now points here, so the next submission from this ' +
+    'client lands on this row.',
+    ui.ButtonSet.OK
+  );
 }
 
 function menuRebuildIndex() {

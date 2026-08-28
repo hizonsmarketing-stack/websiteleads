@@ -14,6 +14,7 @@
 | **Set webhook token…** | The shared secret website forms must send. |
 | **Set Google Ads key…** | Must match the Key on the Google Ads lead form. |
 | **Send lead digest now** | Sends the summary email immediately, whatever the count is at. Useful for testing the address list. |
+| **Move selected lead to…** | Hands the lead on the selected row to another salesperson, or to a shared tab. Use this instead of copying rows between tabs. |
 | **Rebuild dedupe index** | Re-reads every team tab and rebuilds the matching index. Run it after bulk-editing, deleting or moving rows by hand. |
 | **Run self-test** | Checks the normalisation and routing logic, then checks the `_Team` roster for misspelled event types, active people covering nothing, two people sharing a tab, and event types nobody covers. Writes nothing. |
 
@@ -329,6 +330,41 @@ To review what's being caught, sort the Duplicates tab by **Received At**.
 - `email,phone,date` — also treats contact + event date as a key. Use if
   clients legitimately book multiple separate events.
 - `email` — loosest; misses people who give a phone but a different email.
+
+## Handing a lead to someone else
+
+Click any cell on the lead's row, then **Leads → Move selected lead to…** and
+type who gets it — a salesperson's name, or a shared event-type tab.
+
+Use this rather than copying the row between tabs. A copy-paste looks right and
+is not: four separate records have to change together, and a copy changes one.
+
+| | Copy-paste by hand | Move selected lead to… |
+| --- | --- | --- |
+| The row | on both tabs unless you remember to delete the original | moved, once |
+| Duplicate matching | still points at the old tab, so the client's next submission merges into a row nobody is working | follows the lead |
+| **All Leads** | still names the old owner | corrected |
+| Roster tallies | untouched, so the rotation feeds the receiver as though they were empty | receiver +1, sender −1 |
+
+Everything the lead already carries comes with it — touches, first seen, the
+message thread. It is the same lead in somebody else's hands, and the move is
+appended to **Message** so the receiver can see where it came from. The whole
+thing runs under the document lock, so a hand-off cannot land half-done.
+
+Three things it decides for you:
+
+- **The presenter is recomputed** for the row it lands on, because the rotation
+  runs down the destination tab by row.
+- **An Unassigned lead takes the receiver's event type**, but only when that
+  person covers exactly one. Anyone covering several leaves it open — guessing
+  would be worse than the caller finding out and saying so.
+- **A lead marked `Transferred` arrives as `New`.** `Transferred` is what the
+  sender wrote when they let go of it; to the receiver it is a lead nobody has
+  worked yet.
+
+It refuses to act on the header row, a row past the end of the tab, a tab that
+holds no leads, an unknown destination, and a lead already on the tab you named.
+A refusal moves nothing.
 
 ## Statuses
 
