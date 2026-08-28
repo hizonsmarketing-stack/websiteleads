@@ -666,7 +666,11 @@ realLog('\n--- the dashboard counts statuses where people edit them ---');
   check('status is not counted from All Leads', /All Leads/.test(contacted), 'false');
   check('status is counted from a caller tab', /COUNTIF\('Bea'!/.test(contacted), 'true');
   check('and from the shared event tabs', /COUNTIF\('Wedding'!/.test(contacted), 'true');
-  check('every status row has a formula', formulaFor('Booked').charAt(0), '=');
+  check('every status row has a formula', formulaFor('Transferred').charAt(0), '=');
+  // Set by the automation, never picked from the dropdown, still counted.
+  check('leads with no contact details stay visible',
+    formulaFor('Needs Contact Info').charAt(0), '=');
+  check('a dropped status has no row', formulaFor('Booked'), '(not found)');
   // The columns the automation owns still come from the master list.
   check('source still counted from All Leads', /All Leads/.test(formulaFor('Website')), 'true');
 }
