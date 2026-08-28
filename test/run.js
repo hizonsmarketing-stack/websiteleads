@@ -675,21 +675,37 @@ realLog('\n--- setup clears the Source colouring that was dropped ---');
 {
   const sheet = tab('Bea');
   const col = api.fieldColumns_(sheet).byField['source'];
-  const range = sheet.getRange(2, col, sheet.getMaxRows() - 1, 1);
-  const stray = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('Website').setBackground('#1B5E20').setFontColor('#FFFFFF')
+  const rule = (text, range, bg) => SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo(text).setBackground(bg).setFontColor('#FFFFFF')
     .setRanges([range]).build();
-  const mine = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('MINE').setBackground('#FFEB3B').setFontColor('#000000')
-    .setRanges([sheet.getRange(2, 1, sheet.getMaxRows() - 1, 1)]).build();
-  sheet.setConditionalFormatRules([stray, mine]);
+
+  // Written when the tab was 200 rows tall; it has grown since, so the stored
+  // range no longer matches what the Source column spans today.
+  const asWritten = sheet.getRange(2, col, 199, 1);
+  const today = sheet.getRange(2, col, sheet.getMaxRows() - 1, 1);
+  check('the sheet has outgrown the old range',
+    asWritten.getA1Notation() === today.getA1Notation(), 'false');
+
+  const mineOnSource = rule('Booked', sheet.getRange(2, col, 40, 1), '#FFEB3B');
+  const mineElsewhere = rule('MINE', sheet.getRange(2, 1, 40, 1), '#FFEB3B');
+  sheet.setConditionalFormatRules([
+    rule('Website', asWritten, '#1B5E20'),
+    rule('Exhibit', asWritten, '#D6C7E8'),
+    rule('Google Ads', asWritten, '#CFE0F3'),
+    mineOnSource,
+    mineElsewhere
+  ]);
 
   api.resetCaches();
   api.setupWorkbook();
 
   const after = sheet.getConditionalFormatRules().map(r => r.__text);
-  check('an old Source rule is cleared', after.indexOf('Website'), -1);
+  check('all three colour rules are cleared',
+    ['Website', 'Exhibit', 'Google Ads'].some(t => after.indexOf(t) > -1), 'false');
   check('a rule on another column is kept', after.indexOf('MINE') > -1, 'true');
+  check('a rule of yours on the Source column is kept', after.indexOf('Booked') > -1, 'true');
+  check('running setup again is a no-op', (api.setupWorkbook(),
+    sheet.getConditionalFormatRules().length), after.length);
 }
 
 realLog('\n--- the Leads menu is wired to real functions ---');

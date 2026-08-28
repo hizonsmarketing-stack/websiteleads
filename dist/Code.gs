@@ -3431,8 +3431,12 @@ function seedTeamTab_() {
  * disappear with the code — so setup clears them, and a single run tidies every
  * tab instead of someone deleting three rules per sheet by hand.
  *
- * Only rules covering exactly the Source column are touched, which is the range
- * the colouring used. Anything a team added on other columns is left alone.
+ * Matched on the column and the condition rather than the rule's exact range: a
+ * sheet grows as leads are appended, so the range recorded when the colouring
+ * was applied no longer describes the same block of cells. A rule goes only if
+ * it covers the Source column alone and tests for one of our own source names,
+ * which is precisely what the colouring wrote. A team's own highlighting sits
+ * on other columns or asks a different question, and stays.
  *
  * @param {!Sheet} sheet
  */
@@ -3440,11 +3444,21 @@ function clearSourceColours_(sheet) {
   const col = headerMap_(sheet)[squashKey_('Source')];
   if (!col) return;
 
-  const a1 = sheet.getRange(2, col, Math.max(sheet.getMaxRows() - 1, 1), 1).getA1Notation();
+  const ours = {};
+  Object.keys(SOURCES).forEach(function (key) { ours[squashKey_(SOURCES[key])] = true; });
+
   const rules = sheet.getConditionalFormatRules();
   const kept = rules.filter(function (rule) {
-    return !rule.getRanges().some(function (r) { return r.getA1Notation() === a1; });
+    const onSourceColumn = rule.getRanges().some(function (r) {
+      return r.getColumn() === col && r.getNumColumns() === 1;
+    });
+    if (!onSourceColumn) return true;
+
+    const condition = rule.getBooleanCondition && rule.getBooleanCondition();
+    const values = (condition && condition.getCriteriaValues()) || [];
+    return !values.some(function (v) { return ours[squashKey_(v)]; });
   });
+
   if (kept.length !== rules.length) sheet.setConditionalFormatRules(kept);
 }
 

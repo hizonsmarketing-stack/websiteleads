@@ -6,6 +6,8 @@ class FakeRange {
   constructor(sheet, row, col, numRows, numCols) {
     Object.assign(this, { sheet, row, col, numRows, numCols });
   }
+  getColumn() { return this.col; }
+  getNumColumns() { return this.numCols; }
   getA1Notation() {
     const letter = n => {
       let s = '';
