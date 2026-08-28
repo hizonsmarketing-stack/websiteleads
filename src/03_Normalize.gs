@@ -306,3 +306,16 @@ function eventTypeByTab_(tabName) {
   const match = allEventTypes_().filter(function (t) { return t.tab === tabName; })[0];
   return match || FALLBACK_EVENT_TYPE;
 }
+
+/**
+ * The event type a label names, however it happens to be spelled on the sheet.
+ * @param {string} label
+ * @return {?Object} The event type, or null when nothing matches.
+ */
+function eventTypeByLabel_(label) {
+  const wanted = squashKey_(label);
+  if (!wanted) return null;
+  return allEventTypes_().filter(function (t) {
+    return squashKey_(t.label) === wanted;
+  })[0] || null;
+}

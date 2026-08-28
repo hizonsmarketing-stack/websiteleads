@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_ };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, moveLead, loadTeam_, readLeadRow_ };');
 
 const api = global.__api;
 
@@ -53,6 +53,15 @@ function cellOf(sheetName, row, header) {
   }
   if (col === -1) throw new Error('no column "' + header + '" on ' + sheetName);
   return s.getRange(row, col + 1).getValue();
+}
+
+/** The caller's own edit: writes one named column on a row. */
+function setCellOf(sheetName, row, header, value) {
+  const s = tab(sheetName);
+  const field = api.COLUMN_TO_FIELD[header];
+  const col = field ? api.fieldColumns_(s).byField[field] : 0;
+  if (!col) throw new Error('no column "' + header + '" on ' + sheetName);
+  s.getRange(row, col).setValue(value);
 }
 
 realLog('--- self-test (pure logic) ---');
@@ -726,13 +735,100 @@ realLog('\n--- the Leads menu is wired to real functions ---');
 // is invisible until someone clicks it and Apps Script says "Script function
 // not found". Read the handlers straight out of the menu and check each one.
 {
-  const menuSource = fs.readFileSync(path.join(dir, '11_Menu.gs'), 'utf8');
+  // Read from the same text that was eval'd, so this works against the
+  // bundle in dist/ as well as the individual files in src/.
+  const menuSource = src;
   const handlers = [...menuSource.matchAll(/addItem\(\s*'[^']*'\s*,\s*'([^']+)'/g)]
     .map(m => m[1]);
   check('every menu item was found', handlers.length > 0, 'true');
   const missing = handlers.filter(name => typeof global[name] !== 'function' &&
     !new RegExp('function\\s+' + name + '\\s*\\(').test(src));
   check('every menu item has a function behind it', missing.join(', ') || 'none', 'none');
+}
+
+realLog('\n--- moving a lead hands over everything, not just the row ---');
+{
+  silence(quiet);
+  // Quin covers one event type only, which is what lets a move settle what an
+  // Unassigned lead is. Pia covers Corporate so a Wedding lead cannot be
+  // routed to her by rotation — the only way onto her tab is the move itself.
+  tab('_Team').appendRow(['Pia', 'Pia', 'Corporate', '', 'yes', 0, '', '']);
+  tab('_Team').appendRow(['Quin', 'Quin', "Kid's Party", '', 'yes', 0, '', '']);
+  api.resetCaches();
+
+  const landed = post({ formName: 'Homepage Inquiry', name: 'Move Me',
+    email: 'moveme@example.com', 'Contact Number': '09171239876',
+    'Type of Event': 'Wedding', 'Assigned To': 'Bea' }, { source: 'website' });
+  check('the lead starts on the named owner', landed.tab, 'Bea');
+  const fromRow = tab('Bea').getLastRow();
+  const allRow = tab('All Leads').getLastRow();
+  const before = rows('Bea');
+
+  const counts = function () {
+    api.resetCaches();
+    const out = {};
+    api.loadTeam_().forEach(function (m) { out[m.name] = m.count; });
+    return out;
+  };
+  const was = counts();
+
+  const moved = api.moveLead('Bea', fromRow, 'Pia');
+  check('the move says where it went', moved.ok + ' ' + moved.to, 'true Pia');
+  check('the row leaves the old tab', rows('Bea'), before - 1);
+  const piaRow = tab('Pia').getLastRow();
+  check('and lands on the new one', cellOf('Pia', piaRow, 'Full Name'), 'Move Me');
+  check('the new owner is named on it', cellOf('Pia', piaRow, 'Assigned To'), 'Pia');
+  check('the hand-off is written into the message',
+    /moved from Bea to Pia/.test(cellOf('Pia', piaRow, 'Message')), 'true');
+  check('All Leads follows the lead', cellOf('All Leads', allRow, 'Assigned To'), 'Pia');
+  check('the lead keeps its own history', cellOf('Pia', piaRow, 'Touches'), 1);
+
+  const now = counts();
+  check("the receiver's tally goes up", now['Pia'] - was['Pia'], 1);
+  check("the sender's is credited back", now['Bea'] - was['Bea'], -1);
+
+  // The point of the whole exercise: the next submission from this client has
+  // to find the row on the tab it actually lives on now.
+  api.resetCaches();
+  post({ formName: 'Homepage Inquiry', name: 'Move Me', email: 'moveme@example.com',
+    'Type of Event': 'Wedding', message: 'following up' }, { source: 'website' });
+  check('a repeat merges onto the moved row', cellOf('Pia', piaRow, 'Touches'), 2);
+  check('and nothing new was created on the old tab', rows('Bea'), before - 1);
+}
+
+realLog('\n--- what a move settles, and what it refuses ---');
+{
+  silence(quiet);
+  api.resetCaches();
+  const stray = post({ formName: 'Homepage Inquiry', name: 'No Type Given',
+    email: 'notype-move@example.com' }, { source: 'website' });
+  check('a lead with no event type waits in Unassigned', stray.tab, 'Unassigned');
+  const strayRow = tab('Unassigned').getLastRow();
+
+  const settled = api.moveLead('Unassigned', strayRow, 'Quin');
+  check('a receiver who covers one type settles what it is',
+    settled.eventType, "Kid's Party");
+  check('and the event type is on the row',
+    cellOf('Quin', tab('Quin').getLastRow(), 'Event Type'), "Kid's Party");
+
+  const quinRow = tab('Quin').getLastRow();
+  setCellOf('Quin', quinRow, 'Status', 'Transferred');
+  const onward = api.moveLead('Quin', quinRow, 'Pia');
+  check('a lead marked Transferred arrives as unworked work',
+    cellOf('Pia', tab('Pia').getLastRow(), 'Status'), 'New');
+  check('the onward move is reported too', onward.to, 'Pia');
+
+  const piaLast = tab('Pia').getLastRow();
+  check('the header row is not a lead', api.moveLead('Pia', 1, 'Quin').ok, 'false');
+  check('nor is a row past the end',
+    api.moveLead('Pia', piaLast + 5, 'Quin').ok, 'false');
+  check('a tab that holds no leads is refused',
+    api.moveLead('_Settings', 2, 'Quin').ok, 'false');
+  check('an unknown destination is refused',
+    api.moveLead('Pia', piaLast, 'Somebody Else').ok, 'false');
+  check('and so is moving a lead to where it already is',
+    api.moveLead('Pia', piaLast, 'Pia').ok, 'false');
+  check('a refusal moves nothing', cellOf('Pia', piaLast, 'Full Name'), 'No Type Given');
 }
 
 realLog('\n--- auth and payload shapes ---');

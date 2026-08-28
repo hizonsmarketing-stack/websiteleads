@@ -1293,6 +1293,19 @@ function eventTypeByTab_(tabName) {
   return match || FALLBACK_EVENT_TYPE;
 }
 
+/**
+ * The event type a label names, however it happens to be spelled on the sheet.
+ * @param {string} label
+ * @return {?Object} The event type, or null when nothing matches.
+ */
+function eventTypeByLabel_(label) {
+  const wanted = squashKey_(label);
+  if (!wanted) return null;
+  return allEventTypes_().filter(function (t) {
+    return squashKey_(t.label) === wanted;
+  })[0] || null;
+}
+
 // ==========================================================================
 // src/04_Mapping.gs
 // ==========================================================================
@@ -2588,6 +2601,161 @@ function shiftIndexRowsAfterDelete_(tabName, deletedRow) {
   });
 }
 
+/**
+ * Checks that a row really is a lead the automation owns, and reads it back.
+ *
+ * Shared by the move itself and by the menu, so the menu can say what is wrong
+ * before it asks where the lead should go.
+ *
+ * @param {string} tabName
+ * @param {number} row 1-based.
+ * @return {{ok: boolean, problem: (string|undefined),
+ *     sheet: (!GoogleAppsScript.Spreadsheet.Sheet|undefined),
+ *     lead: (!Object|undefined), leadId: (string|undefined)}}
+ */
+function leadAtRow_(tabName, row) {
+  const sheet = getSpreadsheet_().getSheetByName(tabName);
+  if (!sheet) return { ok: false, problem: 'There is no tab called ' + tabName + '.' };
+  if (leadTabNames_().indexOf(tabName) === -1) {
+    return { ok: false, problem: tabName + ' is not a lead tab. Move leads from a ' +
+      'salesperson\'s tab or a shared event-type tab.' };
+  }
+  if (!(row > 1) || row > sheet.getLastRow()) {
+    return { ok: false, problem: 'Row ' + row + ' is not a lead. Click any cell on the ' +
+      'lead\'s own row first — row 1 is the header.' };
+  }
+  const lead = readLeadRow_(sheet, row);
+  const leadId = cleanText_(lead.leadId);
+  if (!leadId) {
+    return { ok: false, problem: 'That row has no Lead ID, so it is not a lead the ' +
+      'automation knows about.' };
+  }
+  return { ok: true, sheet: sheet, lead: lead, leadId: leadId };
+}
+
+/**
+ * Hands one lead to somebody else, everywhere the workbook records it.
+ *
+ * Copying a row from one tab to another by hand looks right and is not. The
+ * dedupe index still points at the old tab, so the client's next submission is
+ * merged into a row nobody is working; the roster's Assigned Count never
+ * moves, so the rotation goes on feeding the receiver as though they were
+ * still empty; All Leads keeps naming the wrong person; and the row left
+ * behind is counted twice. This does the whole set in one pass, under the
+ * document lock, so a hand-off cannot land half-done.
+ *
+ * The lead keeps its own history — touches, first seen, the message thread. It
+ * is the same lead, in somebody else's hands.
+ *
+ * @param {string} fromTab The tab the lead is on now.
+ * @param {number} row Its 1-based row on that tab.
+ * @param {string} target A salesperson's name, or a tab name.
+ * @return {{ok: boolean, problem: (string|undefined), name: (string|undefined),
+ *     from: (string|undefined), to: (string|undefined), row: (number|undefined)}}
+ */
+function moveLead(fromTab, row, target) {
+  return withLock_(function () {
+    const found = leadAtRow_(fromTab, row);
+    if (!found.ok) return found;
+    const sheet = found.sheet;
+    const lead = found.lead;
+    const leadId = found.leadId;
+
+    const member = namedMember_(target) || memberByTab_(target);
+    const targetTab = (member && member.tab) || cleanText_(target);
+    if (!targetTab || leadTabNames_().indexOf(targetTab) === -1) {
+      return { ok: false, problem: 'No salesperson or lead tab called "' + target + '".\n\n' +
+        'Pick one of: ' + leadTabNames_().join(', ') };
+    }
+    if (targetTab === fromTab) {
+      return { ok: false, problem: 'That lead is already on ' + fromTab + '.' };
+    }
+
+    const moved = Object.assign({}, lead);
+    const giver = memberByTab_(fromTab);
+
+    // Coming out of Unassigned, a receiver who only ever handles one event type
+    // settles what the lead is. Anyone covering several leaves it open, because
+    // guessing here would be worse than the caller finding out and saying so.
+    if (member && squashKey_(moved.eventTypeLabel) === squashKey_(FALLBACK_EVENT_TYPE.label)) {
+      const only = member.eventTypes.length === 1 && member.eventTypes[0] !== '*'
+        ? eventTypeByLabel_(member.eventTypes[0]) : null;
+      if (only) moved.eventTypeLabel = only.label;
+    }
+
+    moved.assignedTo = member ? member.name : '';
+
+    // Transferred is what the sender wrote when they let go of it. To the
+    // receiver it is a lead nobody has worked, so it reads as one.
+    if (squashKey_(moved.status) === squashKey_('Transferred')) moved.status = 'New';
+
+    const targetSheet = getOrCreateSheet_(targetTab, LEAD_COLUMNS);
+    // The presenter rotation runs down the destination tab by row, so the row
+    // this is about to land on is the one that decides.
+    moved.presenter = presenterFor_(
+      cleanText_(moved.eventTypeLabel) || FALLBACK_EVENT_TYPE.label,
+      targetSheet.getLastRow() + 1,
+      member ? member.name : '');
+
+    const note = '--- ' + nowStamp_() + ' moved from ' + fromTab + ' to ' + targetTab + ' ---';
+    moved.message = (cleanText_(moved.message) ? moved.message + '\n\n' : '') + note;
+
+    const newRow = appendLead_(targetSheet, moved);
+    sheet.deleteRow(row);
+    shiftIndexRowsAfterDelete_(fromTab, row);
+    moveIndexEntries_(leadId, targetTab, newRow);
+    syncAllLeadsRow_(leadId, {
+      'Event Type': moved.eventTypeLabel,
+      'Assigned To': moved.assignedTo,
+      'Presenter': moved.presenter || '',
+      'Status': moved.status,
+      'Message': moved.message
+    });
+
+    // The rotation is "fewest so far wins", so a hand-off has to move the tally
+    // as well as the row. Otherwise the receiver is fed as though they were
+    // still empty and the sender is never credited for letting go.
+    if (member) recordAssignment_(member);
+    if (giver && giver !== member) creditHandoff_(giver);
+
+    log_('INFO', 'router', 'Moved lead', {
+      leadId: leadId, from: fromTab, to: targetTab, assignedTo: moved.assignedTo
+    });
+    return {
+      ok: true,
+      name: cleanText_(moved.fullName) || cleanText_(moved.email) || leadId,
+      from: fromTab,
+      to: targetTab,
+      row: newRow,
+      assignedTo: moved.assignedTo,
+      eventType: cleanText_(moved.eventTypeLabel)
+    };
+  });
+}
+
+/** @return {?Object} The roster entry that owns a tab, or null. */
+function memberByTab_(tabName) {
+  const wanted = squashKey_(tabName);
+  if (!wanted) return null;
+  return loadTeam_().filter(function (member) {
+    return squashKey_(member.tab) === wanted;
+  })[0] || null;
+}
+
+/**
+ * Gives back the count someone spent on a lead they have now handed on, so the
+ * rotation offers them the next one. Never below zero: the tally is a queue
+ * position, not a score to be settled.
+ * @param {!Object} member
+ */
+function creditHandoff_(member) {
+  if (!member.count) return;
+  member.count -= 1;
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.team);
+  if (!sheet || !member.row) return;
+  updateRowCells_(sheet, member.row, { 'Assigned Count': member.count });
+}
+
 // ==========================================================================
 // src/07_Intake.gs
 // ==========================================================================
@@ -3743,6 +3911,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Send lead digest now', 'menuSendDigest')
     .addSeparator()
+    .addItem('Move selected lead to…', 'menuMoveLead')
     .addItem('Rebuild dedupe index', 'menuRebuildIndex')
     .addItem('Run self-test', 'menuRunTests')
     .addToUi();
@@ -3937,6 +4106,59 @@ function menuSetGoogleAdsKey() {
 
 function menuSendDigest() {
   SpreadsheetApp.getUi().alert('Lead digest', sendDigestNow(), SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Hands the lead on the selected row to somebody else.
+ *
+ * The manual version of this is a copy-paste between tabs, which leaves the
+ * dedupe index pointing at the old row, the roster tallies untouched and — if
+ * the original is not deleted — the same lead counted twice. One menu item is
+ * easier to get right than a five-step drill nobody remembers under pressure.
+ */
+function menuMoveLead() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getActiveSheet();
+  const row = sheet.getActiveRange() ? sheet.getActiveRange().getRow() : 0;
+
+  const found = leadAtRow_(sheet.getName(), row);
+  if (!found.ok) {
+    ui.alert('Nothing to move', found.problem, ui.ButtonSet.OK);
+    return;
+  }
+
+  const people = loadTeam_().filter(function (m) { return m.active && m.tab; })
+    .map(function (m) { return m.name; });
+  const shared = teamTabNames_();
+  const who = cleanText_(found.lead.fullName) || cleanText_(found.lead.email) || found.leadId;
+
+  const response = ui.prompt(
+    'Move lead to…',
+    'Moving ' + who + ', currently on ' + sheet.getName() + '.\n\n' +
+    'Type who gets it:\n  ' + (people.join(', ') || '(nobody active on the roster)') + '\n\n' +
+    'Or a shared tab:\n  ' + shared.join(', ') + '\n\n' +
+    'The row moves, duplicate matching follows it, All Leads is corrected and ' +
+    'the rotation tallies are adjusted so nobody is fed twice.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  const result = moveLead(sheet.getName(), row, response.getResponseText());
+  if (!result.ok) {
+    ui.alert('Not moved', result.problem, ui.ButtonSet.OK);
+    return;
+  }
+
+  getSpreadsheet_().setActiveSheet(getSpreadsheet_().getSheetByName(result.to));
+  ui.alert(
+    'Moved',
+    result.name + ' is now on ' + result.to + ', row ' + result.row +
+    (result.assignedTo ? ', assigned to ' + result.assignedTo : ', with nobody named') +
+    '.\n\nEvent type: ' + result.eventType +
+    '\n\nDuplicate matching now points here, so the next submission from this ' +
+    'client lands on this row.',
+    ui.ButtonSet.OK
+  );
 }
 
 function menuRebuildIndex() {
