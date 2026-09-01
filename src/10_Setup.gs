@@ -476,13 +476,18 @@ function weekCountFormula_(from, to, source) {
   const bySource = source
     ? ',src,' + book + '!' + srcCol + '2:' + srcCol : '';
   const filter = source ? '*(src="' + source + '")' : '';
+  // TEXT, LEFT, MID and VALUE do not map over a range on their own, and these
+  // are bound outside the SUMPRODUCT that would otherwise force it. Without the
+  // ARRAYFORMULA around each one, the binding can collapse to the first cell
+  // and every week reads zero — so the mapping is asked for, not assumed.
   return '=IFERROR(LET(' +
     'r,' + book + '!' + dateCol + '2:' + dateCol + ',' +
-    'd,LEFT(TEXT(r,"yyyy-mm-dd"),10),' +
+    'd,ARRAYFORMULA(LEFT(TEXT(r,"yyyy-mm-dd"),10)),' +
     // "day" would collide with the DAY function, which LET will not allow.
-    'dnum,IFERROR(VALUE(MID(d,9,2)),0)' + bySource + ',' +
-    'SUMPRODUCT((LEFT(d,7)=TEXT(TODAY(),"yyyy-mm"))' +
-      '*(dnum>=' + from + ')*(dnum<=' + to + ')' + filter + ')' +
+    'dnum,ARRAYFORMULA(IFERROR(VALUE(MID(d,9,2)),0))' + bySource + ',' +
+    'SUMPRODUCT(ARRAYFORMULA(' +
+      '(LEFT(d,7)=TEXT(TODAY(),"yyyy-mm"))' +
+      '*(dnum>=' + from + ')*(dnum<=' + to + ')' + filter + '))' +
     '),0)';
 }
 

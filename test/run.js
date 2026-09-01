@@ -943,6 +943,16 @@ realLog('\n--- the dashboard counts a month by week, split by source ---');
   // A real date value and the text the automation writes have to count alike.
   check('both stored date shapes are read', /TEXT\(r,"yyyy-mm-dd"\)/.test(w1total), 'true');
   check('DAY is not used as a LET name', /,day,/.test(w1website), 'false');
+  // TEXT, LEFT, MID and VALUE do not map over a range on their own, and they
+  // are bound outside the SUMPRODUCT that would otherwise force it. Left to
+  // implicit propagation the binding can collapse to the first cell and every
+  // week reads zero, which looks like a quiet month rather than a broken sum.
+  check('the date is mapped over the range, not assumed',
+    /d,ARRAYFORMULA\(LEFT\(TEXT\(r,/.test(w1total), 'true');
+  check('and so is the day number',
+    /dnum,ARRAYFORMULA\(IFERROR\(VALUE\(/.test(w1total), 'true');
+  check('and the product it is all multiplied into',
+    /SUMPRODUCT\(ARRAYFORMULA\(/.test(w1total), 'true');
 
   // Every other block is narrower than the grid; a ragged array would not write.
   check('the narrow blocks are padded out', cellAt('Duplicates caught', 5), '');
