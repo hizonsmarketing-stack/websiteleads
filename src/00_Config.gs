@@ -119,8 +119,8 @@ const EVENT_TYPES = [
     keywords: [
       'kiddie party', 'kids party', "kid's party", 'kids birthday',
       "children's party", 'childrens party', 'children party', 'kiddie',
-      '1st birthday', 'first birthday', '7th birthday', 'christening',
-      'baptism', 'binyag', 'baby shower', 'gender reveal', 'kids event'
+      '1st birthday', 'first birthday', '7th birthday',
+      'baby shower', 'gender reveal', 'kids event'
     ]
   },
   {
@@ -132,7 +132,11 @@ const EVENT_TYPES = [
       'family gathering', 'dinner party', 'house party', 'get together',
       'get-together', 'small gathering', 'birthday', 'bday', 'anniversary',
       'reunion', 'graduation', 'despedida', 'homecoming', 'retirement',
-      'thanksgiving', 'funeral', 'memorial', 'wake'
+      'thanksgiving', 'funeral', 'memorial', 'wake',
+      // A baptism is sold as a private event here, not as a kiddie party.
+      // "baptism" and "binyag" are substrings of "baptismal" and "binyagan",
+      // so those arrive here too.
+      'christening', 'baptism', 'binyag'
     ]
   },
   {
