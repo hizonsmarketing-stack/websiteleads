@@ -101,7 +101,7 @@ function intakeRecord_(input) {
  * @return {{total: number, created: number, merged: number, skipped: number,
  *           byTab: !Object<string,number>, results: !Array<!Object>}}
  */
-function intakeBatch_(records, context) {
+function intakeBatch_(records, context, opts) {
   return withLock_(function () {
     const summary = { total: records.length, created: 0, merged: 0, skipped: 0, byTab: {}, results: [] };
 
@@ -130,11 +130,23 @@ function intakeBatch_(records, context) {
     flushIndex_();
     flushSubSources_();
     housekeeping_();
-    maybeNotifyTabs_(summary.byTab);
-    maybeSendDigest_(summary.created);
-    maybeNotifyUnassigned_(summary.results);
+    // An import too big for one run works in chunks, each its own batch so the
+    // index reaches the sheet as it goes. It asks for the notices to be held
+    // back so callers hear once about the whole import, not once per chunk.
+    if (!(opts && opts.deferNotices)) notifyAfterIntake_(summary);
     return summary;
   }, 120000);
+}
+
+/**
+ * The notices that follow leads landing: each caller told their tab has work
+ * waiting, the digest, and the alert for anything nobody can be given.
+ * @param {!Object} summary From intakeBatch_, or several of them merged.
+ */
+function notifyAfterIntake_(summary) {
+  maybeNotifyTabs_(summary.byTab);
+  maybeSendDigest_(summary.created);
+  maybeNotifyUnassigned_(summary.results);
 }
 
 /** Keeps the archive tabs from growing without bound. */

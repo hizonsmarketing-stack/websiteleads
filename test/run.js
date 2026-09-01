@@ -746,6 +746,75 @@ realLog('\n--- the Leads menu is wired to real functions ---');
   check('every menu item has a function behind it', missing.join(', ') || 'none', 'none');
 }
 
+realLog('\n--- a fair too big for one run stops and carries on ---');
+{
+  silence(quiet);
+  const big = book.insertSheet('Huge Organiser Export');
+  const bigData = [['Name', 'Contact No.', 'Email Address', 'Wedding Date']];
+  for (let i = 1; i <= 250; i++) {
+    bigData.push(['Fair Guest ' + i, '', 'fairguest' + i + '@example.com', '']);
+  }
+  big.getRange(1, 1, bigData.length, 4).setValues(bigData);
+
+  // Nothing may run for long here, so the budget is set to zero: every chunk
+  // after the first finds the time already spent, which is the same decision
+  // the importer makes on a real worksheet at four minutes.
+  setSetting('Import Time Budget (seconds)', '0');
+  api.resetCaches();
+
+  const dupesBefore = rows('Duplicates');
+  const first = api.importFairWorksheet({
+    sheetName: 'Huge Organiser Export', fairName: 'Endless Expo 2026',
+    fairDate: '2026-08-20', defaultEventType: 'Wedding'
+  });
+  check('it stops instead of being killed', first.stoppedEarly, 'true');
+  check('one chunk got through', first.total, 100);
+  check('and it says how many are left', first.remaining, 150);
+  check('and which row to carry on from', first.nextRow, 101);
+  check('the leads it did import are real', first.created, 100);
+
+  const second = api.importFairWorksheet({
+    sheetName: 'Huge Organiser Export', fairName: 'Endless Expo 2026',
+    fairDate: '2026-08-20', defaultEventType: 'Wedding', startRow: first.nextRow
+  });
+  check('carrying on picks up where it stopped', second.startRow, 101);
+  check('and takes the next chunk', second.total, 100);
+  check('nothing is imported twice', second.merged, 0);
+  check('so they are all new leads', second.created, 100);
+
+  const third = api.importFairWorksheet({
+    sheetName: 'Huge Organiser Export', fairName: 'Endless Expo 2026',
+    fairDate: '2026-08-20', defaultEventType: 'Wedding', startRow: second.nextRow
+  });
+  check('the last stretch finishes', third.stoppedEarly, 'false');
+  check('and it is the remainder', third.total, 50);
+  check('every row landed exactly once', first.created + second.created + third.created, 250);
+  check('none of it was filed as a duplicate', rows('Duplicates'), dupesBefore);
+
+  setSetting('Import Time Budget (seconds)', '240');
+  api.resetCaches();
+
+  // The safety net: the index reached the sheet chunk by chunk, so someone who
+  // loses track and starts the whole worksheet over merges into what is already
+  // there instead of doubling it.
+  const again = api.importFairWorksheet({
+    sheetName: 'Huge Organiser Export', fairName: 'Endless Expo 2026',
+    fairDate: '2026-08-20', defaultEventType: 'Wedding'
+  });
+  check('starting the whole thing over runs to the end', again.stoppedEarly, 'false');
+  check('and reads every row again', again.total, 250);
+  check('creating nothing new', again.created, 0);
+  check('because all 250 are recognised', again.merged, 250);
+
+  const budgeted = api.importFairWorksheet({
+    sheetName: 'Organiser Export', fairName: 'Wedding Expo Manila 2026',
+    fairDate: '2026-08-15', defaultEventType: 'Wedding'
+  });
+  check('a worksheet inside the budget runs straight through',
+    budgeted.stoppedEarly, 'false');
+  check('and reports no resume point', budgeted.nextRow, 0);
+}
+
 realLog('\n--- the dashboard counts a month by week ---');
 {
   silence(quiet);

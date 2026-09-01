@@ -408,14 +408,27 @@ function runFairImport(form) {
     fairName: form.fairName,
     fairDate: form.fairDate,
     defaultEventType: form.defaultEventType,
-    headerRow: Number(form.headerRow) || 0
+    headerRow: Number(form.headerRow) || 0,
+    startRow: Number(form.startRow) || 1
   });
 
   const parts = [
-    summary.total + ' rows read from row ' + (summary.headerRow + 1) + ' down',
+    summary.total + ' rows imported' +
+      (summary.startRow > 1 ? ', carrying on from row ' + summary.startRow : ''),
     summary.created + ' new leads',
     summary.merged + ' merged into existing leads',
     summary.skipped + ' skipped (no usable contact details)'
   ];
-  return { summary: parts.join('\n'), byTab: summary.byTab };
+  if (summary.stoppedEarly) {
+    parts.push('');
+    parts.push('Stopped at the time limit with ' + summary.remaining + ' rows to go. ' +
+      'Everything imported so far is saved and will not be brought in twice. ' +
+      'Press Continue to carry on.');
+  }
+  return {
+    summary: parts.join('\n'),
+    byTab: summary.byTab,
+    stoppedEarly: !!summary.stoppedEarly,
+    nextRow: summary.nextRow || 0
+  };
 }

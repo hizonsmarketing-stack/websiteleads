@@ -54,6 +54,32 @@ last month and visited your booth this month stays **one** lead.
   Info**, so it's visible rather than lost.
 - **Completely blank row** → skipped.
 
+## A worksheet too big for one run
+
+Apps Script stops any script at six minutes. Rather than being killed partway,
+the import works in chunks of 100 rows and keeps an eye on the clock: when the
+time budget is spent it stops between chunks and reports how many rows are
+left. The dialog's **Import** button becomes **Continue** — press it and the
+import carries on from the row it stopped at.
+
+Each chunk is its own batch, which means the dedupe index reaches the sheet as
+the import goes rather than all at the end. Two things follow:
+
+- **Carrying on cannot import a row twice.** Continue resumes at the next
+  unread row.
+- **Starting over cannot either.** If you lose track and run the whole
+  worksheet again, every lead already imported is recognised on email or phone
+  and merged into the row that exists — the counts come back as merges, not new
+  leads. This is the safety net if a run is interrupted some other way, such as
+  closing the dialog or losing the connection.
+
+Changing any field in the dialog clears the resume point, because it only means
+anything for the import that produced it. If you edit the fair name or point at
+a different sheet, the button goes back to **Import** and starts from the top.
+
+The budget is `Import Time Budget (seconds)` in `_Settings`, 240 by default.
+Apps Script kills a run at 360, so leave headroom.
+
 ## Notes from experience
 
 - **Import once.** Re-importing the same worksheet is safe — every row will
