@@ -929,6 +929,7 @@ realLog('\n--- the dashboard counts a month by week, split by source ---');
   const headers = allLeads.getRange(1, 1, 1, allLeads.getLastColumn()).getValues()[0];
   const dateLetter = String.fromCharCode(65 + headers.indexOf('Received At'));
   const srcLetter = String.fromCharCode(65 + headers.indexOf('Source'));
+  const subSourceLetter = String.fromCharCode(65 + headers.indexOf('Sub-Source'));
   check('the week count reads Received At',
     w1total.indexOf("'All Leads'!" + dateLetter + '2:' + dateLetter) !== -1, 'true');
   check('and a source column reads Source',
@@ -946,6 +947,18 @@ realLog('\n--- the dashboard counts a month by week, split by source ---');
   // Every other block is narrower than the grid; a ragged array would not write.
   check('the narrow blocks are padded out', cellAt('Duplicates caught', 5), '');
   check('and still hold their own count', cellAt('Duplicates caught', 2).charAt(0), '=');
+
+  // The sub-source roll-up is a QUERY, and a malformed one fails into the
+  // IFERROR rather than showing an error -- it reads "No leads yet" for ever
+  // while leads pile up. A doubled quote in a label did exactly that.
+  const subRow = rowOf('Leads by sub-source') + 1;
+  const query = String(dash.getRange(subRow, 1).getValue());
+  check('the sub-source roll-up is a query', /^=IFERROR\(QUERY\(/.test(query), 'true');
+  check('no doubled quote in its labels', /''/.test(query), 'false');
+  check('the count is labelled once', /count\([A-Z]+\) 'Leads'/.test(query), 'true');
+  check('and so is the group', /label [A-Z]+ 'Sub-Source'/.test(query), 'true');
+  check('it reads the Sub-Source column',
+    query.indexOf("'All Leads'!" + subSourceLetter + '2:' + subSourceLetter) !== -1, 'true');
 }
 
 realLog('\n--- moving a lead hands over everything, not just the row ---');

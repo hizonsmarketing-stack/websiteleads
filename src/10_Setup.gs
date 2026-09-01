@@ -556,11 +556,19 @@ function buildDashboard_() {
   });
   rows.push(['', '', '']);
   rows.push(['Leads by sub-source', '', '']);
+  // A label is quoted once. Two single quotes read as an empty string next to a
+  // bare word, which is a syntax error the IFERROR then swallows -- leaving the
+  // block reading "No leads yet" however many leads there are.
+  const label = function (expression, text) {
+    return expression + ' \'' + text + '\'';
+  };
   rows.push([
     '=IFERROR(QUERY(' + all + '!' + subSourceCol + '2:' + subSourceCol + ',"select ' + subSourceCol +
       ', count(' + subSourceCol + ') where ' + subSourceCol + ' is not null group by ' + subSourceCol +
-      ' order by count(' + subSourceCol + ') desc label count(' + subSourceCol +
-      ') \'\'Leads\'\'",0),"No leads yet")',
+      ' order by count(' + subSourceCol + ') desc label ' +
+      label(subSourceCol, 'Sub-Source') + ', ' +
+      label('count(' + subSourceCol + ')', 'Leads') +
+      '",0),"No leads yet")',
     '', ''
   ]);
 
