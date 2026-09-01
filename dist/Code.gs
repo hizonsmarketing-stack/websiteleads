@@ -3432,6 +3432,25 @@ const STATUS_OPTIONS = ['New', 'Valid', 'No Response', 'Lost', 'Transferred'];
 const AUTOMATIC_STATUSES = ['Needs Contact Info'];
 
 /**
+ * How the Dashboard splits a month into weeks.
+ *
+ * Calendar weeks would put a single month across five or six rows that start
+ * on different days each month, which nobody can compare month to month. Days
+ * of the month are steadier: the 1st to the 7th is always Week 1. The last
+ * bucket runs to 31 so a long month has nowhere to hide — which does make it
+ * ten days wide rather than seven, so it reads high by about a third.
+ *
+ * Counted on Received At, from the All Leads tab: one row per lead, and repeat
+ * inquiries are filed in Duplicates rather than counted again here.
+ */
+const WEEK_BUCKETS = [
+  { label: 'Week 1 (1-7)', from: 1, to: 7 },
+  { label: 'Week 2 (8-14)', from: 8, to: 14 },
+  { label: 'Week 3 (15-21)', from: 15, to: 21 },
+  { label: 'Week 4 (22-31)', from: 22, to: 31 }
+];
+
+/**
  * Shorthand a caller might type instead of the full status.
  *
  * The Dashboard counts on exact text, so "NR" scribbled into the Status column
@@ -3724,6 +3743,34 @@ function styleLeadSheet_(sheet) {
   }
 }
 
+/**
+ * Counts the leads whose Received At falls on days `from` to `to` of whichever
+ * month it is today.
+ *
+ * Received At is written as text — `yyyy-MM-dd HH:mm:ss` — but a column that
+ * has been through a paste or an import can hold real date values in the same
+ * rows, and a count that quietly skipped those would be worse than no count.
+ * TEXT() formats a date and returns text unchanged, so the first ten
+ * characters are `yyyy-mm-dd` either way. An empty cell formats as 1899, which
+ * matches no month anyone is looking at, so blanks fall out on their own.
+ *
+ * @param {number} from First day of the month in this bucket.
+ * @param {number} to Last day, inclusive.
+ * @return {string} An A1 formula.
+ */
+function weekCountFormula_(from, to) {
+  const col = columnLetter_('Received At');
+  const range = a1SheetRef_(SHEETS.allLeads) + '!' + col + '2:' + col;
+  return '=IFERROR(LET(' +
+    'r,' + range + ',' +
+    'd,LEFT(TEXT(r,"yyyy-mm-dd"),10),' +
+    // "day" would collide with the DAY function, which LET will not allow.
+    'dnum,IFERROR(VALUE(MID(d,9,2)),0),' +
+    'SUMPRODUCT((LEFT(d,7)=TEXT(TODAY(),"yyyy-mm"))' +
+      '*(dnum>=' + from + ')*(dnum<=' + to + '))' +
+    '),0)';
+}
+
 /** Builds a live Dashboard tab of counts by team tab, source and status. */
 function buildDashboard_() {
   const sheet = getOrCreateSheet_('Dashboard', ['Website Leads Automation']);
@@ -3753,6 +3800,14 @@ function buildDashboard_() {
   rows.push(['Total (all leads)', '=IFERROR(COUNTA(' + all + '!A2:A),0)', '']);
   rows.push(['Duplicates caught',
     '=IFERROR(COUNTA(' + a1SheetRef_(SHEETS.duplicates) + '!A2:A),0)', '']);
+  rows.push(['', '', '']);
+  // The month names itself from a formula, so the block still reads correctly
+  // in November without anyone re-running setup.
+  rows.push(['Leads by week', 'Count', '=TEXT(TODAY(),"mmmm yyyy")']);
+  WEEK_BUCKETS.forEach(function (bucket) {
+    rows.push([bucket.label, weekCountFormula_(bucket.from, bucket.to), '']);
+  });
+  rows.push(['This month', weekCountFormula_(1, 31), '']);
   rows.push(['', '', '']);
   rows.push(['Leads by source', 'Count', '']);
   Object.keys(SOURCES).forEach(function (key) {
@@ -3788,8 +3843,8 @@ function buildDashboard_() {
   sheet.getRange('A1').setFontSize(16).setFontWeight('bold');
   sheet.getRange('A2').setFontColor('#666666');
   sheet.getRange(1, 1, rows.length, 1).setFontWeight('normal');
-  ['Leads by event type', 'Leads by salesperson', 'Totals', 'Leads by source',
-   'Leads by status', 'Leads by sub-source'].forEach(function (label) {
+  ['Leads by event type', 'Leads by salesperson', 'Totals', 'Leads by week',
+   'Leads by source', 'Leads by status', 'Leads by sub-source'].forEach(function (label) {
     for (let i = 0; i < rows.length; i++) {
       if (rows[i][0] === label) {
         sheet.getRange(i + 1, 1, 1, 2).setFontWeight('bold').setBackground('#eef3f7');
@@ -3798,6 +3853,7 @@ function buildDashboard_() {
   });
   sheet.setColumnWidth(1, 280);
   sheet.setColumnWidth(2, 120);
+  sheet.setColumnWidth(3, 150);
   sheet.setFrozenRows(2);
   getSpreadsheet_().setActiveSheet(sheet);
   getSpreadsheet_().moveActiveSheet(1);
