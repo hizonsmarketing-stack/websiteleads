@@ -109,9 +109,20 @@
           sheetName: document.getElementById('sheetName').value.trim(),
           fairDate: document.getElementById('fairDate').value,
           defaultEventType: document.getElementById('defaultEventType').value,
-          headerRow: document.getElementById('headerRow').value
+          headerRow: document.getElementById('headerRow').value,
+          startRow: startRow
         };
       }
+
+      // Where the next press of Import begins. A worksheet too big for one run
+      // stops partway and sets this; changing any field clears it, because a
+      // resume point only means anything for the import that produced it.
+      var startRow = 1;
+      document.addEventListener('input', function () {
+        if (startRow === 1) return;
+        startRow = 1;
+        document.getElementById('importBtn').textContent = 'Import';
+      });
 
       function busy(on, message) {
         document.getElementById('previewBtn').disabled = on;
@@ -171,6 +182,9 @@
             var byTab = Object.keys(result.byTab).map(function (tab) {
               return tab + ': ' + result.byTab[tab];
             }).join('\n');
+            startRow = result.stoppedEarly ? result.nextRow : 1;
+            document.getElementById('importBtn').textContent =
+              result.stoppedEarly ? 'Continue' : 'Import';
             show(escapeHtml(result.summary + (byTab ? '\n\nRouted to\n' + byTab : '')));
           })
           .withFailureHandler(onError)

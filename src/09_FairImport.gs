@@ -7,7 +7,16 @@
  * same alias dictionary the webhooks use, and pushes each row through the same
  * intake pipeline — so exhibit leads are deduped against website and Google Ads
  * leads, not just against each other.
+ *
+ * Rows are imported in chunks with a time budget. A worksheet too big to finish
+ * inside Apps Script's six minutes stops cleanly and says which row to carry on
+ * from. Each chunk is its own batch, so the dedupe index reaches the sheet as
+ * the import goes: a run that stops — cleanly or not — leaves every lead it
+ * wrote already indexed, and carrying on cannot duplicate them.
  */
+
+/** Rows pushed through intake in one batch, and so one index flush. */
+const FAIR_CHUNK_ROWS = 100;
 
 /**
  * Imports every row of a worksheet as Exhibit leads.
@@ -20,10 +29,15 @@
  * @param {string=} options.fairDate Used as the received date for every row.
  * @param {string=} options.defaultEventType Defaults to "Wedding".
  * @param {number=} options.headerRow 1-based; auto-detected when omitted.
- * @return {!Object} The intakeBatch_ summary, plus `headerRow` and `mapped`.
+ * @param {number=} options.startRow Which data row to begin at, counting the
+ *     first row below the header as 1. Defaults to 1; a run that stopped early
+ *     reports the number to pass back here.
+ * @return {!Object} The intakeBatch_ summary, plus `headerRow`, `mapped`, and
+ *     — when the budget ran out — `stoppedEarly`, `remaining` and `nextRow`.
  */
 function importFairWorksheet(options) {
   const opts = options || {};
+  const startedAt = Date.now();
   if (!cleanText_(opts.fairName)) throw new Error('A fair name is required — it becomes the sub-source.');
 
   const sheet = resolveSourceSheet_(opts);
@@ -58,23 +72,70 @@ function importFairWorksheet(options) {
     return Object.keys(record.flat).length > 0;
   });
 
+  const startRow = Math.max(1, Number(opts.startRow) || 1);
+  const pending = records.slice(startRow - 1);
+
   const rawRef = storeRaw_(SOURCES.exhibit, cleanText_(opts.fairName), {
     sheet: sheet.getName(),
     headerRow: table.headerRow,
     headers: table.headers,
-    rowCount: records.length
+    startRow: startRow,
+    rowCount: pending.length
   });
-  records.forEach(function (record) { record.rawRef = rawRef; });
+  pending.forEach(function (record) { record.rawRef = rawRef; });
 
-  const summary = intakeBatch_(records, 'fair-import');
+  const budgetMs = 1000 * numberSetting_(
+    'Import Time Budget (seconds)', MIGRATE_TIME_BUDGET_SECONDS);
+
+  const summary = {
+    total: 0, created: 0, merged: 0, skipped: 0, byTab: {}, results: [],
+    startRow: startRow, stoppedEarly: false, remaining: 0, nextRow: 0
+  };
+
+  for (let done = 0; done < pending.length; done += FAIR_CHUNK_ROWS) {
+    // Checked between chunks, never inside one: a chunk that has started is
+    // worth finishing, because that is what writes its leads to the index.
+    if (done && Date.now() - startedAt >= budgetMs) {
+      summary.stoppedEarly = true;
+      summary.remaining = pending.length - done;
+      summary.nextRow = startRow + done;
+      break;
+    }
+    mergeIntakeSummary_(
+      summary,
+      intakeBatch_(pending.slice(done, done + FAIR_CHUNK_ROWS), 'fair-import',
+        { deferNotices: true }));
+  }
+
+  // Held back until the whole run is done, so a caller hears once about an
+  // import rather than once per chunk.
+  notifyAfterIntake_(summary);
+
   summary.headerRow = table.headerRow;
   summary.mapped = describeMapping_(table.headers);
   summary.fairName = cleanText_(opts.fairName);
   log_('INFO', 'fair-import', 'Imported "' + summary.fairName + '"', {
     headerRow: table.headerRow, mapped: summary.mapped, created: summary.created,
-    merged: summary.merged, skipped: summary.skipped
+    merged: summary.merged, skipped: summary.skipped,
+    startRow: startRow, stoppedEarly: summary.stoppedEarly, remaining: summary.remaining
   });
   return summary;
+}
+
+/**
+ * Folds one batch's counts into a running total, so a chunked import reports
+ * itself as the single import it is.
+ * @param {!Object} running
+ * @param {!Object} batch
+ */
+function mergeIntakeSummary_(running, batch) {
+  ['total', 'created', 'merged', 'skipped'].forEach(function (key) {
+    running[key] += batch[key];
+  });
+  Object.keys(batch.byTab).forEach(function (tab) {
+    running.byTab[tab] = (running.byTab[tab] || 0) + batch.byTab[tab];
+  });
+  running.results = running.results.concat(batch.results);
 }
 
 /**

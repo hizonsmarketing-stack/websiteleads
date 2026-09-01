@@ -533,7 +533,10 @@ things to know:
   1.3 Sheets calls per row. A tab of a few thousand rows is fine; one bigger
   than the six-minute limit allows stops cleanly, says how many are left, and
   resumes when run again.
-- A fair worksheet of a few hundred rows imports in one execution.
+- A fair worksheet imports in chunks of 100, each its own batch so the dedupe
+  index reaches the sheet as it goes. A few hundred rows finish in one
+  execution; one too big stops cleanly, says how many are left, and the
+  dialog's button becomes **Continue**.
 - Inbound webhooks are serialised with a document lock, so two forms submitted
   at the same instant can't both create the same lead.
 - `_Raw` and `_Log` self-trim to the retention settings above.
