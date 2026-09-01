@@ -417,6 +417,36 @@ dropdown: the form arrived with no email and no phone, so there is no way to
 reach the person. The Dashboard counts it alongside the five so those leads
 stay visible rather than sitting unnoticed in a tab.
 
+### The row colours itself
+
+Setting a status recolours the whole row, the instant the cell changes:
+
+| Status | Row |
+| --- | --- |
+| New | white |
+| Valid | green |
+| No Response | blue |
+| Lost | red |
+| Transferred | purple |
+| Duplicate | orange — only ever seen on the Duplicates tab |
+
+`NR` colours blue along with `No Response`, and any other shorthand added to
+`STATUS_ALIASES` colours with the status it belongs to. `Needs Contact Info`
+has no colour of its own and keeps the sheet's banding.
+
+New is white on purpose rather than left uncoloured: most rows are New at any
+moment, so a plain ground is what makes the worked ones show up.
+
+It is conditional formatting, written onto every tab someone works a lead in
+plus Duplicates, so there is nothing to run and nothing to keep up to date. Not
+**All Leads** — its Status is the automation's copy and does not follow a
+caller's edit, so colouring it would dress a stale value up as a current one.
+
+Change the colours in `STATUS_COLOURS` in `src/10_Setup.gs` and run **Setup /
+repair tabs**. A re-run replaces the set rather than stacking another behind
+it, and a conditional-format rule somebody set up for themselves is left alone
+— those are applied first, so they still win.
+
 ### Shorthand
 
 `NR` in the Status column counts as **No Response**. Matching is Sheets' own, so

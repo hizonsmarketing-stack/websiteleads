@@ -7,7 +7,9 @@ class FakeRange {
     Object.assign(this, { sheet, row, col, numRows, numCols });
   }
   getColumn() { return this.col; }
+  getRow() { return this.row; }
   getNumColumns() { return this.numCols; }
+  getNumRows() { return this.numRows; }
   getA1Notation() {
     const letter = n => {
       let s = '';
@@ -169,19 +171,24 @@ function installFakes(global, options) {
       build() { return {}; }
     }),
     newConditionalFormatRule: () => ({
-      _r: { text: '', background: '', font: '', ranges: [] },
+      _r: { text: '', formula: '', background: '', font: '', ranges: [] },
       whenTextEqualTo(v) { this._r.text = v; return this; },
+      whenFormulaSatisfied(v) { this._r.formula = v; return this; },
       setBackground(v) { this._r.background = v; return this; },
       setFontColor(v) { this._r.font = v; return this; },
       setRanges(v) { this._r.ranges = v; return this; },
       build() {
         const r = this._r;
+        // Sheets reports the formula as the rule's single criteria value, the
+        // same slot a text rule puts its comparison string in.
+        const criteria = r.formula ? [r.formula] : [r.text];
         return {
-          getBooleanCondition: () => ({ getCriteriaValues: () => [r.text] }),
+          getBooleanCondition: () => ({ getCriteriaValues: () => criteria }),
           getRanges: () => r.ranges,
           __background: r.background,
           __font: r.font,
-          __text: r.text
+          __text: r.text,
+          __formula: r.formula
         };
       }
     }),

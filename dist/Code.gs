@@ -3509,6 +3509,27 @@ const STATUS_OPTIONS = ['New', 'Valid', 'No Response', 'Lost', 'Transferred'];
 const AUTOMATIC_STATUSES = ['Needs Contact Info'];
 
 /**
+ * The fill a row takes once somebody has said where the lead stands.
+ *
+ * New is white on purpose rather than left alone: most rows are New at any
+ * moment, so a plain ground is what makes the worked ones show up. Anything
+ * without an entry here — "Needs Contact Info" — keeps the sheet's banding.
+ *
+ * Google's own light tints, so black text stays readable and the rows print.
+ * Written as conditional formatting on each tab, which means a caller changing
+ * the Status cell recolours the row that instant, with nothing to run.
+ */
+const STATUS_COLOURS = {
+  'New': '#FFFFFF',
+  'Valid': '#D9EAD3',
+  'No Response': '#CFE2F3',
+  'Lost': '#F4CCCC',
+  'Transferred': '#D9D2E9',
+  // Only ever written onto rows in the Duplicates tab.
+  'Duplicate': '#FCE5CD'
+};
+
+/**
  * How the Dashboard splits a month into weeks.
  *
  * Calendar weeks would put a single month across five or six rows that start
@@ -3572,11 +3593,21 @@ function setupWorkbook() {
     TEAM_CACHE_ = null;
     const rosterTabs = createRosterTabs_();
 
-    // Existing caller tabs carry the colouring too, so they need clearing.
+    // Existing caller tabs carry the old source colouring too, so they need
+    // clearing — setup only styles a roster tab on the run that creates it.
     loadTeam_().forEach(function (member) {
       if (!member.tab) return;
       const sheet = getSpreadsheet_().getSheetByName(member.tab);
       if (sheet) clearSourceColours_(sheet);
+    });
+
+    // Every tab somebody works a lead in, plus Duplicates, which is where the
+    // Duplicate status is written. Not All Leads: its Status is the
+    // automation's copy and does not follow a caller's edit, so colouring it
+    // would dress a stale value up as a current one.
+    leadTabNames_().concat([SHEETS.duplicates]).forEach(function (name) {
+      const sheet = getSpreadsheet_().getSheetByName(name);
+      if (sheet) applyStatusColours_(sheet);
     });
     buildDashboard_();
     hideInternalTabs_();
@@ -3741,6 +3772,69 @@ function seedTeamTab_() {
  * message text, a Status dropdown and alternating rows.
  * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
  */
+/**
+ * Colours each row by what its Status column says.
+ *
+ * One conditional-format rule per status, spanning the whole row, so a caller
+ * picking "Lost" from the dropdown turns that row red as they let go of the
+ * mouse. The alternative — writing fills from the script — would only be right
+ * until the next edit, and would need a trigger on every keystroke to stay so.
+ *
+ * Shorthand counts: the rule for a status matches every spelling in
+ * STATUS_ALIASES too, so a row reading NR is as blue as one reading
+ * No Response.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ */
+function applyStatusColours_(sheet) {
+  const col = headerMap_(sheet)[squashKey_('Status')];
+  if (!col) return;
+
+  const letter = columnLetterFromIndex_(col);
+  const width = Math.max(sheet.getLastColumn(), 1);
+  const range = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), width);
+
+  // Ours come off first, so running setup again replaces the set instead of
+  // stacking a second one behind it.
+  const kept = sheet.getConditionalFormatRules().filter(function (rule) {
+    return !isStatusColourRule_(rule);
+  });
+
+  const added = Object.keys(STATUS_COLOURS).map(function (status) {
+    const spellings = [status].concat(STATUS_ALIASES[status] || []);
+    return SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(statusColourFormula_(letter, spellings))
+      .setBackground(STATUS_COLOURS[status])
+      .setRanges([range])
+      .build();
+  });
+
+  // Ours go last, so a rule somebody set up for themselves still wins.
+  sheet.setConditionalFormatRules(kept.concat(added));
+}
+
+/**
+ * @param {string} letter Column letter of Status.
+ * @param {!Array<string>} spellings Every wording that counts as this status.
+ * @return {string} A conditional-format formula, relative to the first row.
+ */
+function statusColourFormula_(letter, spellings) {
+  return '=OR(' + spellings.map(function (word) {
+    return '$' + letter + '2="' + word + '"';
+  }).join(',') + ')';
+}
+
+/** @return {boolean} Whether this rule is one applyStatusColours_ wrote. */
+function isStatusColourRule_(rule) {
+  const condition = rule.getBooleanCondition && rule.getBooleanCondition();
+  const values = (condition && condition.getCriteriaValues()) || [];
+  return values.some(function (value) {
+    return Object.keys(STATUS_COLOURS).some(function (status) {
+      return String(value).indexOf('2="' + status + '"') !== -1;
+    });
+  });
+}
+
 /**
  * Removes the Source colouring this script used to apply.
  *
