@@ -869,19 +869,30 @@ realLog('\n--- a worked lead colours its own row ---');
     rulesOn('Bea')[0].__text, 'URGENT');
 }
 
-realLog('\n--- the dashboard counts a month by week ---');
+realLog('\n--- the dashboard counts a month by week, split by source ---');
 {
   silence(quiet);
   api.setupWorkbook();
   const dash = tab('Dashboard');
-  const formulaFor = label => {
+  const rowOf = label => {
     for (let r = 1; r <= dash.getLastRow(); r++) {
-      if (String(dash.getRange(r, 1).getValue()) === label) {
-        return String(dash.getRange(r, 2).getValue());
-      }
+      if (String(dash.getRange(r, 1).getValue()) === label) return r;
     }
-    return '(not found)';
+    return 0;
   };
+  const cellAt = (label, col) => {
+    const r = rowOf(label);
+    return r ? String(dash.getRange(r, col).getValue()) : '(not found)';
+  };
+
+  // Column 1 is the label, then one per source in SOURCES order, then the total.
+  const headerRow = rowOf('Leads by week');
+  const headings = [];
+  for (let c = 2; c <= 6; c++) headings.push(String(dash.getRange(headerRow, c).getValue()));
+  check('a column per source, then the total',
+    headings.slice(0, 4).join(' | '), 'Website | Google Ads | Exhibit | All sources');
+  check('and the month names itself',
+    /^=TEXT\(TODAY\(\),"mmmm yyyy"\)$/.test(headings[4]), 'true');
 
   // The buckets are a tuning knob, so guard the invariant rather than the
   // numbers: every day of a long month lands in exactly one week.
@@ -896,27 +907,45 @@ realLog('\n--- the dashboard counts a month by week ---');
   check('and no day counted twice',
     days.filter(d => covered[d] !== 1).join(',') || 'none', 'none');
 
-  const w1 = formulaFor('Week 1 (1-7)');
-  check('week 1 has a formula', w1.charAt(0), '=');
   check('every week the team named has a row',
-    api.WEEK_BUCKETS.filter(b => formulaFor(b.label) === '(not found)').length, 0);
-  check('and a running month total', formulaFor('This month').charAt(0), '=');
+    api.WEEK_BUCKETS.filter(b => rowOf(b.label) === 0).length, 0);
+  check('and a running month total', cellAt('This month', 5).charAt(0), '=');
+
+  const w1website = cellAt('Week 1 (1-7)', 2);
+  const w1total = cellAt('Week 1 (1-7)', 5);
+  check('the website column filters on Website',
+    /\*\(src="Website"\)/.test(w1website), 'true');
+  check('the google ads column filters on Google Ads',
+    /\*\(src="Google Ads"\)/.test(cellAt('Week 1 (1-7)', 3)), 'true');
+  check('the exhibit column filters on Exhibit',
+    /\*\(src="Exhibit"\)/.test(cellAt('Week 1 (1-7)', 4)), 'true');
+  // Counted, not summed, so a lead carrying a source outside the list still
+  // reaches the total and the row visibly stops adding up.
+  check('the total filters on no source at all', /src=/.test(w1total), 'false');
 
   // Counted on when the lead arrived, from the one tab that holds every lead
-  // exactly once — repeat inquiries are filed in Duplicates, not counted again.
+  // exactly once - repeat inquiries are filed in Duplicates, not counted again.
   const allLeads = tab('All Leads');
   const headers = allLeads.getRange(1, 1, 1, allLeads.getLastColumn()).getValues()[0];
-  const letter = String.fromCharCode(65 + headers.indexOf('Received At'));
+  const dateLetter = String.fromCharCode(65 + headers.indexOf('Received At'));
+  const srcLetter = String.fromCharCode(65 + headers.indexOf('Source'));
   check('the week count reads Received At',
-    w1.indexOf("'All Leads'!" + letter + '2:' + letter) !== -1, 'true');
-  check('week 1 asks for days 1 to 7', /\(dnum>=1\)\*\(dnum<=7\)/.test(w1), 'true');
+    w1total.indexOf("'All Leads'!" + dateLetter + '2:' + dateLetter) !== -1, 'true');
+  check('and a source column reads Source',
+    w1website.indexOf("'All Leads'!" + srcLetter + '2:' + srcLetter) !== -1, 'true');
+
+  check('week 1 asks for days 1 to 7', /\(dnum>=1\)\*\(dnum<=7\)/.test(w1total), 'true');
   check('week 4 asks for days 22 to 31',
-    /\(dnum>=22\)\*\(dnum<=31\)/.test(formulaFor('Week 4 (22-31)')), 'true');
+    /\(dnum>=22\)\*\(dnum<=31\)/.test(cellAt('Week 4 (22-31)', 5)), 'true');
   check('it is scoped to the current month',
-    /LEFT\(d,7\)=TEXT\(TODAY\(\),"yyyy-mm"\)/.test(w1), 'true');
+    /LEFT\(d,7\)=TEXT\(TODAY\(\),"yyyy-mm"\)/.test(w1total), 'true');
   // A real date value and the text the automation writes have to count alike.
-  check('both stored date shapes are read', /TEXT\(r,"yyyy-mm-dd"\)/.test(w1), 'true');
-  check('DAY is not used as a LET name', /,day,/.test(w1), 'false');
+  check('both stored date shapes are read', /TEXT\(r,"yyyy-mm-dd"\)/.test(w1total), 'true');
+  check('DAY is not used as a LET name', /,day,/.test(w1website), 'false');
+
+  // Every other block is narrower than the grid; a ragged array would not write.
+  check('the narrow blocks are padded out', cellAt('Duplicates caught', 5), '');
+  check('and still hold their own count', cellAt('Duplicates caught', 2).charAt(0), '=');
 }
 
 realLog('\n--- moving a lead hands over everything, not just the row ---');

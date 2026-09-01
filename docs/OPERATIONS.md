@@ -337,13 +337,23 @@ The Dashboard carries a **Leads by week** block for the current month, which
 names itself from a formula — it reads correctly in November without anyone
 re-running setup.
 
-| Row | Days of the month |
-| --- | --- |
-| Week 1 | 1–7 |
-| Week 2 | 8–14 |
-| Week 3 | 15–21 |
-| Week 4 | 22–31 |
-| This month | 1–31 |
+One row per week, one column per source, and a total:
+
+| Leads by week | Website | Google Ads | Exhibit | All sources |
+| --- | --- | --- | --- | --- |
+| Week 1 (1-7) | | | | |
+| Week 2 (8-14) | | | | |
+| Week 3 (15-21) | | | | |
+| Week 4 (22-31) | | | | |
+| This month | | | | |
+
+**All sources is counted, not added up.** It runs the same count with no source
+filter, so a lead carrying a source outside the list still reaches the total —
+and a row whose columns do not sum to it is telling you one arrived. Adding the
+columns together would have hidden that.
+
+The source columns follow `SOURCES` in `src/00_Config.gs`; add a source there
+and the grid grows a column on the next **Setup / repair tabs**.
 
 Calendar weeks would put a month across five or six rows starting on a
 different day each month, which cannot be compared month to month. Days of the

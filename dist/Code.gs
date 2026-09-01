@@ -3929,16 +3929,20 @@ function styleLeadSheet_(sheet) {
  * @param {number} to Last day, inclusive.
  * @return {string} An A1 formula.
  */
-function weekCountFormula_(from, to) {
-  const col = columnLetter_('Received At');
-  const range = a1SheetRef_(SHEETS.allLeads) + '!' + col + '2:' + col;
+function weekCountFormula_(from, to, source) {
+  const book = a1SheetRef_(SHEETS.allLeads);
+  const dateCol = columnLetter_('Received At');
+  const srcCol = columnLetter_('Source');
+  const bySource = source
+    ? ',src,' + book + '!' + srcCol + '2:' + srcCol : '';
+  const filter = source ? '*(src="' + source + '")' : '';
   return '=IFERROR(LET(' +
-    'r,' + range + ',' +
+    'r,' + book + '!' + dateCol + '2:' + dateCol + ',' +
     'd,LEFT(TEXT(r,"yyyy-mm-dd"),10),' +
     // "day" would collide with the DAY function, which LET will not allow.
-    'dnum,IFERROR(VALUE(MID(d,9,2)),0),' +
+    'dnum,IFERROR(VALUE(MID(d,9,2)),0)' + bySource + ',' +
     'SUMPRODUCT((LEFT(d,7)=TEXT(TODAY(),"yyyy-mm"))' +
-      '*(dnum>=' + from + ')*(dnum<=' + to + '))' +
+      '*(dnum>=' + from + ')*(dnum<=' + to + ')' + filter + ')' +
     '),0)';
 }
 
@@ -3972,13 +3976,23 @@ function buildDashboard_() {
   rows.push(['Duplicates caught',
     '=IFERROR(COUNTA(' + a1SheetRef_(SHEETS.duplicates) + '!A2:A),0)', '']);
   rows.push(['', '', '']);
-  // The month names itself from a formula, so the block still reads correctly
-  // in November without anyone re-running setup.
-  rows.push(['Leads by week', 'Count', '=TEXT(TODAY(),"mmmm yyyy")']);
+  // One column per source, and the month names itself from a formula so the
+  // block still reads correctly in November without anyone re-running setup.
+  const sourceNames = Object.keys(SOURCES).map(function (key) { return SOURCES[key]; });
+  const weekRow = function (label, from, to) {
+    return [label].concat(
+      sourceNames.map(function (name) { return weekCountFormula_(from, to, name); }),
+      // Counted without the source filter rather than added up, so a lead
+      // carrying a source outside the list is still in the total. A row whose
+      // columns do not sum to it is telling you one arrived.
+      [weekCountFormula_(from, to)]);
+  };
+  rows.push(['Leads by week'].concat(sourceNames, ['All sources'],
+    ['=TEXT(TODAY(),"mmmm yyyy")']));
   WEEK_BUCKETS.forEach(function (bucket) {
-    rows.push([bucket.label, weekCountFormula_(bucket.from, bucket.to), '']);
+    rows.push(weekRow(bucket.label, bucket.from, bucket.to));
   });
-  rows.push(['This month', weekCountFormula_(1, 31), '']);
+  rows.push(weekRow('This month', 1, 31));
   rows.push(['', '', '']);
   rows.push(['Leads by source', 'Count', '']);
   Object.keys(SOURCES).forEach(function (key) {
@@ -4010,21 +4024,30 @@ function buildDashboard_() {
     '', ''
   ]);
 
-  sheet.getRange(1, 1, rows.length, 3).setValues(rows);
+  // The week grid is wider than everything else, so every row is padded out to
+  // the widest before writing — setValues will not take a ragged array.
+  const width = rows.reduce(function (w, r) { return Math.max(w, r.length); }, 3);
+  const padded = rows.map(function (row) {
+    const copy = row.slice();
+    while (copy.length < width) copy.push('');
+    return copy;
+  });
+  sheet.getRange(1, 1, padded.length, width).setValues(padded);
   sheet.getRange('A1').setFontSize(16).setFontWeight('bold');
   sheet.getRange('A2').setFontColor('#666666');
-  sheet.getRange(1, 1, rows.length, 1).setFontWeight('normal');
+  sheet.getRange(1, 1, padded.length, 1).setFontWeight('normal');
   ['Leads by event type', 'Leads by salesperson', 'Totals', 'Leads by week',
    'Leads by source', 'Leads by status', 'Leads by sub-source'].forEach(function (label) {
     for (let i = 0; i < rows.length; i++) {
       if (rows[i][0] === label) {
-        sheet.getRange(i + 1, 1, 1, 2).setFontWeight('bold').setBackground('#eef3f7');
+        sheet.getRange(i + 1, 1, 1, width).setFontWeight('bold').setBackground('#eef3f7');
       }
     }
   });
   sheet.setColumnWidth(1, 280);
-  sheet.setColumnWidth(2, 120);
-  sheet.setColumnWidth(3, 150);
+  for (let c = 2; c <= width; c++) sheet.setColumnWidth(c, 120);
+  // The last column carries the month name, which needs the room.
+  sheet.setColumnWidth(width, 150);
   sheet.setFrozenRows(2);
   getSpreadsheet_().setActiveSheet(sheet);
   getSpreadsheet_().moveActiveSheet(1);
