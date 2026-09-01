@@ -815,6 +815,60 @@ realLog('\n--- a fair too big for one run stops and carries on ---');
   check('and reports no resume point', budgeted.nextRow, 0);
 }
 
+realLog('\n--- a worked lead colours its own row ---');
+{
+  silence(quiet);
+  api.setupWorkbook();
+  const rulesOn = name => tab(name).getConditionalFormatRules();
+  const ruleFor = (name, status) => rulesOn(name).filter(r =>
+    String(r.__formula || '').indexOf('="' + status + '"') !== -1)[0];
+
+  check('a caller tab is coloured by status', !!ruleFor('Bea', 'Valid'), 'true');
+  check('and so is a shared event tab', !!ruleFor('Wedding', 'Lost'), 'true');
+  check('the Duplicates tab too', !!ruleFor('Duplicates', 'Duplicate'), 'true');
+  // All Leads only ever carries the automation's copy of a status, so
+  // colouring it would present a stale value as a current one.
+  check('All Leads is left alone', !!ruleFor('All Leads', 'Valid'), 'false');
+
+  check('valid is green', ruleFor('Bea', 'Valid').__background, '#D9EAD3');
+  check('lost is red', ruleFor('Bea', 'Lost').__background, '#F4CCCC');
+  check('transferred is purple', ruleFor('Bea', 'Transferred').__background, '#D9D2E9');
+  check('no response is blue', ruleFor('Bea', 'No Response').__background, '#CFE2F3');
+  check('duplicate is orange', ruleFor('Duplicates', 'Duplicate').__background, '#FCE5CD');
+  check('new is plain white', ruleFor('Bea', 'New').__background, '#FFFFFF');
+
+  // The rule has to read the tab's own Status column, wherever it sits, and
+  // hold that column steady while the row moves down the sheet.
+  const bea = tab('Bea');
+  const statusCol = api.fieldColumns_(bea).byField.status;
+  const letter = String.fromCharCode(64 + statusCol);
+  check('it reads that tab\'s own Status column',
+    ruleFor('Bea', 'Valid').__formula, '=OR($' + letter + '2="Valid")');
+  check('NR is coloured as No Response',
+    /\$[A-Z]+2="NR"/.test(ruleFor('Bea', 'No Response').__formula), 'true');
+
+  const painted = ruleFor('Bea', 'Valid').getRanges()[0];
+  check('the whole row is painted, not just the cell',
+    painted.getNumColumns() >= 20, 'true');
+  check('starting below the header', painted.getRow(), 2);
+
+  // Running setup again must replace the set, not stack another behind it.
+  const before = rulesOn('Bea').length;
+  api.setupWorkbook();
+  check('running setup again does not stack rules', rulesOn('Bea').length, before);
+
+  // A rule somebody set up for themselves is not ours to remove.
+  const mine = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('URGENT').setBackground('#FFFF00')
+    .setRanges([bea.getRange(2, 1, 10, 1)]).build();
+  bea.setConditionalFormatRules([mine].concat(rulesOn('Bea')));
+  api.setupWorkbook();
+  check('a rule of their own survives',
+    rulesOn('Bea').filter(r => r.__text === 'URGENT').length, 1);
+  check('and still wins, because ours go last',
+    rulesOn('Bea')[0].__text, 'URGENT');
+}
+
 realLog('\n--- the dashboard counts a month by week ---');
 {
   silence(quiet);
