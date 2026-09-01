@@ -145,8 +145,8 @@ const EVENT_TYPES = [
     keywords: [
       'kiddie party', 'kids party', "kid's party", 'kids birthday',
       "children's party", 'childrens party', 'children party', 'kiddie',
-      '1st birthday', 'first birthday', '7th birthday', 'christening',
-      'baptism', 'binyag', 'baby shower', 'gender reveal', 'kids event'
+      '1st birthday', 'first birthday', '7th birthday',
+      'baby shower', 'gender reveal', 'kids event'
     ]
   },
   {
@@ -158,7 +158,11 @@ const EVENT_TYPES = [
       'family gathering', 'dinner party', 'house party', 'get together',
       'get-together', 'small gathering', 'birthday', 'bday', 'anniversary',
       'reunion', 'graduation', 'despedida', 'homecoming', 'retirement',
-      'thanksgiving', 'funeral', 'memorial', 'wake'
+      'thanksgiving', 'funeral', 'memorial', 'wake',
+      // A baptism is sold as a private event here, not as a kiddie party.
+      // "baptism" and "binyag" are substrings of "baptismal" and "binyagan",
+      // so those arrive here too.
+      'christening', 'baptism', 'binyag'
     ]
   },
   {
@@ -4544,7 +4548,12 @@ function runSelfTest() {
   check('route: debut', resolveEventType_('Debut / 18th Birthday').tab, 'Debut');
   check('route: 18th beats plain birthday', resolveEventType_('18th Birthday Party').tab, 'Debut');
   check('route: kiddie party', resolveEventType_('Kiddie Party').tab, "Kid's Party");
-  check('route: christening', resolveEventType_('Christening / Baptism').tab, "Kid's Party");
+  check('route: christening is private', resolveEventType_('Christening / Baptism').tab, 'Private Event');
+  check('route: baptismal', resolveEventType_('Baptismal').tab, 'Private Event');
+  check('route: binyagan', resolveEventType_('Binyagan ng anak namin').tab, 'Private Event');
+  // Sold together, it is the party that decides.
+  check('route: a 1st birthday and baptism is a kids party',
+    resolveEventType_('1st Birthday and Baptism').tab, "Kid's Party");
   check('route: 1st birthday is a kids party', resolveEventType_('1st Birthday').tab, "Kid's Party");
   check('route: plain birthday is private', resolveEventType_('Birthday celebration').tab, 'Private Event');
   check('route: corporate anniversary stays corporate',
