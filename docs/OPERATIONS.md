@@ -331,6 +331,36 @@ To review what's being caught, sort the Duplicates tab by **Received At**.
   clients legitimately book multiple separate events.
 - `email` — loosest; misses people who give a phone but a different email.
 
+## The weekly count
+
+The Dashboard carries a **Leads by week** block for the current month, which
+names itself from a formula — it reads correctly in November without anyone
+re-running setup.
+
+| Row | Days of the month |
+| --- | --- |
+| Week 1 | 1–7 |
+| Week 2 | 8–14 |
+| Week 3 | 15–21 |
+| Week 4 | 22–31 |
+| This month | 1–31 |
+
+Calendar weeks would put a month across five or six rows starting on a
+different day each month, which cannot be compared month to month. Days of the
+month are steadier: the 1st to the 7th is always Week 1.
+
+**Week 4 is ten days wide, not seven**, because the last bucket runs to 31 so a
+long month has nowhere to hide. Expect it to read about a third higher than the
+others; that is the bucket, not a surge.
+
+Counted on **Received At** — when the lead arrived, not when anyone worked it —
+from **All Leads**, which holds every lead exactly once. Repeat inquiries are
+filed in the Duplicates tab, so a client who submits three times counts once.
+
+To change the split, edit `WEEK_BUCKETS` in `src/10_Setup.gs` and run **Setup /
+repair tabs**. Any number of buckets works; they need to cover the days you
+care about without overlapping.
+
 ## Handing a lead to someone else
 
 Click any cell on the lead's row, then **Leads → Move selected lead to…** and

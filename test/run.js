@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, moveLead, loadTeam_, readLeadRow_ };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, moveLead, loadTeam_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -744,6 +744,56 @@ realLog('\n--- the Leads menu is wired to real functions ---');
   const missing = handlers.filter(name => typeof global[name] !== 'function' &&
     !new RegExp('function\\s+' + name + '\\s*\\(').test(src));
   check('every menu item has a function behind it', missing.join(', ') || 'none', 'none');
+}
+
+realLog('\n--- the dashboard counts a month by week ---');
+{
+  silence(quiet);
+  api.setupWorkbook();
+  const dash = tab('Dashboard');
+  const formulaFor = label => {
+    for (let r = 1; r <= dash.getLastRow(); r++) {
+      if (String(dash.getRange(r, 1).getValue()) === label) {
+        return String(dash.getRange(r, 2).getValue());
+      }
+    }
+    return '(not found)';
+  };
+
+  // The buckets are a tuning knob, so guard the invariant rather than the
+  // numbers: every day of a long month lands in exactly one week.
+  const covered = {};
+  api.WEEK_BUCKETS.forEach(b => {
+    for (let d = b.from; d <= b.to; d++) covered[d] = (covered[d] || 0) + 1;
+  });
+  const days = Object.keys(covered).map(Number).sort((a, b) => a - b);
+  check('the weeks start at day 1', days[0], 1);
+  check('and run to day 31', days[days.length - 1], 31);
+  check('with no day left out', days.length, 31);
+  check('and no day counted twice',
+    days.filter(d => covered[d] !== 1).join(',') || 'none', 'none');
+
+  const w1 = formulaFor('Week 1 (1-7)');
+  check('week 1 has a formula', w1.charAt(0), '=');
+  check('every week the team named has a row',
+    api.WEEK_BUCKETS.filter(b => formulaFor(b.label) === '(not found)').length, 0);
+  check('and a running month total', formulaFor('This month').charAt(0), '=');
+
+  // Counted on when the lead arrived, from the one tab that holds every lead
+  // exactly once — repeat inquiries are filed in Duplicates, not counted again.
+  const allLeads = tab('All Leads');
+  const headers = allLeads.getRange(1, 1, 1, allLeads.getLastColumn()).getValues()[0];
+  const letter = String.fromCharCode(65 + headers.indexOf('Received At'));
+  check('the week count reads Received At',
+    w1.indexOf("'All Leads'!" + letter + '2:' + letter) !== -1, 'true');
+  check('week 1 asks for days 1 to 7', /\(dnum>=1\)\*\(dnum<=7\)/.test(w1), 'true');
+  check('week 4 asks for days 22 to 31',
+    /\(dnum>=22\)\*\(dnum<=31\)/.test(formulaFor('Week 4 (22-31)')), 'true');
+  check('it is scoped to the current month',
+    /LEFT\(d,7\)=TEXT\(TODAY\(\),"yyyy-mm"\)/.test(w1), 'true');
+  // A real date value and the text the automation writes have to count alike.
+  check('both stored date shapes are read', /TEXT\(r,"yyyy-mm-dd"\)/.test(w1), 'true');
+  check('DAY is not used as a LET name', /,day,/.test(w1), 'false');
 }
 
 realLog('\n--- moving a lead hands over everything, not just the row ---');
