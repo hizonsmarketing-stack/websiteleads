@@ -83,11 +83,28 @@
       var out = document.getElementById('output');
       var statusEl = document.getElementById('status');
 
-      google.script.run.withSuccessHandler(function (ctx) {
-        fill('tabName', ctx.tabs);
-        fill('defaultEventType', ctx.eventTypes);
-        fill('source', ctx.sources);
-      }).getMigrateContext();
+      // Without a failure handler this call fails silently and the only symptom
+      // is an empty dropdown, which reads as "there are no tabs" rather than
+      // "the script could not be asked".
+      google.script.run
+        .withSuccessHandler(function (ctx) {
+          fill('tabName', ctx.tabs);
+          fill('defaultEventType', ctx.eventTypes);
+          fill('source', ctx.sources);
+          if (!ctx.tabs.length) {
+            show('No tabs to import from — every tab here is one the automation ' +
+              'owns. A salesperson\'s tab has to exist before its leads can be ' +
+              'imported; add them to the roster and run Setup / repair tabs first.', true);
+          }
+        })
+        .withFailureHandler(function (err) {
+          show('Could not read the list of tabs.<br><br>' +
+            escapeHtml(err.message || String(err)) +
+            '<br><br>If that says the function was not found, the script in this ' +
+            'sheet is older than this dialog: re-paste <code>dist/Code.gs</code>, ' +
+            'reload the spreadsheet, and open this again.', true);
+        })
+        .getMigrateContext();
 
       function fill(id, values) {
         var select = document.getElementById(id);

@@ -85,22 +85,34 @@
       var out = document.getElementById('output');
       var statusEl = document.getElementById('status');
 
-      google.script.run.withSuccessHandler(function (ctx) {
-        var list = document.getElementById('tabs');
-        ctx.tabs.forEach(function (name) {
-          var option = document.createElement('option');
-          option.value = name;
-          list.appendChild(option);
-        });
-        var select = document.getElementById('defaultEventType');
-        ctx.eventTypes.forEach(function (label) {
-          var option = document.createElement('option');
-          option.value = label;
-          option.textContent = label;
-          if (label === 'Wedding') option.selected = true;
-          select.appendChild(option);
-        });
-      }).getImportContext();
+      // Without a failure handler this call fails silently and the only symptom
+      // is an empty list, which reads as "there is nothing to pick" rather than
+      // "the script could not be asked".
+      google.script.run
+        .withSuccessHandler(function (ctx) {
+          var list = document.getElementById('tabs');
+          ctx.tabs.forEach(function (name) {
+            var option = document.createElement('option');
+            option.value = name;
+            list.appendChild(option);
+          });
+          var select = document.getElementById('defaultEventType');
+          ctx.eventTypes.forEach(function (label) {
+            var option = document.createElement('option');
+            option.value = label;
+            option.textContent = label;
+            if (label === 'Wedding') option.selected = true;
+            select.appendChild(option);
+          });
+        })
+        .withFailureHandler(function (err) {
+          show('Could not read this workbook\'s tabs.<br><br>' +
+            escapeHtml(err.message || String(err)) +
+            '<br><br>If that says the function was not found, the script in this ' +
+            'sheet is older than this dialog: re-paste <code>dist/Code.gs</code>, ' +
+            'reload the spreadsheet, and open this again.', true);
+        })
+        .getImportContext();
 
       function form() {
         return {
