@@ -887,6 +887,44 @@ realLog('\n--- the same client, on forms that ask for different things ---');
   check('the rebuild still indexed every lead', rebuilt > 0, 'true');
 }
 
+realLog('\n--- a deleted row must not hand the client to somebody else ---');
+{
+  silence(quiet);
+  setSetting('Dedupe On', 'email,phone');
+  api.resetCaches();
+
+  const first = post({ formName: 'F', name: 'Angelika Mendoza', email: 'angelika@example.com',
+    'Contact Number': '0917 808 8080', 'Type of Event': 'Wedding' }, { source: 'website' });
+  const owner = first.tab;
+  const leadId = first.leadId;
+  check('the lead lands with a caller', !!owner, 'true');
+
+  // Somebody deletes the row -- the index still knows the contact, but there
+  // is nothing left on the tab to merge into.
+  const sheet = tab(owner);
+  const idCol = api.fieldColumns_(sheet).byField.leadId;
+  let target = 0;
+  for (let r = 2; r <= sheet.getLastRow(); r++) {
+    if (String(sheet.getRange(r, idCol).getValue()) === leadId) { target = r; break; }
+  }
+  check('the row is there before it is deleted', target > 0, 'true');
+  sheet.deleteRow(target);
+  api.resetCaches();
+
+  const again = post({ formName: 'F', name: 'Angelika Mendoza', email: 'angelika@example.com',
+    'Contact Number': '0917 808 8080', 'Type of Event': 'Wedding' }, { source: 'website' });
+  check('the client stays with the same caller', again.tab, owner);
+  check('and keeps the lead id they already had', again.leadId, leadId);
+  check('it is not dealt out as a new lead', again.action, 'refiled');
+
+  // And the next repeat has to find it again, or the same thing happens twice.
+  api.resetCaches();
+  const third = post({ formName: 'F', name: 'Angelika Mendoza', email: 'angelika@example.com',
+    'Contact Number': '0917 808 8080', 'Type of Event': 'Wedding' }, { source: 'website' });
+  check('the re-filed row is found next time', /^merged/.test(third.action), 'true');
+  check('still with the same caller', third.tab, owner);
+}
+
 realLog('\n--- a typo in Dedupe On must not switch matching off ---');
 {
   silence(quiet);

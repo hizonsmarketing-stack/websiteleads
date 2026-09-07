@@ -333,6 +333,22 @@ To review what's being caught, sort the Duplicates tab by **Received At**.
 - `email,phone,name` — also matches on the client's name, squashed so `MARIA
   CRUZ` and `Maria  Cruz` are one person.
 
+### When the row a repeat should merge into has gone
+
+Someone deletes a row, or moves one between tabs by hand. The index still knows
+the contact, but there is nothing left to merge into.
+
+The lead is written back to **the same caller's tab**, keeping the lead id it
+already had, and the index is pointed at the new row. It is never dealt out
+again: the client is known, and re-running the rotation would hand them to a
+second caller — the one thing the index exists to prevent. `_Log` records it as
+`Indexed row is gone; re-filing with the same caller`, and the result is
+reported as `refiled` rather than `created`.
+
+A run of those warnings means rows are being deleted or moved by hand on that
+tab. Use **Move selected lead to…** for hand-offs, and **Rebuild dedupe index**
+after deleting rows.
+
 ### When the same client still reaches two callers
 
 `email,phone` can only match on something the two submissions share. If one

@@ -2486,17 +2486,22 @@ function mergeDuplicate_(incoming, match) {
   const entry = match.entry;
   const sheet = getSpreadsheet_().getSheetByName(entry.tab);
 
+  // The client is known either way, so the incoming record carries on as the
+  // same lead. Dealing it out again under a new id is what put one client in
+  // two callers' tabs.
+  incoming.leadId = entry.leadId;
+
   if (!sheet) {
-    log_('WARN', 'dedupe', 'Indexed tab is missing; treating lead as new', entry);
-    INDEX_CACHE_ = null;
-    return Object.assign({ action: 'created' }, routeLead_(incoming), { leadId: incoming.leadId });
+    // The whole tab is gone, so there is no owner left to keep it with. Route
+    // it properly and point the stale index entries at wherever it lands.
+    log_('WARN', 'dedupe', 'Indexed tab is missing; re-routing this lead', entry);
+    const placed = routeLead_(incoming);
+    moveIndexEntries_(entry.leadId, placed.tab, placed.row);
+    return Object.assign({ action: 'created' }, placed, { leadId: entry.leadId });
   }
 
   const row = findLeadRow_(sheet, entry.leadId, entry.row);
-  if (!row) {
-    log_('WARN', 'dedupe', 'Indexed row no longer holds this lead; treating as new', entry);
-    return Object.assign({ action: 'created' }, routeLead_(incoming), { leadId: incoming.leadId });
-  }
+  if (!row) return refileWithSameOwner_(sheet, entry, incoming);
   if (row !== entry.row) moveIndexEntries_(entry.leadId, entry.tab, row);
 
   const original = readLeadRow_(sheet, row);
@@ -2514,6 +2519,43 @@ function mergeDuplicate_(incoming, match) {
     row: promoted ? promoted.row : row,
     leadId: entry.leadId
   };
+}
+
+/**
+ * Puts a repeat inquiry back with the caller who already owns the client, when
+ * the row it should have merged into has gone.
+ *
+ * A row disappears because somebody deleted it or moved it by hand — the index
+ * still knows this contact, but there is nothing left to merge into. Dealing
+ * the lead out again is the worst answer available: the client is known, and
+ * the rotation hands them to a second caller, which is the one thing the index
+ * exists to prevent. So the lead is written back to the same tab, keeping its
+ * original id, and the index is pointed at the row just written.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet The owner's tab.
+ * @param {!Object} entry The index entry whose row could not be found.
+ * @param {!Object} incoming
+ * @return {{action: string, tab: string, row: number, leadId: string}}
+ */
+function refileWithSameOwner_(sheet, entry, incoming) {
+  log_('WARN', 'dedupe', 'Indexed row is gone; re-filing with the same caller', entry);
+
+  const owner = memberByTab_(entry.tab);
+  if (owner && !cleanText_(incoming.assignedTo)) incoming.assignedTo = owner.name;
+  incoming.presenter = presenterFor_(
+    incoming.eventTypeLabel, sheet.getLastRow() + 1, owner ? owner.name : '');
+
+  const row = appendLead_(sheet, incoming);
+
+  // All Leads keeps one row per lead. The old one usually survived whatever
+  // removed the caller's copy, so it is updated rather than added to.
+  const allLeads = getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS);
+  if (!findLeadRow_(allLeads, entry.leadId, 0)) appendLead_(allLeads, incoming);
+
+  moveIndexEntries_(entry.leadId, entry.tab, row);
+  mergeIndexKeys_(incoming, { leadId: entry.leadId, tab: entry.tab, row: row });
+
+  return { action: 'refiled', tab: entry.tab, row: row, leadId: entry.leadId };
 }
 
 /**
