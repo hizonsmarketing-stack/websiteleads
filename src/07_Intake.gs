@@ -51,7 +51,8 @@ function intakeRecord_(input) {
     subSource: input.subSource,
     receivedAt: input.receivedAt,
     defaultEventType: input.defaultEventType,
-    rawRef: input.rawRef
+    rawRef: input.rawRef,
+    externalId: input.externalId
   });
 
   if (!lead.email && !lead.phone && !lead.fullName) {

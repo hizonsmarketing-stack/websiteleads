@@ -87,3 +87,20 @@ For reference when debugging from `_Raw`:
 ```
 
 The campaign id is written to the lead's **Campaign** column.
+
+## Why a lead could arrive twice
+
+Google Ads retries a delivery it does not get a prompt `200` for. Apps Script is
+not always prompt — a cold start takes a few seconds — so the same lead can be
+delivered more than once, carrying the same `lead_id` each time.
+
+That id is now used as a duplicate key. It is checked before email and phone and
+cannot be switched off in `Dedupe On`: it is an exact identity rather than a
+guess about who two records are, so it cannot match the wrong person, and it
+works even on a form that collects too little for email or phone matching to
+help. A redelivered lead merges into the row it already created and stays with
+the caller who has it.
+
+The id lives only in the dedupe index, not in a column, so **Rebuild dedupe
+index** does not restore it. That costs nothing in practice: a retry arrives
+within seconds of the original, long before anybody rebuilds.

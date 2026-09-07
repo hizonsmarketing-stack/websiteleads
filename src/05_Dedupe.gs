@@ -93,6 +93,19 @@ function dedupeFields_() {
 function dedupeKeys_(lead) {
   const fields = dedupeFields_();
   const keys = [];
+
+  // The sending system's own id for the submission — Google Ads sends one with
+  // every lead. Checked first and never switched off: it is an exact identity
+  // rather than a guess about who two records are, so it cannot match the
+  // wrong person, and it is what makes a redelivered lead land on the row it
+  // already created instead of being dealt out a second time.
+  //
+  // It lives only in the index, not in a column, so a rebuild does not restore
+  // it. That costs nothing: a retry arrives within seconds of the original,
+  // long before anybody rebuilds.
+  if (lead.externalKey) {
+    keys.push({ key: lead.externalKey, matchedOn: 'Lead ID from the source' });
+  }
   if (fields.indexOf('email') !== -1 && lead.emailKey) {
     keys.push({ key: 'email:' + lead.emailKey, matchedOn: 'Email' });
   }

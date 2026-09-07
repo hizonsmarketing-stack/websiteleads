@@ -335,7 +335,9 @@ function buildLead_(input) {
     phoneKey: normalizePhone_(fields.phone),
     // Only used when "Dedupe On" names it. Squashed so "MARIA CRUZ" and
     // "Maria  Cruz" are one person.
-    nameKey: squashKey_(fields.fullName)
+    nameKey: squashKey_(fields.fullName),
+    // The sending system's own id for this submission, where it has one.
+    externalKey: cleanText_(input.externalId) ? 'ext:' + cleanText_(input.externalId) : ''
   };
 }
 

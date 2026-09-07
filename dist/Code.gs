@@ -1657,7 +1657,9 @@ function buildLead_(input) {
     phoneKey: normalizePhone_(fields.phone),
     // Only used when "Dedupe On" names it. Squashed so "MARIA CRUZ" and
     // "Maria  Cruz" are one person.
-    nameKey: squashKey_(fields.fullName)
+    nameKey: squashKey_(fields.fullName),
+    // The sending system's own id for this submission, where it has one.
+    externalKey: cleanText_(input.externalId) ? 'ext:' + cleanText_(input.externalId) : ''
   };
 }
 
@@ -1916,6 +1918,19 @@ function dedupeFields_() {
 function dedupeKeys_(lead) {
   const fields = dedupeFields_();
   const keys = [];
+
+  // The sending system's own id for the submission — Google Ads sends one with
+  // every lead. Checked first and never switched off: it is an exact identity
+  // rather than a guess about who two records are, so it cannot match the
+  // wrong person, and it is what makes a redelivered lead land on the row it
+  // already created instead of being dealt out a second time.
+  //
+  // It lives only in the index, not in a column, so a rebuild does not restore
+  // it. That costs nothing: a retry arrives within seconds of the original,
+  // long before anybody rebuilds.
+  if (lead.externalKey) {
+    keys.push({ key: lead.externalKey, matchedOn: 'Lead ID from the source' });
+  }
   if (fields.indexOf('email') !== -1 && lead.emailKey) {
     keys.push({ key: 'email:' + lead.emailKey, matchedOn: 'Email' });
   }
@@ -2909,7 +2924,8 @@ function intakeRecord_(input) {
     subSource: input.subSource,
     receivedAt: input.receivedAt,
     defaultEventType: input.defaultEventType,
-    rawRef: input.rawRef
+    rawRef: input.rawRef,
+    externalId: input.externalId
   });
 
   if (!lead.email && !lead.phone && !lead.fullName) {
@@ -3068,7 +3084,11 @@ function doPost(e) {
       flat: flat,
       source: source,
       subSource: subSource,
-      rawRef: rawRef
+      rawRef: rawRef,
+      // Google Ads retries a delivery it does not get a prompt 200 for, and
+      // the retry carries the same lead_id. Passing it through is what makes
+      // the second delivery merge instead of becoming a second lead.
+      externalId: isGoogleAds ? cleanText_(payload.lead_id) : ''
     }], 'webhook');
 
     const result = summary.results[0];
