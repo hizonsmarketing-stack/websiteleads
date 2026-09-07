@@ -45,7 +45,11 @@ function doPost(e) {
       flat: flat,
       source: source,
       subSource: subSource,
-      rawRef: rawRef
+      rawRef: rawRef,
+      // Google Ads retries a delivery it does not get a prompt 200 for, and
+      // the retry carries the same lead_id. Passing it through is what makes
+      // the second delivery merge instead of becoming a second lead.
+      externalId: isGoogleAds ? cleanText_(payload.lead_id) : ''
     }], 'webhook');
 
     const result = summary.results[0];

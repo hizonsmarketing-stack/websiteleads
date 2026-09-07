@@ -887,6 +887,64 @@ realLog('\n--- the same client, on forms that ask for different things ---');
   check('the rebuild still indexed every lead', rebuilt > 0, 'true');
 }
 
+realLog('\n--- a redelivered Google Ads lead is the same lead ---');
+{
+  silence(quiet);
+  setSetting('Dedupe On', 'email,phone');
+  api.resetCaches();
+
+  const ads = function (leadId, columns) {
+    api.resetCaches();
+    const res = api.doPost({
+      postData: { contents: JSON.stringify({
+        lead_id: leadId, api_version: '1.0', form_id: 4321, campaign_id: 77,
+        google_key: '', is_test: false, user_column_data: columns }) },
+      parameter: {}
+    });
+    return JSON.parse(res.getContent());
+  };
+
+  // Google Ads retries a delivery it does not get a prompt 200 for, and the
+  // retry carries the same lead_id. Before this it became a second lead and
+  // the rotation gave it to a second caller.
+  const columns = [
+    { column_name: 'Full Name', string_value: 'Retry Client' },
+    { column_name: 'User Email', string_value: 'retry@example.com' },
+    { column_name: 'User Phone', string_value: '+63 917 121 2121' },
+    { column_name: 'What type of event?', string_value: 'Wedding' }
+  ];
+  const first = ads('GADS-RETRY-1', columns);
+  const retry = ads('GADS-RETRY-1', columns);
+  check('the first delivery creates the lead', first.action, 'created');
+  check('the retry does not create a second', /^merged/.test(retry.action), 'true');
+  check('and stays with the same caller', retry.tab, first.tab);
+
+  // The id is exact, so it works even when the form collects almost nothing
+  // for email or phone matching to work with.
+  const bare = [{ column_name: 'Full Name', string_value: 'Bare Ads Lead' }];
+  const b1 = ads('GADS-RETRY-2', bare);
+  const b2 = ads('GADS-RETRY-2', bare);
+  check('a retry is caught with no contact details to match on',
+    /^merged/.test(b2.action), 'true');
+  check('and it lands on the same tab', b2.tab, b1.tab);
+
+  // Two real leads must never be folded together.
+  const one = ads('GADS-REAL-1',
+    [{ column_name: 'Full Name', string_value: 'Ads One' },
+     { column_name: 'User Email', string_value: 'adsone@example.com' }]);
+  const two = ads('GADS-REAL-2',
+    [{ column_name: 'Full Name', string_value: 'Ads Two' },
+     { column_name: 'User Email', string_value: 'adstwo@example.com' }]);
+  check('different lead ids stay different leads', two.action, 'created');
+  check('and they are two leads, not one', one.leadId === two.leadId, 'false');
+
+  // Website leads carry no such id, so nothing changes for them.
+  api.resetCaches();
+  const web = post({ formName: 'F', name: 'No Ext Id', email: 'noext@example.com',
+    'Type of Event': 'Wedding' }, { source: 'website' });
+  check('a website lead is unaffected', web.action, 'created');
+}
+
 realLog('\n--- a deleted row must not hand the client to somebody else ---');
 {
   silence(quiet);
