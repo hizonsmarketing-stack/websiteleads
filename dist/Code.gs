@@ -1648,7 +1648,10 @@ function buildLead_(input) {
     allSubSources: subSourceInfo.label,
     rawRef: input.rawRef || '',
     emailKey: emailDedupeKey_(normalizeEmail_(fields.email)),
-    phoneKey: normalizePhone_(fields.phone)
+    phoneKey: normalizePhone_(fields.phone),
+    // Only used when "Dedupe On" names it. Squashed so "MARIA CRUZ" and
+    // "Maria  Cruz" are one person.
+    nameKey: squashKey_(fields.fullName)
   };
 }
 
@@ -1886,6 +1889,13 @@ function dedupeKeys_(lead) {
       matchedOn: 'Email/Phone + Event Date'
     });
   }
+  // Last, because it is the weakest signal: two clients can share a name, and
+  // merging two real people is worse than dealing one of them out twice. It
+  // catches the case nothing else can — the same person filling in one form
+  // that asks only for an email and another that asks only for a phone.
+  if (fields.indexOf('name') !== -1 && lead.nameKey) {
+    keys.push({ key: 'name:' + lead.nameKey, matchedOn: 'Name' });
+  }
   return keys;
 }
 
@@ -2028,6 +2038,7 @@ function rebuildIndex() {
         const stub = {
           emailKey: emailDedupeKey_(normalizeEmail_(at(row, 'email'))),
           phoneKey: normalizePhone_(at(row, 'phone')),
+          nameKey: squashKey_(at(row, 'fullName')),
           eventDate: cleanText_(at(row, 'eventDate'))
         };
         dedupeKeys_(stub).forEach(function (k) {
@@ -3641,7 +3652,7 @@ function seedSettings_() {
   const notes = {
     'Time Zone': 'Used for every timestamp written by the automation.',
     'Default Country Code': 'Digits only. Local numbers starting 09... become +63 9...',
-    'Dedupe On': 'Comma separated: email, phone, date. Default email,phone.',
+    'Dedupe On': 'Comma separated: email, phone, date, name. Default email,phone. Add name to also catch the same person when one form asked only for an email and another only for a phone — at the risk of merging two clients who share a name. Run Rebuild dedupe index after changing this.',
     'Dedupe Ignore Plus Tags': 'yes = maria+fair@gmail.com matches maria@gmail.com.',
     'Promote Unassigned Leads': 'yes = move a lead out of Unassigned once a later form reveals the event type.',
     'Append Duplicate Notes': 'yes = add the repeat inquiry text to the original lead’s Message.',

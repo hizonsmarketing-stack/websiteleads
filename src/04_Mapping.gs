@@ -332,7 +332,10 @@ function buildLead_(input) {
     allSubSources: subSourceInfo.label,
     rawRef: input.rawRef || '',
     emailKey: emailDedupeKey_(normalizeEmail_(fields.email)),
-    phoneKey: normalizePhone_(fields.phone)
+    phoneKey: normalizePhone_(fields.phone),
+    // Only used when "Dedupe On" names it. Squashed so "MARIA CRUZ" and
+    // "Maria  Cruz" are one person.
+    nameKey: squashKey_(fields.fullName)
   };
 }
 

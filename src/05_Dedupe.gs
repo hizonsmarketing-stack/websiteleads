@@ -72,6 +72,13 @@ function dedupeKeys_(lead) {
       matchedOn: 'Email/Phone + Event Date'
     });
   }
+  // Last, because it is the weakest signal: two clients can share a name, and
+  // merging two real people is worse than dealing one of them out twice. It
+  // catches the case nothing else can — the same person filling in one form
+  // that asks only for an email and another that asks only for a phone.
+  if (fields.indexOf('name') !== -1 && lead.nameKey) {
+    keys.push({ key: 'name:' + lead.nameKey, matchedOn: 'Name' });
+  }
   return keys;
 }
 
@@ -214,6 +221,7 @@ function rebuildIndex() {
         const stub = {
           emailKey: emailDedupeKey_(normalizeEmail_(at(row, 'email'))),
           phoneKey: normalizePhone_(at(row, 'phone')),
+          nameKey: squashKey_(at(row, 'fullName')),
           eventDate: cleanText_(at(row, 'eventDate'))
         };
         dedupeKeys_(stub).forEach(function (k) {

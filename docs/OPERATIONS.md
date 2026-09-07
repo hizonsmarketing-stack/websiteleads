@@ -330,6 +330,30 @@ To review what's being caught, sort the Duplicates tab by **Received At**.
 - `email,phone,date` — also treats contact + event date as a key. Use if
   clients legitimately book multiple separate events.
 - `email` — loosest; misses people who give a phone but a different email.
+- `email,phone,name` — also matches on the client's name, squashed so `MARIA
+  CRUZ` and `Maria  Cruz` are one person.
+
+### When the same client still reaches two callers
+
+`email,phone` can only match on something the two submissions share. If one
+form asks for an email and another asks for a phone, the same person filling in
+both leaves no overlap at all — no key matches, so a second lead is created and
+dealt to a different caller.
+
+Two ways to close it, best first:
+
+1. **Ask every form for both an email and a phone.** This removes the gap at
+   source and cannot merge two different people by mistake.
+2. **Add `name` to `Dedupe On`.** It catches what nothing else can, at the risk
+   of merging two clients who happen to share a name — which is the worse
+   failure, because a real lead then disappears into somebody else's row.
+
+Name is deliberately checked *last*, so a genuine email or phone match always
+wins and is reported as such in the **Matched On** column of the Duplicates tab.
+
+**Changing `Dedupe On` needs a Rebuild dedupe index.** The keys are written when
+a lead arrives, so leads already in the sheet carry no name key until the index
+is rebuilt — until then, switching it on appears to do nothing.
 
 ## The weekly count
 
