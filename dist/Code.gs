@@ -553,7 +553,13 @@ function trimSheet_(sheetName, keep) {
  * @template T
  */
 function withLock_(fn, timeoutMs) {
-  const lock = LockService.getDocumentLock();
+  // Script lock, not document lock. A document lock is tied to the bound
+  // spreadsheet, and a webhook runs with no document in context — where that
+  // leaves it unheld, two forms submitted a moment apart both read the index
+  // before either had written to it, so the same client was created twice and
+  // dealt to two different callers. A script lock holds in every context, and
+  // one spreadsheet means there is nothing to gain from a narrower one.
+  const lock = LockService.getScriptLock();
   lock.waitLock(timeoutMs || 30000);
   try {
     return fn();
@@ -1648,7 +1654,10 @@ function buildLead_(input) {
     allSubSources: subSourceInfo.label,
     rawRef: input.rawRef || '',
     emailKey: emailDedupeKey_(normalizeEmail_(fields.email)),
-    phoneKey: normalizePhone_(fields.phone)
+    phoneKey: normalizePhone_(fields.phone),
+    // Only used when "Dedupe On" names it. Squashed so "MARIA CRUZ" and
+    // "Maria  Cruz" are one person.
+    nameKey: squashKey_(fields.fullName)
   };
 }
 
@@ -1857,13 +1866,46 @@ function loadIndex_() {
   return cache;
 }
 
-/** @return {!Array<string>} Which contact fields to dedupe on, per _Settings. */
+/** Every value "Dedupe On" understands. Anything else is a typo. */
+const DEDUPE_FIELDS = ['email', 'phone', 'date', 'name'];
+
+/** The safe setting to fall back to, and what ships in _Settings. */
+const DEDUPE_DEFAULT = ['email', 'phone'];
+
+let DEDUPE_WARNED_ = false;
+
+/**
+ * Which contact fields to dedupe on, per _Settings.
+ *
+ * A word this does not recognise is dropped rather than obeyed, and if nothing
+ * recognisable is left the default is used. Taking the setting literally meant
+ * one typo — "e-mail", "phone number" — turned duplicate detection off
+ * entirely and silently: every lead became unique, and the same client was
+ * dealt to a different caller each time they enquired.
+ *
+ * @return {!Array<string>}
+ */
 function dedupeFields_() {
-  return String(setting_('Dedupe On', 'email,phone'))
+  const asked = String(setting_('Dedupe On', DEDUPE_DEFAULT.join(',')))
     .toLowerCase()
     .split(',')
     .map(function (f) { return f.trim(); })
     .filter(String);
+
+  const known = asked.filter(function (f) { return DEDUPE_FIELDS.indexOf(f) !== -1; });
+  const unknown = asked.filter(function (f) { return DEDUPE_FIELDS.indexOf(f) === -1; });
+
+  // Once per execution: this is called for every lead, and an import would
+  // otherwise write the same warning several hundred times.
+  if (unknown.length && !DEDUPE_WARNED_) {
+    DEDUPE_WARNED_ = true;
+    log_('WARN', 'dedupe', 'Ignored an unrecognised "Dedupe On" value', {
+      ignored: unknown,
+      using: known.length ? known : DEDUPE_DEFAULT,
+      understands: DEDUPE_FIELDS
+    });
+  }
+  return known.length ? known : DEDUPE_DEFAULT.slice();
 }
 
 /**
@@ -1885,6 +1927,13 @@ function dedupeKeys_(lead) {
       key: 'contactdate:' + (lead.emailKey || lead.phoneKey) + '|' + lead.eventDate,
       matchedOn: 'Email/Phone + Event Date'
     });
+  }
+  // Last, because it is the weakest signal: two clients can share a name, and
+  // merging two real people is worse than dealing one of them out twice. It
+  // catches the case nothing else can — the same person filling in one form
+  // that asks only for an email and another that asks only for a phone.
+  if (fields.indexOf('name') !== -1 && lead.nameKey) {
+    keys.push({ key: 'name:' + lead.nameKey, matchedOn: 'Name' });
   }
   return keys;
 }
@@ -2028,6 +2077,7 @@ function rebuildIndex() {
         const stub = {
           emailKey: emailDedupeKey_(normalizeEmail_(at(row, 'email'))),
           phoneKey: normalizePhone_(at(row, 'phone')),
+          nameKey: squashKey_(at(row, 'fullName')),
           eventDate: cleanText_(at(row, 'eventDate'))
         };
         dedupeKeys_(stub).forEach(function (k) {
@@ -2436,17 +2486,22 @@ function mergeDuplicate_(incoming, match) {
   const entry = match.entry;
   const sheet = getSpreadsheet_().getSheetByName(entry.tab);
 
+  // The client is known either way, so the incoming record carries on as the
+  // same lead. Dealing it out again under a new id is what put one client in
+  // two callers' tabs.
+  incoming.leadId = entry.leadId;
+
   if (!sheet) {
-    log_('WARN', 'dedupe', 'Indexed tab is missing; treating lead as new', entry);
-    INDEX_CACHE_ = null;
-    return Object.assign({ action: 'created' }, routeLead_(incoming), { leadId: incoming.leadId });
+    // The whole tab is gone, so there is no owner left to keep it with. Route
+    // it properly and point the stale index entries at wherever it lands.
+    log_('WARN', 'dedupe', 'Indexed tab is missing; re-routing this lead', entry);
+    const placed = routeLead_(incoming);
+    moveIndexEntries_(entry.leadId, placed.tab, placed.row);
+    return Object.assign({ action: 'created' }, placed, { leadId: entry.leadId });
   }
 
   const row = findLeadRow_(sheet, entry.leadId, entry.row);
-  if (!row) {
-    log_('WARN', 'dedupe', 'Indexed row no longer holds this lead; treating as new', entry);
-    return Object.assign({ action: 'created' }, routeLead_(incoming), { leadId: incoming.leadId });
-  }
+  if (!row) return refileWithSameOwner_(sheet, entry, incoming);
   if (row !== entry.row) moveIndexEntries_(entry.leadId, entry.tab, row);
 
   const original = readLeadRow_(sheet, row);
@@ -2464,6 +2519,43 @@ function mergeDuplicate_(incoming, match) {
     row: promoted ? promoted.row : row,
     leadId: entry.leadId
   };
+}
+
+/**
+ * Puts a repeat inquiry back with the caller who already owns the client, when
+ * the row it should have merged into has gone.
+ *
+ * A row disappears because somebody deleted it or moved it by hand — the index
+ * still knows this contact, but there is nothing left to merge into. Dealing
+ * the lead out again is the worst answer available: the client is known, and
+ * the rotation hands them to a second caller, which is the one thing the index
+ * exists to prevent. So the lead is written back to the same tab, keeping its
+ * original id, and the index is pointed at the row just written.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet The owner's tab.
+ * @param {!Object} entry The index entry whose row could not be found.
+ * @param {!Object} incoming
+ * @return {{action: string, tab: string, row: number, leadId: string}}
+ */
+function refileWithSameOwner_(sheet, entry, incoming) {
+  log_('WARN', 'dedupe', 'Indexed row is gone; re-filing with the same caller', entry);
+
+  const owner = memberByTab_(entry.tab);
+  if (owner && !cleanText_(incoming.assignedTo)) incoming.assignedTo = owner.name;
+  incoming.presenter = presenterFor_(
+    incoming.eventTypeLabel, sheet.getLastRow() + 1, owner ? owner.name : '');
+
+  const row = appendLead_(sheet, incoming);
+
+  // All Leads keeps one row per lead. The old one usually survived whatever
+  // removed the caller's copy, so it is updated rather than added to.
+  const allLeads = getOrCreateSheet_(SHEETS.allLeads, LEAD_COLUMNS);
+  if (!findLeadRow_(allLeads, entry.leadId, 0)) appendLead_(allLeads, incoming);
+
+  moveIndexEntries_(entry.leadId, entry.tab, row);
+  mergeIndexKeys_(incoming, { leadId: entry.leadId, tab: entry.tab, row: row });
+
+  return { action: 'refiled', tab: entry.tab, row: row, leadId: entry.leadId };
 }
 
 /**
@@ -3641,7 +3733,7 @@ function seedSettings_() {
   const notes = {
     'Time Zone': 'Used for every timestamp written by the automation.',
     'Default Country Code': 'Digits only. Local numbers starting 09... become +63 9...',
-    'Dedupe On': 'Comma separated: email, phone, date. Default email,phone.',
+    'Dedupe On': 'Comma separated: email, phone, date, name. Default email,phone. Add name to also catch the same person when one form asked only for an email and another only for a phone — at the risk of merging two clients who share a name. Run Rebuild dedupe index after changing this.',
     'Dedupe Ignore Plus Tags': 'yes = maria+fair@gmail.com matches maria@gmail.com.',
     'Promote Unassigned Leads': 'yes = move a lead out of Unassigned once a later form reveals the event type.',
     'Append Duplicate Notes': 'yes = add the repeat inquiry text to the original lead’s Message.',

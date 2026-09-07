@@ -815,6 +815,150 @@ realLog('\n--- a fair too big for one run stops and carries on ---');
   check('and reports no resume point', budgeted.nextRow, 0);
 }
 
+realLog('\n--- the same client, on forms that ask for different things ---');
+{
+  silence(quiet);
+  // The gap this closes: one form asks only for an email, another only for a
+  // phone. The two submissions then share no key at all, so the same client is
+  // created twice and dealt to two different callers.
+  const twice = function (a, b) {
+    api.resetCaches();
+    post(a, { source: 'website' });
+    api.resetCaches();
+    return post(b, { source: 'website' });
+  };
+
+  setSetting('Dedupe On', 'email,phone');
+  const split = twice(
+    { formName: 'Email Only Form', name: 'Split Person', email: 'split@example.com',
+      'Type of Event': 'Wedding' },
+    { formName: 'Phone Only Form', name: 'Split Person', 'Contact Number': '0917 321 7654',
+      'Type of Event': 'Wedding' });
+  check('on email,phone the same client arrives twice', split.action, 'created');
+
+  setSetting('Dedupe On', 'email,phone,name');
+  api.resetCaches();
+  const joined = twice(
+    { formName: 'Email Only Form', name: 'Joined Person', email: 'joined@example.com',
+      'Type of Event': 'Wedding' },
+    { formName: 'Phone Only Form', name: 'Joined Person', 'Contact Number': '0917 456 6543',
+      'Type of Event': 'Wedding' });
+  check('adding name catches it', /^merged/.test(joined.action), 'true');
+
+  // Weakest signal, so it must never beat a real contact match.
+  api.resetCaches();
+  post({ formName: 'F', name: 'Name Order', email: 'nameorder@example.com',
+    'Contact Number': '0917 010 1010', 'Type of Event': 'Wedding' }, { source: 'website' });
+  api.resetCaches();
+  post({ formName: 'F', name: 'Someone Else Entirely',
+    email: 'nameorder@example.com', 'Type of Event': 'Wedding' }, { source: 'website' });
+  // What the sheet records is what matters: the Duplicates row says which
+  // signal caught it, and a real contact match must never be reported as Name.
+  const dupes = tab('Duplicates');
+  check('email still wins over name',
+    cellOf('Duplicates', dupes.getLastRow(), 'Matched On'), 'Email');
+
+  // Squashed, so how it was typed does not matter.
+  api.resetCaches();
+  post({ formName: 'F', name: 'MARIA  CLARA', email: 'mc1@example.com',
+    'Type of Event': 'Wedding' }, { source: 'website' });
+  api.resetCaches();
+  const cased = post({ formName: 'F', name: 'Maria Clara', 'Contact Number': '0917 020 2020',
+    'Type of Event': 'Wedding' }, { source: 'website' });
+  check('caps and spacing do not hide a name match', /^merged/.test(cased.action), 'true');
+  check('and it is recorded as a name match',
+    cellOf('Duplicates', tab('Duplicates').getLastRow(), 'Matched On'), 'Name');
+
+  // Turning the setting on is worthless if a rebuild does not write name keys.
+  api.resetCaches();
+  api.rebuildIndex();
+  const keys = tab('_Index').getRange(2, 1, tab('_Index').getLastRow() - 1, 1).getValues()
+    .map(r => String(r[0]));
+  check('a rebuild writes name keys too',
+    keys.some(k => k.indexOf('name:') === 0), 'true');
+
+  setSetting('Dedupe On', 'email,phone');
+  api.resetCaches();
+  const rebuilt = api.rebuildIndex();
+  const after = tab('_Index').getRange(2, 1, tab('_Index').getLastRow() - 1, 1).getValues()
+    .map(r => String(r[0]));
+  check('and stops writing them when the setting is taken back out',
+    after.some(k => k.indexOf('name:') === 0), 'false');
+  check('the rebuild still indexed every lead', rebuilt > 0, 'true');
+}
+
+realLog('\n--- a deleted row must not hand the client to somebody else ---');
+{
+  silence(quiet);
+  setSetting('Dedupe On', 'email,phone');
+  api.resetCaches();
+
+  const first = post({ formName: 'F', name: 'Angelika Mendoza', email: 'angelika@example.com',
+    'Contact Number': '0917 808 8080', 'Type of Event': 'Wedding' }, { source: 'website' });
+  const owner = first.tab;
+  const leadId = first.leadId;
+  check('the lead lands with a caller', !!owner, 'true');
+
+  // Somebody deletes the row -- the index still knows the contact, but there
+  // is nothing left on the tab to merge into.
+  const sheet = tab(owner);
+  const idCol = api.fieldColumns_(sheet).byField.leadId;
+  let target = 0;
+  for (let r = 2; r <= sheet.getLastRow(); r++) {
+    if (String(sheet.getRange(r, idCol).getValue()) === leadId) { target = r; break; }
+  }
+  check('the row is there before it is deleted', target > 0, 'true');
+  sheet.deleteRow(target);
+  api.resetCaches();
+
+  const again = post({ formName: 'F', name: 'Angelika Mendoza', email: 'angelika@example.com',
+    'Contact Number': '0917 808 8080', 'Type of Event': 'Wedding' }, { source: 'website' });
+  check('the client stays with the same caller', again.tab, owner);
+  check('and keeps the lead id they already had', again.leadId, leadId);
+  check('it is not dealt out as a new lead', again.action, 'refiled');
+
+  // And the next repeat has to find it again, or the same thing happens twice.
+  api.resetCaches();
+  const third = post({ formName: 'F', name: 'Angelika Mendoza', email: 'angelika@example.com',
+    'Contact Number': '0917 808 8080', 'Type of Event': 'Wedding' }, { source: 'website' });
+  check('the re-filed row is found next time', /^merged/.test(third.action), 'true');
+  check('still with the same caller', third.tab, owner);
+}
+
+realLog('\n--- a typo in Dedupe On must not switch matching off ---');
+{
+  silence(quiet);
+  // Taking the setting literally meant one misspelling turned duplicate
+  // detection off entirely, without a word anywhere: every lead became unique
+  // and the same client was dealt to a different caller each time.
+  setSetting('Dedupe On', 'e-mail, cell');
+  api.resetCaches();
+  post({ formName: 'F', name: 'Typo Guard', email: 'typoguard@example.com',
+    'Contact Number': '0917 234 5678', 'Type of Event': 'Wedding' }, { source: 'website' });
+  api.resetCaches();
+  const again = post({ formName: 'F', name: 'Typo Guard', email: 'typoguard@example.com',
+    'Contact Number': '0917 234 5678', 'Type of Event': 'Wedding' }, { source: 'website' });
+  check('an unrecognised setting falls back instead of matching nothing',
+    /^merged/.test(again.action), 'true');
+  check('and it is written down as ignored',
+    tab('_Log').getRange(1, 1, tab('_Log').getLastRow(), 4).getValues()
+      .some(r => /unrecognised "Dedupe On"/.test(String(r[3]))), 'true');
+
+  // A real setting is still obeyed exactly: naming only email must not quietly
+  // bring phone back in with it.
+  setSetting('Dedupe On', 'email');
+  api.resetCaches();
+  post({ formName: 'F', name: 'Email Only Rule', email: 'rule1@example.com',
+    'Contact Number': '0917 345 6789', 'Type of Event': 'Wedding' }, { source: 'website' });
+  api.resetCaches();
+  const phoneOnly = post({ formName: 'F', name: 'Email Only Rule', email: 'rule2@example.com',
+    'Contact Number': '0917 345 6789', 'Type of Event': 'Wedding' }, { source: 'website' });
+  check('naming one field still means only that field', phoneOnly.action, 'created');
+
+  setSetting('Dedupe On', 'email,phone');
+  api.resetCaches();
+}
+
 realLog('\n--- a worked lead colours its own row ---');
 {
   silence(quiet);

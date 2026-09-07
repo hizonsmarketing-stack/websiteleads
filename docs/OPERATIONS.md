@@ -330,6 +330,46 @@ To review what's being caught, sort the Duplicates tab by **Received At**.
 - `email,phone,date` — also treats contact + event date as a key. Use if
   clients legitimately book multiple separate events.
 - `email` — loosest; misses people who give a phone but a different email.
+- `email,phone,name` — also matches on the client's name, squashed so `MARIA
+  CRUZ` and `Maria  Cruz` are one person.
+
+### When the row a repeat should merge into has gone
+
+Someone deletes a row, or moves one between tabs by hand. The index still knows
+the contact, but there is nothing left to merge into.
+
+The lead is written back to **the same caller's tab**, keeping the lead id it
+already had, and the index is pointed at the new row. It is never dealt out
+again: the client is known, and re-running the rotation would hand them to a
+second caller — the one thing the index exists to prevent. `_Log` records it as
+`Indexed row is gone; re-filing with the same caller`, and the result is
+reported as `refiled` rather than `created`.
+
+A run of those warnings means rows are being deleted or moved by hand on that
+tab. Use **Move selected lead to…** for hand-offs, and **Rebuild dedupe index**
+after deleting rows.
+
+### When the same client still reaches two callers
+
+`email,phone` can only match on something the two submissions share. If one
+form asks for an email and another asks for a phone, the same person filling in
+both leaves no overlap at all — no key matches, so a second lead is created and
+dealt to a different caller.
+
+Two ways to close it, best first:
+
+1. **Ask every form for both an email and a phone.** This removes the gap at
+   source and cannot merge two different people by mistake.
+2. **Add `name` to `Dedupe On`.** It catches what nothing else can, at the risk
+   of merging two clients who happen to share a name — which is the worse
+   failure, because a real lead then disappears into somebody else's row.
+
+Name is deliberately checked *last*, so a genuine email or phone match always
+wins and is reported as such in the **Matched On** column of the Duplicates tab.
+
+**Changing `Dedupe On` needs a Rebuild dedupe index.** The keys are written when
+a lead arrives, so leads already in the sheet carry no name key until the index
+is rebuilt — until then, switching it on appears to do nothing.
 
 ## The weekly count
 

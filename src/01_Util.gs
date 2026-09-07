@@ -155,7 +155,13 @@ function trimSheet_(sheetName, keep) {
  * @template T
  */
 function withLock_(fn, timeoutMs) {
-  const lock = LockService.getDocumentLock();
+  // Script lock, not document lock. A document lock is tied to the bound
+  // spreadsheet, and a webhook runs with no document in context — where that
+  // leaves it unheld, two forms submitted a moment apart both read the index
+  // before either had written to it, so the same client was created twice and
+  // dealt to two different callers. A script lock holds in every context, and
+  // one spreadsheet means there is nothing to gain from a narrower one.
+  const lock = LockService.getScriptLock();
   lock.waitLock(timeoutMs || 30000);
   try {
     return fn();
