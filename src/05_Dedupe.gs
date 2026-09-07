@@ -43,13 +43,46 @@ function loadIndex_() {
   return cache;
 }
 
-/** @return {!Array<string>} Which contact fields to dedupe on, per _Settings. */
+/** Every value "Dedupe On" understands. Anything else is a typo. */
+const DEDUPE_FIELDS = ['email', 'phone', 'date', 'name'];
+
+/** The safe setting to fall back to, and what ships in _Settings. */
+const DEDUPE_DEFAULT = ['email', 'phone'];
+
+let DEDUPE_WARNED_ = false;
+
+/**
+ * Which contact fields to dedupe on, per _Settings.
+ *
+ * A word this does not recognise is dropped rather than obeyed, and if nothing
+ * recognisable is left the default is used. Taking the setting literally meant
+ * one typo — "e-mail", "phone number" — turned duplicate detection off
+ * entirely and silently: every lead became unique, and the same client was
+ * dealt to a different caller each time they enquired.
+ *
+ * @return {!Array<string>}
+ */
 function dedupeFields_() {
-  return String(setting_('Dedupe On', 'email,phone'))
+  const asked = String(setting_('Dedupe On', DEDUPE_DEFAULT.join(',')))
     .toLowerCase()
     .split(',')
     .map(function (f) { return f.trim(); })
     .filter(String);
+
+  const known = asked.filter(function (f) { return DEDUPE_FIELDS.indexOf(f) !== -1; });
+  const unknown = asked.filter(function (f) { return DEDUPE_FIELDS.indexOf(f) === -1; });
+
+  // Once per execution: this is called for every lead, and an import would
+  // otherwise write the same warning several hundred times.
+  if (unknown.length && !DEDUPE_WARNED_) {
+    DEDUPE_WARNED_ = true;
+    log_('WARN', 'dedupe', 'Ignored an unrecognised "Dedupe On" value', {
+      ignored: unknown,
+      using: known.length ? known : DEDUPE_DEFAULT,
+      understands: DEDUPE_FIELDS
+    });
+  }
+  return known.length ? known : DEDUPE_DEFAULT.slice();
 }
 
 /**

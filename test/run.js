@@ -887,6 +887,40 @@ realLog('\n--- the same client, on forms that ask for different things ---');
   check('the rebuild still indexed every lead', rebuilt > 0, 'true');
 }
 
+realLog('\n--- a typo in Dedupe On must not switch matching off ---');
+{
+  silence(quiet);
+  // Taking the setting literally meant one misspelling turned duplicate
+  // detection off entirely, without a word anywhere: every lead became unique
+  // and the same client was dealt to a different caller each time.
+  setSetting('Dedupe On', 'e-mail, cell');
+  api.resetCaches();
+  post({ formName: 'F', name: 'Typo Guard', email: 'typoguard@example.com',
+    'Contact Number': '0917 234 5678', 'Type of Event': 'Wedding' }, { source: 'website' });
+  api.resetCaches();
+  const again = post({ formName: 'F', name: 'Typo Guard', email: 'typoguard@example.com',
+    'Contact Number': '0917 234 5678', 'Type of Event': 'Wedding' }, { source: 'website' });
+  check('an unrecognised setting falls back instead of matching nothing',
+    /^merged/.test(again.action), 'true');
+  check('and it is written down as ignored',
+    tab('_Log').getRange(1, 1, tab('_Log').getLastRow(), 4).getValues()
+      .some(r => /unrecognised "Dedupe On"/.test(String(r[3]))), 'true');
+
+  // A real setting is still obeyed exactly: naming only email must not quietly
+  // bring phone back in with it.
+  setSetting('Dedupe On', 'email');
+  api.resetCaches();
+  post({ formName: 'F', name: 'Email Only Rule', email: 'rule1@example.com',
+    'Contact Number': '0917 345 6789', 'Type of Event': 'Wedding' }, { source: 'website' });
+  api.resetCaches();
+  const phoneOnly = post({ formName: 'F', name: 'Email Only Rule', email: 'rule2@example.com',
+    'Contact Number': '0917 345 6789', 'Type of Event': 'Wedding' }, { source: 'website' });
+  check('naming one field still means only that field', phoneOnly.action, 'created');
+
+  setSetting('Dedupe On', 'email,phone');
+  api.resetCaches();
+}
+
 realLog('\n--- a worked lead colours its own row ---');
 {
   silence(quiet);

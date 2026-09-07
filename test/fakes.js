@@ -204,7 +204,9 @@ function installFakes(global, options) {
     })
   };
   global.LockService = {
-    getDocumentLock: () => ({ waitLock() {}, releaseLock() {} })
+    // Both, so a switch between them cannot pass here and fail in Apps Script.
+    getDocumentLock: () => ({ waitLock() {}, releaseLock() {} }),
+    getScriptLock: () => ({ waitLock() {}, releaseLock() {} })
   };
   global.MailApp = { sendEmail: m => global.__mails.push(m) };
   global.ContentService = {
