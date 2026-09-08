@@ -159,6 +159,29 @@ Adding a salesperson later is the same move: a row on `_Team`, then
 self-test** — it reads the roster back and tells you if anything is misspelled
 or uncovered.
 
+### Choosing the order
+
+`Assignment Order` in `_Settings`:
+
+| Value | Behaviour |
+| --- | --- |
+| `balanced` *(default)* | Whoever has had the fewest leads gets the next one. |
+| `roster` | Straight down the `_Team` tab and back to the top. |
+
+**`roster` makes the rotation the roster itself** — the order is the order of
+the rows, so moving a row moves that person's turn, with nothing else to edit.
+Anyone who does not cover the lead's event type is stepped over rather than
+waited for, so a corporate lead cannot stall the rotation on somebody who does
+not take corporate.
+
+Where the rotation stopped is remembered as a name, not a row number, so
+inserting or reordering rows moves the rotation with them. `Last Assigned At`
+cannot serve for this: it is written to the second, and several leads landing in
+one second would leave the rotation unable to tell which came last.
+
+Switching between the two is safe either way. The pointer is kept up to date in
+both, so a switch carries on from the right person.
+
 ### How the split works
 
 Among everyone active who covers that event type, **the one with the fewest

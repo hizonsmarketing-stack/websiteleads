@@ -181,6 +181,7 @@ function seedSettings_() {
   const notes = {
     'Time Zone': 'Used for every timestamp written by the automation.',
     'Default Country Code': 'Digits only. Local numbers starting 09... become +63 9...',
+    'Assignment Order': 'balanced = whoever has had the fewest leads gets the next one. roster = straight down the _Team tab and back to the top, stepping over anyone who does not cover that event type. Reorder the rows to change the order.',
     'Dedupe On': 'Comma separated: email, phone, date, name. Default email,phone. Add name to also catch the same person when one form asked only for an email and another only for a phone — at the risk of merging two clients who share a name. Run Rebuild dedupe index after changing this.',
     'Dedupe Ignore Plus Tags': 'yes = maria+fair@gmail.com matches maria@gmail.com.',
     'Promote Unassigned Leads': 'yes = move a lead out of Unassigned once a later form reveals the event type.',

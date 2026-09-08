@@ -176,6 +176,7 @@ const DEFAULT_SETTINGS = {
   'Default Country Code': '63',
   'Local Mobile Prefix': '9',
   'Dedupe On': 'email,phone',
+  'Assignment Order': 'balanced',
   'Dedupe Ignore Plus Tags': 'yes',
   'Promote Unassigned Leads': 'yes',
   'Append Duplicate Notes': 'yes',

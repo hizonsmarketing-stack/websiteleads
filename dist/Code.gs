@@ -202,6 +202,7 @@ const DEFAULT_SETTINGS = {
   'Default Country Code': '63',
   'Local Mobile Prefix': '9',
   'Dedupe On': 'email,phone',
+  'Assignment Order': 'balanced',
   'Dedupe Ignore Plus Tags': 'yes',
   'Promote Unassigned Leads': 'yes',
   'Append Duplicate Notes': 'yes',
@@ -2228,11 +2229,67 @@ function pickAssignee_(lead) {
   const candidates = membersFor_(lead.eventTypeLabel);
   if (!candidates.length) return null;
 
-  candidates.sort(function (a, b) {
+  return squashKey_(setting_('Assignment Order', 'balanced')) === 'roster'
+    ? nextInRosterOrder_(candidates)
+    : fewestSoFar_(candidates);
+}
+
+/**
+ * Evens the split out: whoever has had the fewest leads gets the next one.
+ *
+ * Ties break on who was assigned longest ago, then alphabetically, so the
+ * outcome is reproducible and can be explained to whoever thinks they were
+ * skipped.
+ *
+ * @param {!Array<!Object>} candidates
+ * @return {!Object}
+ */
+function fewestSoFar_(candidates) {
+  return candidates.slice().sort(function (a, b) {
     if (a.count !== b.count) return a.count - b.count;
     if (a.lastAt !== b.lastAt) return a.lastAt < b.lastAt ? -1 : 1;
     return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+  })[0];
+}
+
+/**
+ * Follows the order of the _Team tab, top to bottom and back to the top.
+ *
+ * The rotation is the roster itself — reorder the rows and the order changes,
+ * with nothing else to edit. Where a lead's event type is covered by only some
+ * of the team, the rest are stepped over rather than waited for, so a Corporate
+ * lead does not stall the rotation on somebody who does not take corporate.
+ *
+ * Where the rotation stopped is remembered as a name rather than a position,
+ * so inserting or reordering rows moves the rotation with them instead of
+ * jumping. Last Assigned At cannot serve: it is written to the second, and
+ * several leads landing in one second would leave the rotation unable to tell
+ * which came last and stuck on one person.
+ *
+ * @param {!Array<!Object>} candidates Roster entries covering this event type.
+ * @return {!Object}
+ */
+function nextInRosterOrder_(candidates) {
+  const roster = loadTeam_().filter(function (member) {
+    return member.active && member.tab;
   });
+  if (!roster.length) return candidates[0];
+
+  const eligible = {};
+  candidates.forEach(function (member) { eligible[squashKey_(member.name)] = member; });
+
+  // Nobody yet, or a name that has since left the roster, starts at the top.
+  const last = PropertiesService.getScriptProperties().getProperty(ROTATION_KEY) || '';
+  let at = -1;
+  roster.forEach(function (member, i) {
+    if (squashKey_(member.name) === last) at = i;
+  });
+
+  for (let step = 1; step <= roster.length; step++) {
+    const member = roster[(at + step) % roster.length];
+    const hit = eligible[squashKey_(member.name)];
+    if (hit) return hit;
+  }
   return candidates[0];
 }
 
@@ -2308,6 +2365,10 @@ function namedMember_(name) {
 function recordAssignment_(member) {
   member.count += 1;
   member.lastAt = nowStamp_();
+  // Where a strict rotation carries on from. Written whichever order is in
+  // use, so switching between them picks up from the right person.
+  PropertiesService.getScriptProperties()
+    .setProperty(ROTATION_KEY, squashKey_(member.name));
   const sheet = getSpreadsheet_().getSheetByName(SHEETS.team);
   if (!sheet || !member.row) return;
   updateRowCells_(sheet, member.row, {
@@ -2356,6 +2417,9 @@ function maybeNotifyTabs_(byTab) {
 }
 
 /** Script property prefix holding the last row of a tab that was notified. */
+/** Who the strict rotation last handed a lead to. */
+const ROTATION_KEY = 'ROTATION_AT';
+
 const NOTIFY_MARK_PREFIX = 'NOTIFY_MARK_';
 
 /**
@@ -3753,6 +3817,7 @@ function seedSettings_() {
   const notes = {
     'Time Zone': 'Used for every timestamp written by the automation.',
     'Default Country Code': 'Digits only. Local numbers starting 09... become +63 9...',
+    'Assignment Order': 'balanced = whoever has had the fewest leads gets the next one. roster = straight down the _Team tab and back to the top, stepping over anyone who does not cover that event type. Reorder the rows to change the order.',
     'Dedupe On': 'Comma separated: email, phone, date, name. Default email,phone. Add name to also catch the same person when one form asked only for an email and another only for a phone — at the risk of merging two clients who share a name. Run Rebuild dedupe index after changing this.',
     'Dedupe Ignore Plus Tags': 'yes = maria+fair@gmail.com matches maria@gmail.com.',
     'Promote Unassigned Leads': 'yes = move a lead out of Unassigned once a later form reveals the event type.',

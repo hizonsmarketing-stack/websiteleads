@@ -887,6 +887,75 @@ realLog('\n--- the same client, on forms that ask for different things ---');
   check('the rebuild still indexed every lead', rebuilt > 0, 'true');
 }
 
+realLog('\n--- a strict rotation follows the roster, top to bottom ---');
+{
+  silence(quiet);
+  const order = ['CJ', 'REINA', 'MIKA', 'GWEN', 'GILIAN', 'JAM', 'LEA'];
+  const socials = "Wedding, Debut, Kid's Party, Private Event";
+  // Everyone the earlier blocks put on the roster steps aside, so the rotation
+  // under test is exactly these seven -- the rotation is the whole roster.
+  const team = tab('_Team');
+  if (team.getLastRow() > 1) {
+    team.getRange(2, 5, team.getLastRow() - 1, 1).setValues(
+      team.getRange(2, 5, team.getLastRow() - 1, 1).getValues().map(() => ['no']));
+  }
+  // GWEN and LEA are the only two who also take Corporate.
+  order.forEach(function (name) {
+    const types = (name === 'GWEN' || name === 'LEA') ? socials + ', Corporate' : socials;
+    tab('_Team').appendRow([name, name, types, '', 'yes', 0, '', '']);
+  });
+  setSetting('Assignment Order', 'roster');
+  setSetting('Dedupe On', 'email,phone');
+  api.resetCaches();
+
+  let n = 0;
+  const lead = function (type) {
+    api.resetCaches();
+    n++;
+    return post({ formName: 'F', name: 'Rota ' + n, email: 'rota' + n + '@example.com',
+      'Type of Event': type }, { source: 'website' }).tab;
+  };
+
+  const nine = [];
+  for (let i = 0; i < 9; i++) nine.push(lead('Wedding'));
+  check('it goes straight down the roster and back to the top',
+    nine.join(','), 'CJ,REINA,MIKA,GWEN,GILIAN,JAM,LEA,CJ,REINA');
+
+  // Several leads land within one second, so Last Assigned At cannot order
+  // them -- the rotation has to remember who it stopped on.
+  check('and does not stick on one person inside a single second',
+    nine[7] === nine[8], 'false');
+
+  // An event type only some of them cover steps over the rest rather than
+  // stalling the rotation on somebody who does not take it.
+  check('a corporate lead skips to the next who covers it', lead('Corporate'), 'GWEN');
+  check('and the rotation carries on from there', lead('Wedding'), 'GILIAN');
+
+  // The order is the roster itself, so moving a row moves the rotation.
+  // Everyone is on a different count by now, so balanced picks whoever has had
+  // the fewest rather than carrying on down the list. Worked out from the
+  // roster instead of hard-coded, so the check still means something if the
+  // leads above are ever changed.
+  api.resetCaches();
+  const counts = {};
+  let fewest = Infinity;
+  api.loadTeam_().filter(m => m.active && m.tab).forEach(m => {
+    counts[m.tab] = m.count;
+    fewest = Math.min(fewest, m.count);
+  });
+  setSetting('Assignment Order', 'balanced');
+  api.resetCaches();
+  // The invariant, not the tie-break: whoever it picks must be on the lowest
+  // count. Several people can share it, and which of those wins is decided by
+  // who was assigned longest ago -- that is fewestSoFar_'s business, not this
+  // check's.
+  check('switching back to balanced picks somebody on the lowest count',
+    counts[lead('Wedding')], fewest);
+
+  setSetting('Assignment Order', 'roster');
+  api.resetCaches();
+}
+
 realLog('\n--- a redelivered Google Ads lead is the same lead ---');
 {
   silence(quiet);
