@@ -22,24 +22,48 @@ function getSpreadsheet_() {
  * @return {!Object<string,string>}
  */
 let SETTINGS_CACHE_ = null;
+
+/**
+ * The same settings again, indexed by squashed name.
+ *
+ * Reading a setting by its exact text meant "Assignment order" or "dedupe on"
+ * was a different key from the one the code asks for — so the row was ignored
+ * and the default applied, with nothing to show that anything had been typed.
+ * Every other name in this workbook is matched squashed; settings were the
+ * exception.
+ */
+let SETTINGS_KEYED_ = null;
+
 function getSettings_() {
-  if (SETTINGS_CACHE_) return SETTINGS_CACHE_;
+  if (!SETTINGS_CACHE_) loadSettings_();
+  return SETTINGS_CACHE_;
+}
+
+function loadSettings_() {
   const settings = Object.assign({}, DEFAULT_SETTINGS);
+  const keyed = {};
+  Object.keys(settings).forEach(function (key) { keyed[squashKey_(key)] = settings[key]; });
+
   const sheet = getSpreadsheet_().getSheetByName(SHEETS.settings);
   if (sheet && sheet.getLastRow() > 1) {
     const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
     rows.forEach(function (row) {
       const key = String(row[0] || '').trim();
-      if (key) settings[key] = String(row[1] === null ? '' : row[1]).trim();
+      if (!key) return;
+      const value = String(row[1] === null ? '' : row[1]).trim();
+      settings[key] = value;
+      // However it was typed, what the sheet says wins over the default.
+      keyed[squashKey_(key)] = value;
     });
   }
   SETTINGS_CACHE_ = settings;
-  return settings;
+  SETTINGS_KEYED_ = keyed;
 }
 
 /** @return {string} A setting value, or the supplied fallback when blank. */
 function setting_(key, fallback) {
-  const value = getSettings_()[key];
+  if (!SETTINGS_CACHE_) loadSettings_();
+  const value = SETTINGS_KEYED_[squashKey_(key)];
   return (value === undefined || value === '') ? fallback : value;
 }
 

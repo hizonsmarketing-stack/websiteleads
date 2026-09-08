@@ -929,7 +929,11 @@ realLog('\n--- a strict rotation follows the roster, top to bottom ---');
   // An event type only some of them cover steps over the rest rather than
   // stalling the rotation on somebody who does not take it.
   check('a corporate lead skips to the next who covers it', lead('Corporate'), 'GWEN');
-  check('and the rotation carries on from there', lead('Wedding'), 'GILIAN');
+  // Wedding carries on from where wedding got to, not from the corporate pick:
+  // the two rotations are independent.
+  const cycle = order.concat(order);
+  check('and the wedding rotation is undisturbed by it',
+    lead('Wedding'), cycle[cycle.indexOf(nine[8]) + 1]);
 
   // The order is the roster itself, so moving a row moves the rotation.
   // Everyone is on a different count by now, so balanced picks whoever has had
@@ -951,6 +955,38 @@ realLog('\n--- a strict rotation follows the roster, top to bottom ---');
   // check's.
   check('switching back to balanced picks somebody on the lowest count',
     counts[lead('Wedding')], fewest);
+
+  setSetting('Assignment Order', 'roster');
+  api.resetCaches();
+  // A team splits into groups that barely overlap. One shared pointer would let
+  // a corporate lead send the socials rotation back to whoever follows the
+  // corporate pair, which is nobody's turn.
+  tab('_Team').appendRow(['SHANE', 'SHANE', 'Corporate', '', 'yes', 0, '', '']);
+  tab('_Team').appendRow(['ABI', 'ABI', 'Corporate', '', 'yes', 0, '', '']);
+  api.resetCaches();
+  const before = lead('Wedding');
+  const takesCorporate = ['GWEN', 'LEA', 'SHANE', 'ABI'];
+  const corp = [lead('Corporate'), lead('Corporate')];
+  check('corporate goes only to people who cover it',
+    corp.every(name => takesCorporate.indexOf(name) !== -1), 'true');
+  check('and it moves on rather than repeating', corp[0] === corp[1], 'false');
+  const after = [lead('Wedding'), lead('Wedding')];
+  const wanted = order.concat(order);
+  const from = wanted.indexOf(before);
+  check('and does not disturb where socials had got to',
+    after.join(','), wanted[from + 1] + ',' + wanted[from + 2]);
+
+  // Every other name in the workbook is matched squashed. Settings were the
+  // exception, so a row typed "assignment order" was a different key from the
+  // one the code asks for -- ignored, with the default quietly applying.
+  setSetting('Assignment Order', 'balanced');
+  tab('_Settings').appendRow(['assignment order', 'roster', '']);
+  api.resetCaches();
+  const resumed = lead('Wedding');
+  check('a miscapitalised setting name is still read',
+    order.indexOf(resumed) !== -1, 'true');
+  check('and it is following the roster, not the counts',
+    resumed, wanted[wanted.indexOf(after[1]) + 1]);
 
   setSetting('Assignment Order', 'roster');
   api.resetCaches();

@@ -179,8 +179,22 @@ inserting or reordering rows moves the rotation with them. `Last Assigned At`
 cannot serve for this: it is written to the second, and several leads landing in
 one second would leave the rotation unable to tell which came last.
 
-Switching between the two is safe either way. The pointer is kept up to date in
-both, so a switch carries on from the right person.
+**Each event type keeps its own place in the list.** A team usually splits into
+groups that barely overlap — everybody on socials, two people on corporate — and
+one shared place would let a corporate lead send the socials rotation back to
+whoever follows the corporate pair, which is nobody's turn.
+
+On `roster`, **Assigned Count stops deciding anything.** Somebody joining with a
+count of 0 beside colleagues on 100 takes their turn like everyone else, rather
+than absorbing every lead until they catch up.
+
+### Setting names are matched loosely
+
+`Assignment Order`, `assignment order` and `Assignment  Order` are the same row.
+Reading settings by their exact text meant one miscapitalised name was a
+different key from the one the code asks for, so the row was ignored and the
+default applied with nothing to show for it. Every other name in this workbook
+is matched the same forgiving way; settings were the exception.
 
 ### How the split works
 
