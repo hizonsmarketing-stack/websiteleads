@@ -188,6 +188,24 @@ On `roster`, **Assigned Count stops deciding anything.** Somebody joining with a
 count of 0 beside colleagues on 100 takes their turn like everyone else, rather
 than absorbing every lead until they catch up.
 
+**Moving a lead by hand does not take somebody's turn.** The rotation advances
+only when the automation assigns, so a lead handed over with **Move selected
+lead to…** is an exception rather than a turn: the next lead still goes to
+whoever was next before the move.
+
+### Which build is deployed
+
+The web app URL reports it:
+
+```json
+{"status":"ok","build":"4a22fa1","assignmentOrder":"roster", …}
+```
+
+`build` is the commit `dist/Code.gs` was bundled from, and `dev` when the script
+is running straight from `src/`. Open the `/exec` URL in a browser to see what is
+actually live — "did the redeploy take?" is otherwise unanswerable from outside
+the editor, and guessing at it has cost real time.
+
 ### Setting names are matched loosely
 
 `Assignment Order`, `assignment order` and `Assignment  Order` are the same row.

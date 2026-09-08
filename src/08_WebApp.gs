@@ -78,6 +78,8 @@ function doGet(e) {
   return jsonResponse_({
     status: 'ok',
     service: 'Website Leads Automation',
+    build: buildStamp_(),
+    assignmentOrder: setting_('Assignment Order', 'balanced'),
     time: nowStamp_(),
     tabs: leadTabNames_()
   });

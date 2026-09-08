@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, moveLead, loadTeam_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, loadTeam_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -1361,6 +1361,23 @@ realLog('\n--- what a move settles, and what it refuses ---');
   check('and so is moving a lead to where it already is',
     api.moveLead('Pia', piaLast, 'Pia').ok, 'false');
   check('a refusal moves nothing', cellOf('Pia', piaLast, 'Full Name'), 'No Type Given');
+}
+
+realLog('\n--- the deployment can say which build it is ---');
+{
+  silence(quiet);
+  // "Did the redeploy take?" has been the hardest question to answer about this
+  // system from the outside. The health URL answers it now.
+  const health = JSON.parse(api.doGet({}).getContent());
+  check('the health check reports a build', typeof health.build, 'string');
+  check('and it is never empty', health.build.length > 0, 'true');
+  // The same suite runs against src/ and against the bundle, so the value
+  // differs by design: "dev" from source, the built commit from dist/.
+  check('it is either dev or a built commit',
+    /^(dev|[0-9a-f]{7,40}(\+local-changes)?)$/.test(health.build), 'true');
+  check('it reports the assignment order too',
+    typeof health.assignmentOrder, 'string');
+  check('and still says what it is', health.status, 'ok');
 }
 
 realLog('\n--- auth and payload shapes ---');
