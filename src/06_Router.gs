@@ -113,7 +113,7 @@ function pickAssignee_(lead) {
   if (!candidates.length) return null;
 
   return squashKey_(setting_('Assignment Order', 'balanced')) === 'roster'
-    ? nextInRosterOrder_(candidates)
+    ? nextInRosterOrder_(candidates, lead.eventTypeLabel)
     : fewestSoFar_(candidates);
 }
 
@@ -149,10 +149,16 @@ function fewestSoFar_(candidates) {
  * several leads landing in one second would leave the rotation unable to tell
  * which came last and stuck on one person.
  *
+ * Each event type keeps its own place in the list. A team usually splits into
+ * groups that barely overlap — everybody on socials, two people on corporate —
+ * and one shared pointer would let a corporate lead send the socials rotation
+ * back to whoever follows the corporate pair, which is nobody's turn.
+ *
  * @param {!Array<!Object>} candidates Roster entries covering this event type.
+ * @param {string} eventTypeLabel Which rotation this is.
  * @return {!Object}
  */
-function nextInRosterOrder_(candidates) {
+function nextInRosterOrder_(candidates, eventTypeLabel) {
   const roster = loadTeam_().filter(function (member) {
     return member.active && member.tab;
   });
@@ -162,7 +168,9 @@ function nextInRosterOrder_(candidates) {
   candidates.forEach(function (member) { eligible[squashKey_(member.name)] = member; });
 
   // Nobody yet, or a name that has since left the roster, starts at the top.
-  const last = PropertiesService.getScriptProperties().getProperty(ROTATION_KEY) || '';
+  const props = PropertiesService.getScriptProperties();
+  const key = ROTATION_KEY + squashKey_(eventTypeLabel);
+  const last = props.getProperty(key) || '';
   let at = -1;
   roster.forEach(function (member, i) {
     if (squashKey_(member.name) === last) at = i;
@@ -171,7 +179,10 @@ function nextInRosterOrder_(candidates) {
   for (let step = 1; step <= roster.length; step++) {
     const member = roster[(at + step) % roster.length];
     const hit = eligible[squashKey_(member.name)];
-    if (hit) return hit;
+    if (hit) {
+      props.setProperty(key, squashKey_(member.name));
+      return hit;
+    }
   }
   return candidates[0];
 }
@@ -193,10 +204,7 @@ function nextInRosterOrder_(candidates) {
  * @return {{mode: string, list: !Array<string>}} mode is 'list', 'caller' or 'none'.
  */
 function presenterRule_(eventTypeLabel) {
-  const settings = getSettings_();
-  const key = 'Presenters - ' + eventTypeLabel;
-  let raw = cleanText_(
-    Object.prototype.hasOwnProperty.call(settings, key) ? settings[key] : '');
+  let raw = cleanText_(setting_('Presenters - ' + eventTypeLabel, ''));
   if (!raw) raw = cleanText_(setting_('Presenters', ''));
 
   const token = squashKey_(raw);
@@ -248,10 +256,6 @@ function namedMember_(name) {
 function recordAssignment_(member) {
   member.count += 1;
   member.lastAt = nowStamp_();
-  // Where a strict rotation carries on from. Written whichever order is in
-  // use, so switching between them picks up from the right person.
-  PropertiesService.getScriptProperties()
-    .setProperty(ROTATION_KEY, squashKey_(member.name));
   const sheet = getSpreadsheet_().getSheetByName(SHEETS.team);
   if (!sheet || !member.row) return;
   updateRowCells_(sheet, member.row, {
@@ -300,8 +304,8 @@ function maybeNotifyTabs_(byTab) {
 }
 
 /** Script property prefix holding the last row of a tab that was notified. */
-/** Who the strict rotation last handed a lead to. */
-const ROTATION_KEY = 'ROTATION_AT';
+/** Prefix for who each event type's rotation last handed a lead to. */
+const ROTATION_KEY = 'ROTATION_AT_';
 
 const NOTIFY_MARK_PREFIX = 'NOTIFY_MARK_';
 
