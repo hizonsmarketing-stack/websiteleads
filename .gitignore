@@ -6,6 +6,7 @@
 node_modules/
 npm-debug.log*
 package-lock.json
+!agent/package-lock.json
 
 # os / editor
 .DS_Store
@@ -16,3 +17,6 @@ Thumbs.db
 # local scratch
 *.local
 scratch/
+
+# content agent output (regenerated every run)
+agent/output/

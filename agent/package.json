@@ -1,0 +1,16 @@
+{
+  "name": "content-insights-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Turns Semrush, Wix, GA4 and Search Console data into per-channel content recommendations.",
+  "scripts": {
+    "start": "node src/index.js",
+    "offline": "node src/index.js --offline",
+    "test": "node test/run.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "playwright": "^1.63.0"
+  }
+}

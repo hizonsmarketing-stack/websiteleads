@@ -1,0 +1,93 @@
+name: Content insights agent
+
+# Monday 07:00 Manila (23:00 UTC Sunday) — the plan is waiting when the week
+# starts, rather than landing mid-week when the shoot is already booked.
+on:
+  schedule:
+    - cron: '0 23 * * 0'
+  workflow_dispatch:
+    inputs:
+      offline:
+        description: 'Run against fixtures instead of the live APIs'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: content-agent
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install
+        working-directory: agent
+        run: npm ci
+
+      - name: Test
+        working-directory: agent
+        run: npm test
+
+      - name: Run the agent
+        working-directory: agent
+        env:
+          SEMRUSH_API_KEY: ${{ secrets.SEMRUSH_API_KEY }}
+          SEMRUSH_DATABASE: ${{ vars.SEMRUSH_DATABASE }}
+          WIX_API_KEY: ${{ secrets.WIX_API_KEY }}
+          WIX_SITE_ID: ${{ secrets.WIX_SITE_ID }}
+          WIX_ACCOUNT_ID: ${{ secrets.WIX_ACCOUNT_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+          SEARCH_CONSOLE_SITE: ${{ secrets.SEARCH_CONSOLE_SITE }}
+          LEADS_SPREADSHEET_ID: ${{ secrets.LEADS_SPREADSHEET_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
+        run: node src/index.js ${{ inputs.offline && '--offline' || '' }}
+
+      - name: Summarise the run
+        if: always()
+        working-directory: agent
+        run: |
+          if [ -f output/insights.json ]; then
+            node -e '
+              const plan = require("./output/insights.json");
+              const live = plan.sources.filter(s => s.ready).map(s => s.label);
+              const rows = plan.recommendations.map(r =>
+                `| ${r.priority} | ${r.channel} | ${r.title.replace(/\|/g, "\\|")} | ${r.targetKeyword} |`);
+              console.log([
+                `## Content plan — ${plan.generatedAt.slice(0, 10)}`, "",
+                plan.summary, "",
+                `**Sources live:** ${live.join(", ") || "none"}`,
+                `**Briefs from:** ${plan.planSource}`,
+                `**Opportunities:** ${plan.opportunities.length}`, "",
+                "| Prio | Channel | Title | Keyword |",
+                "| --- | --- | --- | --- |",
+                ...rows, "",
+                plan.dataErrors.length ? `> Partial data: ${plan.dataErrors.join("; ")}` : "",
+              ].join("\n"));
+            ' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The agent produced no output — see the log above." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the plan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: content-plan
+          path: agent/output/
+          retention-days: 90

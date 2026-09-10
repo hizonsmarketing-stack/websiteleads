@@ -5,6 +5,9 @@
   "description": "Lead intake, dedupe, source tagging and event-type routing for website, Google Ads and bridal-fair leads.",
   "scripts": {
     "test": "node test/run.js",
+    "test:agent": "node agent/test/run.js",
+    "agent": "node agent/src/index.js",
+    "agent:offline": "node agent/src/index.js --offline",
     "bundle": "node tools/bundle.js",
     "login": "clasp login",
     "push": "clasp push",

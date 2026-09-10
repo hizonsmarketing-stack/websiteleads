@@ -84,6 +84,23 @@ in [docs/EXISTING_LEADS.md](docs/EXISTING_LEADS.md). Making a copy of the
 worksheet first (File → Make a copy) turns the first run into a rehearsal you
 can throw away.
 
+## Knowing what to publish next
+
+A second, separate automation reads Semrush, Wix, Google Analytics and Search
+Console — alongside the lead data this system already collects — and says what
+to write and film this week, on which channel, and why.
+
+It runs weekly in GitHub Actions rather than in Apps Script, and produces a
+dashboard, a content calendar you can import into Sheets, and the reasoning
+behind every recommendation. It knows which pages produce *enquiries* and not
+just traffic, because it reads the same sheet this automation fills.
+
+```bash
+npm run agent:offline    # try it with no credentials and no network
+```
+
+Setup, tuning and troubleshooting: **[docs/CONTENT_AGENT.md](docs/CONTENT_AGENT.md)**.
+
 ## Getting started
 
 1. **[docs/SETUP.md](docs/SETUP.md)** — install the script on the sales
@@ -99,6 +116,8 @@ can throw away.
    event types, changing the dedupe rule, assigning reps, troubleshooting.
 6. **[docs/FIELD_MAPPING.md](docs/FIELD_MAPPING.md)** — how unfamiliar column
    names are understood, and how to teach it new ones.
+7. **[docs/CONTENT_AGENT.md](docs/CONTENT_AGENT.md)** — the content insights
+   agent: what to publish next, and why.
 
 ## Repository layout
 
@@ -129,6 +148,17 @@ test/
   fakes.js          The in-memory stand-in for SpreadsheetApp and friends
 tools/
   bundle.js         Builds dist/
+agent/            The content insights agent — runs in GitHub Actions, not
+                  in Apps Script. See docs/CONTENT_AGENT.md
+  src/
+    config.js       Channels, capacities, booking seasons, thresholds
+    classify.js     Search intent, event type, channel fit, seasonal weighting
+    analyze.js      The five detectors and the scoring
+    synthesize.js   Claude writes the briefs; a deterministic fallback if it can't
+    connectors/     Semrush, Wix, GA4, Search Console, the lead sheet
+    render/         The dashboard and the content calendar
+  fixtures/         Sample data, so it runs with no credentials
+  test/run.js       108 checks, no network
 ```
 
 ## Developing
