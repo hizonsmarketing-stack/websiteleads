@@ -501,6 +501,38 @@ It refuses to act on the header row, a row past the end of the tab, a tab that
 holds no leads, an unknown destination, and a lead already on the tab you named.
 A refusal moves nothing.
 
+## Rows that look blank
+
+A row carrying nothing but a presenter name — or nothing at all — in the columns
+the team looks at, on a tab that was in use before the automation.
+
+**The lead is not lost.** Scroll right. The automation read **row 1** as that
+tab's header row, recognised almost nothing there, and appended its own set of
+columns after the last one in use. Everything it writes goes into those, so the
+row reads as blank in the columns already there.
+
+It happens when the real headers are not on row 1 — under a title row, or behind
+merged cells. `_Log` now records it the first time:
+
+```
+WARN sheets: Tab header row not recognised; adding a second set of columns
+{"tab":"…","headerRowRead":1,"headerRowLooksLike":2,"fix":"Move the header row
+up to row 1 (or delete the rows above it), then run Setup / repair tabs."}
+```
+
+To repair a tab this has already happened to, pick one:
+
+- **Keep the automation's columns.** Move the old rows' values across into them,
+  delete the team's original columns, and carry on. The tab is then an ordinary
+  lead tab.
+- **Keep the team's columns.** Move the header row up to row 1, delete the
+  appended block on the right, run **Setup / repair tabs** so the columns bind
+  properly this time, then **Import existing leads from a tab…** so the rows
+  already there join duplicate matching.
+
+Either way, do it before the tab collects much more: every lead that arrives
+meanwhile lands in whichever set the automation can see.
+
 ## Statuses
 
 Five words, one per lead, picked from a dropdown on the **Status** column. They
