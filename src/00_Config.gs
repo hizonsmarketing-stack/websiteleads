@@ -346,6 +346,24 @@ const NON_ANSWERS = [
 ];
 
 /** Keys carried by a Google Ads lead-form webhook payload. */
+/**
+ * Which build is running.
+ *
+ * tools/bundle.js writes a `BUILD_` constant into dist/Code.gs carrying the
+ * commit it built from. Nothing declares it here — that would collide with the
+ * bundle's own — so it is read through `typeof`, which is safe on a name that
+ * was never declared. Running from src/ there is no such constant, and this
+ * says "dev".
+ *
+ * The health URL reports it, so "did the redeploy take?" is a question the
+ * deployment can answer itself.
+ *
+ * @return {string}
+ */
+function buildStamp_() {
+  return typeof BUILD_ === 'string' ? BUILD_ : 'dev';
+}
+
 const GOOGLE_ADS_MARKERS = ['user_column_data', 'google_key', 'lead_id'];
 
 /**

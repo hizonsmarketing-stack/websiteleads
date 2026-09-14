@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, moveLead, loadTeam_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, loadTeam_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -887,6 +887,50 @@ realLog('\n--- the same client, on forms that ask for different things ---');
   check('the rebuild still indexed every lead', rebuilt > 0, 'true');
 }
 
+realLog('\n--- a tab whose headers are not on row 1 ---');
+{
+  silence(quiet);
+  // A team keeps a tab with a title row on top and the real headers under it.
+  // Reading row 1 as the header binds almost nothing, so the whole canonical
+  // set is appended to the right -- and every lead from then on writes out
+  // there, reading as blank in the columns the team actually looks at. One tab
+  // showed rows carrying nothing but a presenter name for exactly this reason.
+  const legacy = book.insertSheet('LEGACY TAB');
+  legacy.getRange(1, 1, 1, 6).setValues([['PRESENTER', '', '', '', '', '']]);
+  legacy.getRange(2, 1, 1, 6).setValues([['', '', 'DATE', 'NAME', 'CONTACT', 'EMAIL']]);
+  legacy.getRange(3, 1, 1, 6).setValues([['AJ', '', '2026-09-11', 'Sho G', '9614561212', 'a@b.com']]);
+  tab('_Team').appendRow(['LEGACY TAB', 'LEGACY TAB', 'Wedding', '', 'yes', 0, '', '']);
+  api.resetCaches();
+
+  const before = tab('_Log').getLastRow();
+  post({ formName: 'F', name: 'Legacy Client', email: 'legacy@example.com',
+    'Type of Event': 'Wedding' }, { source: 'website' });
+
+  const written = tab('_Log')
+    .getRange(before + 1, 1, tab('_Log').getLastRow() - before, 5).getValues();
+  const warned = written.filter(r => /header row not recognised/i.test(String(r[3])))[0];
+  check('it says the header row was not recognised', !!warned, 'true');
+  check('and names the tab', /LEGACY TAB/.test(String(warned && warned[4])), 'true');
+  check('and works out where the real header row is',
+    /"headerRowLooksLike":2/.test(String(warned && warned[4])), 'true');
+  check('and says what to do about it',
+    /Move the header row up to row 1/.test(String(warned && warned[4])), 'true');
+
+  // The lead is still written -- losing it would be worse than filing it oddly.
+  const legacyRow = legacy.getLastRow();
+  check('the lead is not thrown away',
+    cellOf('LEGACY TAB', legacyRow, 'Full Name'), 'Legacy Client');
+
+  // An ordinary tab must not trip the warning.
+  const quiet2 = tab('_Log').getLastRow();
+  post({ formName: 'F', name: 'Ordinary Client', email: 'ordinary@example.com',
+    'Type of Event': 'Wedding' }, { source: 'website' });
+  const after = tab('_Log')
+    .getRange(quiet2 + 1, 1, tab('_Log').getLastRow() - quiet2, 5).getValues();
+  check('a tab with proper headers says nothing',
+    after.some(r => /header row not recognised/i.test(String(r[3]))), 'false');
+}
+
 realLog('\n--- a strict rotation follows the roster, top to bottom ---');
 {
   silence(quiet);
@@ -1361,6 +1405,23 @@ realLog('\n--- what a move settles, and what it refuses ---');
   check('and so is moving a lead to where it already is',
     api.moveLead('Pia', piaLast, 'Pia').ok, 'false');
   check('a refusal moves nothing', cellOf('Pia', piaLast, 'Full Name'), 'No Type Given');
+}
+
+realLog('\n--- the deployment can say which build it is ---');
+{
+  silence(quiet);
+  // "Did the redeploy take?" has been the hardest question to answer about this
+  // system from the outside. The health URL answers it now.
+  const health = JSON.parse(api.doGet({}).getContent());
+  check('the health check reports a build', typeof health.build, 'string');
+  check('and it is never empty', health.build.length > 0, 'true');
+  // The same suite runs against src/ and against the bundle, so the value
+  // differs by design: "dev" from source, the built commit from dist/.
+  check('it is either dev or a built commit',
+    /^(dev|[0-9a-f]{7,40}(\+local-changes)?)$/.test(health.build), 'true');
+  check('it reports the assignment order too',
+    typeof health.assignmentOrder, 'string');
+  check('and still says what it is', health.status, 'ok');
 }
 
 realLog('\n--- auth and payload shapes ---');

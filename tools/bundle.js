@@ -15,6 +15,23 @@ const distDir = path.join(root, 'dist');
 
 fs.mkdirSync(distDir, { recursive: true });
 
+// Stamped into the bundle so the deployed script can say which build it is.
+// "Did the redeploy take?" has been the hardest question to answer about this
+// system from the outside, and guessing at it has cost real hours.
+function buildStamp() {
+  try {
+    const sha = require('child_process')
+      .execSync('git rev-parse --short HEAD', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim();
+    const dirty = require('child_process')
+      .execSync('git status --porcelain', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim();
+    return sha + (dirty ? '+local-changes' : '');
+  } catch (err) {
+    return 'unknown';
+  }
+}
+
 const files = fs.readdirSync(srcDir).filter(f => f.endsWith('.gs')).sort();
 const banner = [
   '/**',
@@ -36,7 +53,14 @@ const body = files.map(file => [
   fs.readFileSync(path.join(srcDir, file), 'utf8').trimEnd()
 ].join('\n')).join('\n');
 
-fs.writeFileSync(path.join(distDir, 'Code.gs'), banner + body + '\n');
+const stamp = [
+  '',
+  '/** Which build this is. Written by tools/bundle.js; "dev" when run from src. */',
+  "const BUILD_ = '" + buildStamp() + "';",
+  ''
+].join('\n');
+
+fs.writeFileSync(path.join(distDir, 'Code.gs'), banner + stamp + body + '\n');
 // Everything that is not a .gs file is copied through as-is: the HTML dialogs
 // and the manifest are separate files in the Apps Script editor too.
 const assets = fs.readdirSync(srcDir).filter(f => !f.endsWith('.gs')).sort();

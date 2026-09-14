@@ -20,6 +20,9 @@
  *   src/14_Digest.gs
  */
 
+/** Which build this is. Written by tools/bundle.js; "dev" when run from src. */
+const BUILD_ = '2539c86+local-changes';
+
 // ==========================================================================
 // src/00_Config.gs
 // ==========================================================================
@@ -372,6 +375,24 @@ const NON_ANSWERS = [
 ];
 
 /** Keys carried by a Google Ads lead-form webhook payload. */
+/**
+ * Which build is running.
+ *
+ * tools/bundle.js writes a `BUILD_` constant into dist/Code.gs carrying the
+ * commit it built from. Nothing declares it here — that would collide with the
+ * bundle's own — so it is read through `typeof`, which is safe on a name that
+ * was never declared. Running from src/ there is no such constant, and this
+ * says "dev".
+ *
+ * The health URL reports it, so "did the redeploy take?" is a question the
+ * deployment can answer itself.
+ *
+ * @return {string}
+ */
+function buildStamp_() {
+  return typeof BUILD_ === 'string' ? BUILD_ : 'dev';
+}
+
 const GOOGLE_ADS_MARKERS = ['user_column_data', 'google_key', 'lead_id'];
 
 /**
@@ -832,6 +853,8 @@ function ensureHeaders_(sheet, headers) {
   });
   if (!missing.length) return;
 
+  warnIfHeadersUnrecognised_(sheet, missing, headers);
+
   // Append after the last populated column — never over a gap in the header row.
   const startCol = width + 1;
   const needed = startCol + missing.length - 1;
@@ -842,6 +865,52 @@ function ensureHeaders_(sheet, headers) {
   formatHeaderRow_(sheet, needed);
   forgetFieldColumns_(sheet.getName());
   protectTextColumns_(sheet);
+}
+
+/**
+ * Says so when a tab is about to be given a second set of columns.
+ *
+ * Adding the whole canonical set to a tab that already holds leads means its
+ * header row was not recognised — nearly always because the real headers are
+ * not on row 1, sitting under a title row or behind merged cells. Left silent,
+ * every lead from then on writes into the new columns off to the right, and
+ * the row reads as blank in the columns the team actually looks at. One tab
+ * had rows showing nothing but a presenter name for exactly this reason.
+ *
+ * The lead is still written, because losing it would be worse. This only makes
+ * the cause findable, and names the row that looks like the real header.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {!Array<string>} missing Columns about to be appended.
+ * @param {!Array<string>} headers The full canonical set.
+ */
+function warnIfHeadersUnrecognised_(sheet, missing, headers) {
+  // A tab with no rows yet has nothing to misread.
+  if (sheet.getLastRow() < 2) return;
+  // A couple of new columns is ordinary — a schema change, not a misread.
+  if (missing.length < headers.length - 2) return;
+
+  let looksLike = 0;
+  try {
+    const depth = Math.min(sheet.getLastRow(), 15);
+    const sample = sheet.getRange(1, 1, depth, Math.max(sheet.getLastColumn(), 1)).getValues();
+    looksLike = detectHeaderRow_(sample) + 1;
+  } catch (err) {
+    looksLike = 0;
+  }
+
+  log_('WARN', 'sheets', 'Tab header row not recognised; adding a second set of columns', {
+    tab: sheet.getName(),
+    added: missing.length,
+    headerRowRead: 1,
+    headerRowLooksLike: looksLike > 1 ? looksLike : 'unclear',
+    effect: 'leads will be written into the new columns on the right, and will ' +
+      'read as blank in the columns already there',
+    fix: looksLike > 1
+      ? 'Move the header row up to row 1 (or delete the rows above it), then run ' +
+        'Setup / repair tabs.'
+      : 'Give this tab a header row the automation can read, then run Setup / repair tabs.'
+  });
 }
 
 /**
@@ -3209,6 +3278,8 @@ function doGet(e) {
   return jsonResponse_({
     status: 'ok',
     service: 'Website Leads Automation',
+    build: buildStamp_(),
+    assignmentOrder: setting_('Assignment Order', 'balanced'),
     time: nowStamp_(),
     tabs: leadTabNames_()
   });

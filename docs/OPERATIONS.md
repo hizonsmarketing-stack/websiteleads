@@ -188,6 +188,24 @@ On `roster`, **Assigned Count stops deciding anything.** Somebody joining with a
 count of 0 beside colleagues on 100 takes their turn like everyone else, rather
 than absorbing every lead until they catch up.
 
+**Moving a lead by hand does not take somebody's turn.** The rotation advances
+only when the automation assigns, so a lead handed over with **Move selected
+lead to…** is an exception rather than a turn: the next lead still goes to
+whoever was next before the move.
+
+### Which build is deployed
+
+The web app URL reports it:
+
+```json
+{"status":"ok","build":"4a22fa1","assignmentOrder":"roster", …}
+```
+
+`build` is the commit `dist/Code.gs` was bundled from, and `dev` when the script
+is running straight from `src/`. Open the `/exec` URL in a browser to see what is
+actually live — "did the redeploy take?" is otherwise unanswerable from outside
+the editor, and guessing at it has cost real time.
+
 ### Setting names are matched loosely
 
 `Assignment Order`, `assignment order` and `Assignment  Order` are the same row.
@@ -482,6 +500,38 @@ Three things it decides for you:
 It refuses to act on the header row, a row past the end of the tab, a tab that
 holds no leads, an unknown destination, and a lead already on the tab you named.
 A refusal moves nothing.
+
+## Rows that look blank
+
+A row carrying nothing but a presenter name — or nothing at all — in the columns
+the team looks at, on a tab that was in use before the automation.
+
+**The lead is not lost.** Scroll right. The automation read **row 1** as that
+tab's header row, recognised almost nothing there, and appended its own set of
+columns after the last one in use. Everything it writes goes into those, so the
+row reads as blank in the columns already there.
+
+It happens when the real headers are not on row 1 — under a title row, or behind
+merged cells. `_Log` now records it the first time:
+
+```
+WARN sheets: Tab header row not recognised; adding a second set of columns
+{"tab":"…","headerRowRead":1,"headerRowLooksLike":2,"fix":"Move the header row
+up to row 1 (or delete the rows above it), then run Setup / repair tabs."}
+```
+
+To repair a tab this has already happened to, pick one:
+
+- **Keep the automation's columns.** Move the old rows' values across into them,
+  delete the team's original columns, and carry on. The tab is then an ordinary
+  lead tab.
+- **Keep the team's columns.** Move the header row up to row 1, delete the
+  appended block on the right, run **Setup / repair tabs** so the columns bind
+  properly this time, then **Import existing leads from a tab…** so the rows
+  already there join duplicate matching.
+
+Either way, do it before the tab collects much more: every lead that arrives
+meanwhile lands in whichever set the automation can see.
 
 ## Statuses
 
