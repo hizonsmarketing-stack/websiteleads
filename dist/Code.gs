@@ -21,7 +21,7 @@
  */
 
 /** Which build this is. Written by tools/bundle.js; "dev" when run from src. */
-const BUILD_ = 'c82f09f+local-changes';
+const BUILD_ = 'f2ac07f+local-changes';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -1749,9 +1749,18 @@ function buildLead_(input) {
     rawRef: input.rawRef || '',
     emailKey: emailDedupeKey_(normalizeEmail_(fields.email)),
     phoneKey: normalizePhone_(fields.phone),
+    // The composed name, not the raw field. A form that sends First name and
+    // Last name separately — which is every Google Ads lead form — leaves
+    // fields.fullName empty, so reading it here gave those leads no name key
+    // at all and the one thing name matching exists to catch, the same person
+    // filling in one form asking only for email and another asking only for
+    // phone, went uncaught on exactly the source it happens most on. It also
+    // disagreed with rebuildIndex, which reads the sheet's Full Name column:
+    // the index changed depending on whether anybody had rebuilt it.
+    //
     // Only used when "Dedupe On" names it. Squashed so "MARIA CRUZ" and
     // "Maria  Cruz" are one person.
-    nameKey: squashKey_(fields.fullName),
+    nameKey: squashKey_(fullName),
     // The sending system's own id for this submission, where it has one.
     externalKey: cleanText_(input.externalId) ? 'ext:' + cleanText_(input.externalId) : ''
   };
@@ -2581,7 +2590,7 @@ function sendTabNotice_(tabName, pending) {
   for (let row = pending.from; row <= pending.to; row++) {
     leads.push({
       name: read(row, 'fullName') || read(row, 'email') || read(row, 'phone') || '(no name given)',
-      eventType: read(row, 'eventType'),
+      eventType: read(row, 'eventTypeLabel'),
       eventDate: read(row, 'eventDate'),
       guests: read(row, 'guestCount'),
       presenter: read(row, 'presenter'),
@@ -3126,7 +3135,7 @@ const RAW_COLUMNS = ['Ref', 'Received At', 'Source', 'Sub-Source', 'Payload'];
  */
 function storeRaw_(source, subSource, payload) {
   const sheet = getOrCreateSheet_(SHEETS.raw, RAW_COLUMNS);
-  const ref = 'RAW-' + Utilities.formatString('%06d', sheet.getLastRow());
+  const ref = 'RAW-' + Utilities.formatString('%06d', nextRawSequence_(sheet));
   let serialised;
   try {
     serialised = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -3135,6 +3144,34 @@ function storeRaw_(source, subSource, payload) {
   }
   sheet.appendRow([ref, nowStamp_(), source, subSource, serialised.slice(0, 45000)]);
   return ref;
+}
+
+/** Script property holding the number of the last raw payload stored. */
+const RAW_SEQUENCE_KEY = 'RAW_SEQUENCE';
+
+/**
+ * The next raw reference number.
+ *
+ * Counted in a script property rather than from the sheet's length. Retention
+ * trims _Raw from the top, so it settles at exactly the retention figure and
+ * never grows again — and the row count, which used to be the number, stopped
+ * moving with it. Every payload from then on was filed as RAW-002000, and the
+ * Raw Ref on a lead row pointed at nothing in particular.
+ *
+ * The sheet still seeds the counter the first time, so a workbook that has
+ * been running carries on from where its refs had reached instead of going
+ * back to one and reusing numbers already printed on lead rows.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet The _Raw tab.
+ * @return {number}
+ */
+function nextRawSequence_(sheet) {
+  const props = PropertiesService.getScriptProperties();
+  const stored = Number(props.getProperty(RAW_SEQUENCE_KEY));
+  const seeded = isFinite(stored) && stored > 0 ? stored : sheet.getLastRow();
+  const next = seeded + 1;
+  props.setProperty(RAW_SEQUENCE_KEY, String(next));
+  return next;
 }
 
 /**
@@ -4324,13 +4361,13 @@ function buildDashboard_() {
   rows.push(['Leads by salesperson', 'Count', '']);
   loadTeam_().forEach(function (member) {
     rows.push([member.name + (member.active ? '' : ' (inactive)'),
-      '=IFERROR(COUNTA(' + a1SheetRef_(member.tab) + '!A2:A),0)', '']);
+      leadCountFormula_(member.tab), '']);
   });
   rows.push(['', '', '']);
   rows.push(['Totals', 'Count', '']);
-  rows.push(['Total (all leads)', '=IFERROR(COUNTA(' + all + '!A2:A),0)', '']);
+  rows.push(['Total (all leads)', leadCountFormula_(SHEETS.allLeads), '']);
   rows.push(['Duplicates caught',
-    '=IFERROR(COUNTA(' + a1SheetRef_(SHEETS.duplicates) + '!A2:A),0)', '']);
+    leadCountFormula_(SHEETS.duplicates), '']);
   rows.push(['', '', '']);
   // One column per source, and the month names itself from a formula so the
   // block still reads correctly in November without anyone re-running setup.
@@ -4415,6 +4452,33 @@ function buildDashboard_() {
   sheet.setFrozenRows(2);
   getSpreadsheet_().setActiveSheet(sheet);
   getSpreadsheet_().moveActiveSheet(1);
+}
+
+/**
+ * Counts the leads on a tab, by its own Lead ID column.
+ *
+ * Column A is not the answer. On a tab this script laid out, A is Presenter,
+ * which is filled only where the event type has a presenter rule — set one to
+ * "none" and the caller reads as zero. On a tab the team had before the
+ * automation, A is whatever they put there. And a presenter cell left behind
+ * by hand, with no lead beside it, counted as a lead.
+ *
+ * Lead ID is the one column written for every lead and for nothing else, so it
+ * is what gets counted — resolved per tab the way statusCountRefs_ resolves
+ * Status, because a tab that predates the automation keeps its own layout. A
+ * tab with no Lead ID column holds no leads this script wrote, and reads zero
+ * rather than guessing.
+ *
+ * @param {string} tabName
+ * @return {string} A formula for the Dashboard.
+ */
+function leadCountFormula_(tabName) {
+  const sheet = getSpreadsheet_().getSheetByName(tabName);
+  if (!sheet) return '=0';
+  const col = fieldColumns_(sheet).byField['leadId'];
+  if (!col) return '=0';
+  const letter = columnLetterFromIndex_(col);
+  return '=IFERROR(COUNTA(' + a1SheetRef_(tabName) + '!' + letter + '2:' + letter + '),0)';
 }
 
 /**

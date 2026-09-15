@@ -371,7 +371,7 @@ function sendTabNotice_(tabName, pending) {
   for (let row = pending.from; row <= pending.to; row++) {
     leads.push({
       name: read(row, 'fullName') || read(row, 'email') || read(row, 'phone') || '(no name given)',
-      eventType: read(row, 'eventType'),
+      eventType: read(row, 'eventTypeLabel'),
       eventDate: read(row, 'eventDate'),
       guests: read(row, 'guestCount'),
       presenter: read(row, 'presenter'),

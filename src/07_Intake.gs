@@ -17,7 +17,7 @@ const RAW_COLUMNS = ['Ref', 'Received At', 'Source', 'Sub-Source', 'Payload'];
  */
 function storeRaw_(source, subSource, payload) {
   const sheet = getOrCreateSheet_(SHEETS.raw, RAW_COLUMNS);
-  const ref = 'RAW-' + Utilities.formatString('%06d', sheet.getLastRow());
+  const ref = 'RAW-' + Utilities.formatString('%06d', nextRawSequence_(sheet));
   let serialised;
   try {
     serialised = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -26,6 +26,34 @@ function storeRaw_(source, subSource, payload) {
   }
   sheet.appendRow([ref, nowStamp_(), source, subSource, serialised.slice(0, 45000)]);
   return ref;
+}
+
+/** Script property holding the number of the last raw payload stored. */
+const RAW_SEQUENCE_KEY = 'RAW_SEQUENCE';
+
+/**
+ * The next raw reference number.
+ *
+ * Counted in a script property rather than from the sheet's length. Retention
+ * trims _Raw from the top, so it settles at exactly the retention figure and
+ * never grows again — and the row count, which used to be the number, stopped
+ * moving with it. Every payload from then on was filed as RAW-002000, and the
+ * Raw Ref on a lead row pointed at nothing in particular.
+ *
+ * The sheet still seeds the counter the first time, so a workbook that has
+ * been running carries on from where its refs had reached instead of going
+ * back to one and reusing numbers already printed on lead rows.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet The _Raw tab.
+ * @return {number}
+ */
+function nextRawSequence_(sheet) {
+  const props = PropertiesService.getScriptProperties();
+  const stored = Number(props.getProperty(RAW_SEQUENCE_KEY));
+  const seeded = isFinite(stored) && stored > 0 ? stored : sheet.getLastRow();
+  const next = seeded + 1;
+  props.setProperty(RAW_SEQUENCE_KEY, String(next));
+  return next;
 }
 
 /**
