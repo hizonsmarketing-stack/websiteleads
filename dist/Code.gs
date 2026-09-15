@@ -20,8 +20,8 @@
  *   src/14_Digest.gs
  */
 
-/** Which build this is. Written by tools/bundle.js; "dev" when run from src. */
-const BUILD_ = 'f2ac07f+local-changes';
+/** Which build this is: a hash of src/. Written by tools/bundle.js. */
+const BUILD_ = '223fcda28970';
 
 // ==========================================================================
 // src/00_Config.gs
