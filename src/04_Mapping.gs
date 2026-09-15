@@ -333,9 +333,18 @@ function buildLead_(input) {
     rawRef: input.rawRef || '',
     emailKey: emailDedupeKey_(normalizeEmail_(fields.email)),
     phoneKey: normalizePhone_(fields.phone),
+    // The composed name, not the raw field. A form that sends First name and
+    // Last name separately — which is every Google Ads lead form — leaves
+    // fields.fullName empty, so reading it here gave those leads no name key
+    // at all and the one thing name matching exists to catch, the same person
+    // filling in one form asking only for email and another asking only for
+    // phone, went uncaught on exactly the source it happens most on. It also
+    // disagreed with rebuildIndex, which reads the sheet's Full Name column:
+    // the index changed depending on whether anybody had rebuilt it.
+    //
     // Only used when "Dedupe On" names it. Squashed so "MARIA CRUZ" and
     // "Maria  Cruz" are one person.
-    nameKey: squashKey_(fields.fullName),
+    nameKey: squashKey_(fullName),
     // The sending system's own id for this submission, where it has one.
     externalKey: cleanText_(input.externalId) ? 'ext:' + cleanText_(input.externalId) : ''
   };

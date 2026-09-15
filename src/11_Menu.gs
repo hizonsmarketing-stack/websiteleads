@@ -21,7 +21,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Send lead digest now', 'menuSendDigest')
     .addSeparator()
-    .addItem('Move selected lead to…', 'menuMoveLead')
+    .addItem('Move selected leads to…', 'menuMoveLead')
     .addItem('Rebuild dedupe index', 'menuRebuildIndex')
     .addItem('Run self-test', 'menuRunTests')
     .addToUi();
@@ -226,49 +226,153 @@ function menuSendDigest() {
  * the original is not deleted — the same lead counted twice. One menu item is
  * easier to get right than a five-step drill nobody remembers under pressure.
  */
+/**
+ * Every row the user has selected, on the active sheet.
+ *
+ * getActiveRangeList covers a ctrl-clicked selection of separate blocks, which
+ * is how somebody picks eight leads out of a tab of two hundred. It is read
+ * through a guard because a range list is not guaranteed to be there, and
+ * falling back to the single active range is better than throwing at somebody
+ * who is only moving one lead.
+ *
+ * Row 1 is dropped: selecting a whole column, which is the quickest way to take
+ * a tab's leads, includes the header.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @return {!Array<number>} 1-based rows, ascending, no repeats.
+ */
+function selectedRows_(sheet) {
+  const ranges = [];
+  try {
+    const list = sheet.getActiveRangeList();
+    if (list) list.getRanges().forEach(function (range) { ranges.push(range); });
+  } catch (err) {
+    // No range list available; the active range below is enough.
+  }
+  if (!ranges.length && sheet.getActiveRange()) ranges.push(sheet.getActiveRange());
+
+  const seen = {};
+  const rows = [];
+  const lastRow = sheet.getLastRow();
+  ranges.forEach(function (range) {
+    const from = range.getRow();
+    const to = from + range.getNumRows() - 1;
+    for (let row = Math.max(from, 2); row <= Math.min(to, lastRow); row++) {
+      if (seen[row]) continue;
+      seen[row] = true;
+      rows.push(row);
+    }
+  });
+  return rows.sort(function (a, b) { return a - b; });
+}
+
+/**
+ * Moves whatever is selected to another caller — one lead or a hundred.
+ *
+ * What can actually be moved is worked out before anyone is asked where to
+ * send it, so the confirmation says how many leads this really is. A selection
+ * over a caller's tab picks up blank rows and hand-typed rows without a Lead
+ * ID, and "move 40 leads" when it is really 31 is how somebody finds out
+ * afterwards that nine clients stayed put.
+ */
 function menuMoveLead() {
   const ui = SpreadsheetApp.getUi();
   const sheet = getSpreadsheet_().getActiveSheet();
-  const row = sheet.getActiveRange() ? sheet.getActiveRange().getRow() : 0;
+  const rows = selectedRows_(sheet);
 
-  const found = leadAtRow_(sheet.getName(), row);
-  if (!found.ok) {
-    ui.alert('Nothing to move', found.problem, ui.ButtonSet.OK);
+  if (!rows.length) {
+    ui.alert('Nothing to move',
+      'Select the lead rows first — click any cell on a lead\'s row, or drag ' +
+      'down the rows to take several.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const movable = [];
+  const blocked = [];
+  rows.forEach(function (row) {
+    const found = leadAtRow_(sheet.getName(), row);
+    if (found.ok) movable.push({ row: row, lead: found.lead, leadId: found.leadId });
+    else blocked.push({ row: row, problem: found.problem });
+  });
+
+  if (!movable.length) {
+    ui.alert('Nothing to move', blocked[0].problem, ui.ButtonSet.OK);
     return;
   }
 
   const people = loadTeam_().filter(function (m) { return m.active && m.tab; })
     .map(function (m) { return m.name; });
   const shared = teamTabNames_();
-  const who = cleanText_(found.lead.fullName) || cleanText_(found.lead.email) || found.leadId;
+  const nameOf = function (entry) {
+    return cleanText_(entry.lead.fullName) || cleanText_(entry.lead.email) || entry.leadId;
+  };
+
+  // Named individually up to a handful, counted beyond that: a list of forty
+  // names does not fit a prompt and is not what anybody reads at that size.
+  const what = movable.length === 1
+    ? nameOf(movable[0])
+    : movable.length + ' leads' + (movable.length <= 5
+        ? ' (' + movable.map(nameOf).join(', ') + ')'
+        : '');
+
+  const caveat = blocked.length
+    ? '\n\n' + blocked.length + ' selected row' + (blocked.length === 1 ? '' : 's') +
+      ' will be left alone — no Lead ID, so ' +
+      (blocked.length === 1 ? 'it is not a lead' : 'they are not leads') +
+      ' the automation knows about.'
+    : '';
 
   const response = ui.prompt(
-    'Move lead to…',
-    'Moving ' + who + ', currently on ' + sheet.getName() + '.\n\n' +
-    'Type who gets it:\n  ' + (people.join(', ') || '(nobody active on the roster)') + '\n\n' +
+    movable.length === 1 ? 'Move lead to…' : 'Move leads to…',
+    'Moving ' + what + ', currently on ' + sheet.getName() + '.' + caveat + '\n\n' +
+    'Type who gets ' + (movable.length === 1 ? 'it' : 'them') + ':\n  ' +
+    (people.join(', ') || '(nobody active on the roster)') + '\n\n' +
     'Or a shared tab:\n  ' + shared.join(', ') + '\n\n' +
-    'The row moves, duplicate matching follows it, All Leads is corrected and ' +
+    'The rows move, duplicate matching follows them, All Leads is corrected and ' +
     'the rotation tallies are adjusted so nobody is fed twice.',
     ui.ButtonSet.OK_CANCEL
   );
   if (response.getSelectedButton() !== ui.Button.OK) return;
 
-  const result = moveLead(sheet.getName(), row, response.getResponseText());
+  const result = moveLeads(sheet.getName(), movable.map(function (entry) {
+    return entry.row;
+  }), response.getResponseText());
+
   if (!result.ok) {
-    ui.alert('Not moved', result.problem, ui.ButtonSet.OK);
+    const problem = result.problem ||
+      (result.skipped.length ? result.skipped[0].problem : 'Nothing moved.');
+    ui.alert('Not moved', problem, ui.ButtonSet.OK);
     return;
   }
 
   getSpreadsheet_().setActiveSheet(getSpreadsheet_().getSheetByName(result.to));
-  ui.alert(
-    'Moved',
-    result.name + ' is now on ' + result.to + ', row ' + result.row +
-    (result.assignedTo ? ', assigned to ' + result.assignedTo : ', with nobody named') +
-    '.\n\nEvent type: ' + result.eventType +
-    '\n\nDuplicate matching now points here, so the next submission from this ' +
-    'client lands on this row.',
-    ui.ButtonSet.OK
-  );
+
+  const lines = [];
+  if (result.moved.length === 1) {
+    const one = result.moved[0];
+    lines.push(one.name + ' is now on ' + one.to + ', row ' + one.row +
+      (one.assignedTo ? ', assigned to ' + one.assignedTo : ', with nobody named') + '.');
+    lines.push('');
+    lines.push('Event type: ' + one.eventType);
+  } else {
+    lines.push(result.moved.length + ' leads are now on ' + result.to +
+      (result.moved[0].assignedTo ? ', assigned to ' + result.moved[0].assignedTo : '') + '.');
+    lines.push('');
+    lines.push(result.moved.map(function (one) {
+      return '  • ' + one.name;
+    }).join('\n'));
+  }
+  if (result.skipped.length) {
+    lines.push('');
+    lines.push('Left alone: ' + result.skipped.map(function (one) {
+      return 'row ' + one.row;
+    }).join(', ') + '.');
+  }
+  lines.push('');
+  lines.push('Duplicate matching now points here, so the next submission from ' +
+    (result.moved.length === 1 ? 'this client lands on this row.' : 'these clients lands on these rows.'));
+
+  ui.alert('Moved', lines.join('\n'), ui.ButtonSet.OK);
 }
 
 function menuRebuildIndex() {

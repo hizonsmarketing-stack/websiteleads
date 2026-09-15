@@ -514,13 +514,13 @@ function buildDashboard_() {
   rows.push(['Leads by salesperson', 'Count', '']);
   loadTeam_().forEach(function (member) {
     rows.push([member.name + (member.active ? '' : ' (inactive)'),
-      '=IFERROR(COUNTA(' + a1SheetRef_(member.tab) + '!A2:A),0)', '']);
+      leadCountFormula_(member.tab), '']);
   });
   rows.push(['', '', '']);
   rows.push(['Totals', 'Count', '']);
-  rows.push(['Total (all leads)', '=IFERROR(COUNTA(' + all + '!A2:A),0)', '']);
+  rows.push(['Total (all leads)', leadCountFormula_(SHEETS.allLeads), '']);
   rows.push(['Duplicates caught',
-    '=IFERROR(COUNTA(' + a1SheetRef_(SHEETS.duplicates) + '!A2:A),0)', '']);
+    leadCountFormula_(SHEETS.duplicates), '']);
   rows.push(['', '', '']);
   // One column per source, and the month names itself from a formula so the
   // block still reads correctly in November without anyone re-running setup.
@@ -605,6 +605,33 @@ function buildDashboard_() {
   sheet.setFrozenRows(2);
   getSpreadsheet_().setActiveSheet(sheet);
   getSpreadsheet_().moveActiveSheet(1);
+}
+
+/**
+ * Counts the leads on a tab, by its own Lead ID column.
+ *
+ * Column A is not the answer. On a tab this script laid out, A is Presenter,
+ * which is filled only where the event type has a presenter rule — set one to
+ * "none" and the caller reads as zero. On a tab the team had before the
+ * automation, A is whatever they put there. And a presenter cell left behind
+ * by hand, with no lead beside it, counted as a lead.
+ *
+ * Lead ID is the one column written for every lead and for nothing else, so it
+ * is what gets counted — resolved per tab the way statusCountRefs_ resolves
+ * Status, because a tab that predates the automation keeps its own layout. A
+ * tab with no Lead ID column holds no leads this script wrote, and reads zero
+ * rather than guessing.
+ *
+ * @param {string} tabName
+ * @return {string} A formula for the Dashboard.
+ */
+function leadCountFormula_(tabName) {
+  const sheet = getSpreadsheet_().getSheetByName(tabName);
+  if (!sheet) return '=0';
+  const col = fieldColumns_(sheet).byField['leadId'];
+  if (!col) return '=0';
+  const letter = columnLetterFromIndex_(col);
+  return '=IFERROR(COUNTA(' + a1SheetRef_(tabName) + '!' + letter + '2:' + letter + '),0)';
 }
 
 /**

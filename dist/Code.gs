@@ -21,7 +21,7 @@
  */
 
 /** Which build this is. Written by tools/bundle.js; "dev" when run from src. */
-const BUILD_ = '2539c86+local-changes';
+const BUILD_ = 'f2ac07f+local-changes';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -1749,9 +1749,18 @@ function buildLead_(input) {
     rawRef: input.rawRef || '',
     emailKey: emailDedupeKey_(normalizeEmail_(fields.email)),
     phoneKey: normalizePhone_(fields.phone),
+    // The composed name, not the raw field. A form that sends First name and
+    // Last name separately — which is every Google Ads lead form — leaves
+    // fields.fullName empty, so reading it here gave those leads no name key
+    // at all and the one thing name matching exists to catch, the same person
+    // filling in one form asking only for email and another asking only for
+    // phone, went uncaught on exactly the source it happens most on. It also
+    // disagreed with rebuildIndex, which reads the sheet's Full Name column:
+    // the index changed depending on whether anybody had rebuilt it.
+    //
     // Only used when "Dedupe On" names it. Squashed so "MARIA CRUZ" and
     // "Maria  Cruz" are one person.
-    nameKey: squashKey_(fields.fullName),
+    nameKey: squashKey_(fullName),
     // The sending system's own id for this submission, where it has one.
     externalKey: cleanText_(input.externalId) ? 'ext:' + cleanText_(input.externalId) : ''
   };
@@ -2581,7 +2590,7 @@ function sendTabNotice_(tabName, pending) {
   for (let row = pending.from; row <= pending.to; row++) {
     leads.push({
       name: read(row, 'fullName') || read(row, 'email') || read(row, 'phone') || '(no name given)',
-      eventType: read(row, 'eventType'),
+      eventType: read(row, 'eventTypeLabel'),
       eventDate: read(row, 'eventDate'),
       guests: read(row, 'guestCount'),
       presenter: read(row, 'presenter'),
@@ -2927,6 +2936,24 @@ function leadAtRow_(tabName, row) {
  */
 function moveLead(fromTab, row, target) {
   return withLock_(function () {
+    return moveOneLead_(fromTab, row, target);
+  });
+}
+
+/**
+ * Moves one lead, assuming the caller already holds the lock.
+ *
+ * Split out from moveLead so a bulk move can take the lock once for the whole
+ * run. Taking it per row would let a webhook land between two rows and write a
+ * lead at a row number the next delete is about to shift.
+ *
+ * @param {string} fromTab
+ * @param {number} row
+ * @param {string} target
+ * @return {!Object} Same shape as moveLead.
+ */
+function moveOneLead_(fromTab, row, target) {
+  {
     const found = leadAtRow_(fromTab, row);
     if (!found.ok) return found;
     const sheet = found.sheet;
@@ -3002,7 +3029,64 @@ function moveLead(fromTab, row, target) {
       assignedTo: moved.assignedTo,
       eventType: cleanText_(moved.eventTypeLabel)
     };
-  });
+  }
+}
+
+/**
+ * Hands a batch of leads to somebody else in one run.
+ *
+ * Rows are moved from the bottom up. Each move deletes the row it came from,
+ * so working downwards would shift every row still to come and the run would
+ * move the wrong leads from the second one onwards — the failure is silent,
+ * which is what makes it worth spelling out here.
+ *
+ * The lock is taken once for the whole batch rather than per row. A webhook
+ * landing between two rows would append a lead at a row number the next delete
+ * is about to move, and the index would point one row off from then on.
+ *
+ * A row that cannot be moved does not stop the run. Rows typed in by hand have
+ * no Lead ID, and a selection over a caller's tab will usually catch a few;
+ * they are collected and reported so the rest of the batch still goes through.
+ *
+ * @param {string} fromTab The tab the leads are on now.
+ * @param {!Array<number>} rows 1-based rows on that tab, in any order.
+ * @param {string} target A salesperson's name, or a tab name.
+ * @return {{ok: boolean, problem: (string|undefined), to: (string|undefined),
+ *     moved: !Array<!Object>, skipped: !Array<{row: number, problem: string}>}}
+ */
+function moveLeads(fromTab, rows, target) {
+  return withLock_(function () {
+    const wanted = (rows || [])
+      .map(Number)
+      .filter(function (row) { return row > 1; })
+      .filter(function (row, i, all) { return all.indexOf(row) === i; })
+      .sort(function (a, b) { return b - a; });
+
+    if (!wanted.length) {
+      return { ok: false, problem: 'No lead rows were selected.', moved: [], skipped: [] };
+    }
+
+    const moved = [];
+    const skipped = [];
+    let to = '';
+
+    wanted.forEach(function (row) {
+      const result = moveOneLead_(fromTab, row, target);
+      if (result.ok) {
+        moved.push(result);
+        to = result.to;
+      } else {
+        skipped.push({ row: row, problem: result.problem });
+      }
+    });
+
+    log_('INFO', 'router', 'Moved leads in bulk', {
+      from: fromTab, to: to || target, moved: moved.length, skipped: skipped.length
+    });
+    // Reported oldest row first, which is the order they appear on the tab —
+    // the run itself had to go the other way.
+    return { ok: moved.length > 0, to: to, moved: moved.reverse(), skipped: skipped.reverse() };
+  }, 300000);
 }
 
 /** @return {?Object} The roster entry that owns a tab, or null. */
@@ -3051,7 +3135,7 @@ const RAW_COLUMNS = ['Ref', 'Received At', 'Source', 'Sub-Source', 'Payload'];
  */
 function storeRaw_(source, subSource, payload) {
   const sheet = getOrCreateSheet_(SHEETS.raw, RAW_COLUMNS);
-  const ref = 'RAW-' + Utilities.formatString('%06d', sheet.getLastRow());
+  const ref = 'RAW-' + Utilities.formatString('%06d', nextRawSequence_(sheet));
   let serialised;
   try {
     serialised = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -3060,6 +3144,34 @@ function storeRaw_(source, subSource, payload) {
   }
   sheet.appendRow([ref, nowStamp_(), source, subSource, serialised.slice(0, 45000)]);
   return ref;
+}
+
+/** Script property holding the number of the last raw payload stored. */
+const RAW_SEQUENCE_KEY = 'RAW_SEQUENCE';
+
+/**
+ * The next raw reference number.
+ *
+ * Counted in a script property rather than from the sheet's length. Retention
+ * trims _Raw from the top, so it settles at exactly the retention figure and
+ * never grows again — and the row count, which used to be the number, stopped
+ * moving with it. Every payload from then on was filed as RAW-002000, and the
+ * Raw Ref on a lead row pointed at nothing in particular.
+ *
+ * The sheet still seeds the counter the first time, so a workbook that has
+ * been running carries on from where its refs had reached instead of going
+ * back to one and reusing numbers already printed on lead rows.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet The _Raw tab.
+ * @return {number}
+ */
+function nextRawSequence_(sheet) {
+  const props = PropertiesService.getScriptProperties();
+  const stored = Number(props.getProperty(RAW_SEQUENCE_KEY));
+  const seeded = isFinite(stored) && stored > 0 ? stored : sheet.getLastRow();
+  const next = seeded + 1;
+  props.setProperty(RAW_SEQUENCE_KEY, String(next));
+  return next;
 }
 
 /**
@@ -4249,13 +4361,13 @@ function buildDashboard_() {
   rows.push(['Leads by salesperson', 'Count', '']);
   loadTeam_().forEach(function (member) {
     rows.push([member.name + (member.active ? '' : ' (inactive)'),
-      '=IFERROR(COUNTA(' + a1SheetRef_(member.tab) + '!A2:A),0)', '']);
+      leadCountFormula_(member.tab), '']);
   });
   rows.push(['', '', '']);
   rows.push(['Totals', 'Count', '']);
-  rows.push(['Total (all leads)', '=IFERROR(COUNTA(' + all + '!A2:A),0)', '']);
+  rows.push(['Total (all leads)', leadCountFormula_(SHEETS.allLeads), '']);
   rows.push(['Duplicates caught',
-    '=IFERROR(COUNTA(' + a1SheetRef_(SHEETS.duplicates) + '!A2:A),0)', '']);
+    leadCountFormula_(SHEETS.duplicates), '']);
   rows.push(['', '', '']);
   // One column per source, and the month names itself from a formula so the
   // block still reads correctly in November without anyone re-running setup.
@@ -4340,6 +4452,33 @@ function buildDashboard_() {
   sheet.setFrozenRows(2);
   getSpreadsheet_().setActiveSheet(sheet);
   getSpreadsheet_().moveActiveSheet(1);
+}
+
+/**
+ * Counts the leads on a tab, by its own Lead ID column.
+ *
+ * Column A is not the answer. On a tab this script laid out, A is Presenter,
+ * which is filled only where the event type has a presenter rule — set one to
+ * "none" and the caller reads as zero. On a tab the team had before the
+ * automation, A is whatever they put there. And a presenter cell left behind
+ * by hand, with no lead beside it, counted as a lead.
+ *
+ * Lead ID is the one column written for every lead and for nothing else, so it
+ * is what gets counted — resolved per tab the way statusCountRefs_ resolves
+ * Status, because a tab that predates the automation keeps its own layout. A
+ * tab with no Lead ID column holds no leads this script wrote, and reads zero
+ * rather than guessing.
+ *
+ * @param {string} tabName
+ * @return {string} A formula for the Dashboard.
+ */
+function leadCountFormula_(tabName) {
+  const sheet = getSpreadsheet_().getSheetByName(tabName);
+  if (!sheet) return '=0';
+  const col = fieldColumns_(sheet).byField['leadId'];
+  if (!col) return '=0';
+  const letter = columnLetterFromIndex_(col);
+  return '=IFERROR(COUNTA(' + a1SheetRef_(tabName) + '!' + letter + '2:' + letter + '),0)';
 }
 
 /**
@@ -4450,7 +4589,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Send lead digest now', 'menuSendDigest')
     .addSeparator()
-    .addItem('Move selected lead to…', 'menuMoveLead')
+    .addItem('Move selected leads to…', 'menuMoveLead')
     .addItem('Rebuild dedupe index', 'menuRebuildIndex')
     .addItem('Run self-test', 'menuRunTests')
     .addToUi();
@@ -4655,49 +4794,153 @@ function menuSendDigest() {
  * the original is not deleted — the same lead counted twice. One menu item is
  * easier to get right than a five-step drill nobody remembers under pressure.
  */
+/**
+ * Every row the user has selected, on the active sheet.
+ *
+ * getActiveRangeList covers a ctrl-clicked selection of separate blocks, which
+ * is how somebody picks eight leads out of a tab of two hundred. It is read
+ * through a guard because a range list is not guaranteed to be there, and
+ * falling back to the single active range is better than throwing at somebody
+ * who is only moving one lead.
+ *
+ * Row 1 is dropped: selecting a whole column, which is the quickest way to take
+ * a tab's leads, includes the header.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @return {!Array<number>} 1-based rows, ascending, no repeats.
+ */
+function selectedRows_(sheet) {
+  const ranges = [];
+  try {
+    const list = sheet.getActiveRangeList();
+    if (list) list.getRanges().forEach(function (range) { ranges.push(range); });
+  } catch (err) {
+    // No range list available; the active range below is enough.
+  }
+  if (!ranges.length && sheet.getActiveRange()) ranges.push(sheet.getActiveRange());
+
+  const seen = {};
+  const rows = [];
+  const lastRow = sheet.getLastRow();
+  ranges.forEach(function (range) {
+    const from = range.getRow();
+    const to = from + range.getNumRows() - 1;
+    for (let row = Math.max(from, 2); row <= Math.min(to, lastRow); row++) {
+      if (seen[row]) continue;
+      seen[row] = true;
+      rows.push(row);
+    }
+  });
+  return rows.sort(function (a, b) { return a - b; });
+}
+
+/**
+ * Moves whatever is selected to another caller — one lead or a hundred.
+ *
+ * What can actually be moved is worked out before anyone is asked where to
+ * send it, so the confirmation says how many leads this really is. A selection
+ * over a caller's tab picks up blank rows and hand-typed rows without a Lead
+ * ID, and "move 40 leads" when it is really 31 is how somebody finds out
+ * afterwards that nine clients stayed put.
+ */
 function menuMoveLead() {
   const ui = SpreadsheetApp.getUi();
   const sheet = getSpreadsheet_().getActiveSheet();
-  const row = sheet.getActiveRange() ? sheet.getActiveRange().getRow() : 0;
+  const rows = selectedRows_(sheet);
 
-  const found = leadAtRow_(sheet.getName(), row);
-  if (!found.ok) {
-    ui.alert('Nothing to move', found.problem, ui.ButtonSet.OK);
+  if (!rows.length) {
+    ui.alert('Nothing to move',
+      'Select the lead rows first — click any cell on a lead\'s row, or drag ' +
+      'down the rows to take several.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const movable = [];
+  const blocked = [];
+  rows.forEach(function (row) {
+    const found = leadAtRow_(sheet.getName(), row);
+    if (found.ok) movable.push({ row: row, lead: found.lead, leadId: found.leadId });
+    else blocked.push({ row: row, problem: found.problem });
+  });
+
+  if (!movable.length) {
+    ui.alert('Nothing to move', blocked[0].problem, ui.ButtonSet.OK);
     return;
   }
 
   const people = loadTeam_().filter(function (m) { return m.active && m.tab; })
     .map(function (m) { return m.name; });
   const shared = teamTabNames_();
-  const who = cleanText_(found.lead.fullName) || cleanText_(found.lead.email) || found.leadId;
+  const nameOf = function (entry) {
+    return cleanText_(entry.lead.fullName) || cleanText_(entry.lead.email) || entry.leadId;
+  };
+
+  // Named individually up to a handful, counted beyond that: a list of forty
+  // names does not fit a prompt and is not what anybody reads at that size.
+  const what = movable.length === 1
+    ? nameOf(movable[0])
+    : movable.length + ' leads' + (movable.length <= 5
+        ? ' (' + movable.map(nameOf).join(', ') + ')'
+        : '');
+
+  const caveat = blocked.length
+    ? '\n\n' + blocked.length + ' selected row' + (blocked.length === 1 ? '' : 's') +
+      ' will be left alone — no Lead ID, so ' +
+      (blocked.length === 1 ? 'it is not a lead' : 'they are not leads') +
+      ' the automation knows about.'
+    : '';
 
   const response = ui.prompt(
-    'Move lead to…',
-    'Moving ' + who + ', currently on ' + sheet.getName() + '.\n\n' +
-    'Type who gets it:\n  ' + (people.join(', ') || '(nobody active on the roster)') + '\n\n' +
+    movable.length === 1 ? 'Move lead to…' : 'Move leads to…',
+    'Moving ' + what + ', currently on ' + sheet.getName() + '.' + caveat + '\n\n' +
+    'Type who gets ' + (movable.length === 1 ? 'it' : 'them') + ':\n  ' +
+    (people.join(', ') || '(nobody active on the roster)') + '\n\n' +
     'Or a shared tab:\n  ' + shared.join(', ') + '\n\n' +
-    'The row moves, duplicate matching follows it, All Leads is corrected and ' +
+    'The rows move, duplicate matching follows them, All Leads is corrected and ' +
     'the rotation tallies are adjusted so nobody is fed twice.',
     ui.ButtonSet.OK_CANCEL
   );
   if (response.getSelectedButton() !== ui.Button.OK) return;
 
-  const result = moveLead(sheet.getName(), row, response.getResponseText());
+  const result = moveLeads(sheet.getName(), movable.map(function (entry) {
+    return entry.row;
+  }), response.getResponseText());
+
   if (!result.ok) {
-    ui.alert('Not moved', result.problem, ui.ButtonSet.OK);
+    const problem = result.problem ||
+      (result.skipped.length ? result.skipped[0].problem : 'Nothing moved.');
+    ui.alert('Not moved', problem, ui.ButtonSet.OK);
     return;
   }
 
   getSpreadsheet_().setActiveSheet(getSpreadsheet_().getSheetByName(result.to));
-  ui.alert(
-    'Moved',
-    result.name + ' is now on ' + result.to + ', row ' + result.row +
-    (result.assignedTo ? ', assigned to ' + result.assignedTo : ', with nobody named') +
-    '.\n\nEvent type: ' + result.eventType +
-    '\n\nDuplicate matching now points here, so the next submission from this ' +
-    'client lands on this row.',
-    ui.ButtonSet.OK
-  );
+
+  const lines = [];
+  if (result.moved.length === 1) {
+    const one = result.moved[0];
+    lines.push(one.name + ' is now on ' + one.to + ', row ' + one.row +
+      (one.assignedTo ? ', assigned to ' + one.assignedTo : ', with nobody named') + '.');
+    lines.push('');
+    lines.push('Event type: ' + one.eventType);
+  } else {
+    lines.push(result.moved.length + ' leads are now on ' + result.to +
+      (result.moved[0].assignedTo ? ', assigned to ' + result.moved[0].assignedTo : '') + '.');
+    lines.push('');
+    lines.push(result.moved.map(function (one) {
+      return '  • ' + one.name;
+    }).join('\n'));
+  }
+  if (result.skipped.length) {
+    lines.push('');
+    lines.push('Left alone: ' + result.skipped.map(function (one) {
+      return 'row ' + one.row;
+    }).join(', ') + '.');
+  }
+  lines.push('');
+  lines.push('Duplicate matching now points here, so the next submission from ' +
+    (result.moved.length === 1 ? 'this client lands on this row.' : 'these clients lands on these rows.'));
+
+  ui.alert('Moved', lines.join('\n'), ui.ButtonSet.OK);
 }
 
 function menuRebuildIndex() {

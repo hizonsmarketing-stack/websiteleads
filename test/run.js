@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, loadTeam_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -231,6 +231,14 @@ function setSetting(key, value) {
     if (String(values[i][0]) === key) { sheet.getRange(i + 2, 2).setValue(value); return; }
   }
   throw new Error('no such setting: ' + key);
+}
+
+/** Every key currently in the dedupe index. */
+function indexKeys() {
+  const sheet = tab('_Index');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues()
+    .map(function (row) { return String(row[0]); });
 }
 
 // Two teams, mirroring a tab-per-salesperson worksheet: five people covering
@@ -1405,6 +1413,212 @@ realLog('\n--- what a move settles, and what it refuses ---');
   check('and so is moving a lead to where it already is',
     api.moveLead('Pia', piaLast, 'Pia').ok, 'false');
   check('a refusal moves nothing', cellOf('Pia', piaLast, 'Full Name'), 'No Type Given');
+}
+
+realLog('\n--- a form that sends first and last name separately ---');
+{
+  silence(quiet);
+  setSetting('Dedupe On', 'email,phone,name');
+  api.resetCaches();
+
+  // Google Ads never sends one combined name box. Reading the raw field here
+  // gave every Ads lead an empty name key, so name matching — the thing that
+  // catches one form asking only for email and another only for phone — was
+  // off on exactly the source that needs it.
+  const ads = function (leadId, columns) {
+    api.resetCaches();
+    return JSON.parse(api.doPost({
+      postData: { contents: JSON.stringify({
+        lead_id: leadId, api_version: '1.0', form_id: 9001, campaign_id: 5,
+        google_key: '', is_test: false, user_column_data: columns }) },
+      parameter: {}
+    }).getContent());
+  };
+
+  const first = ads('split-ads-1', [
+    { column_name: 'First name', string_value: 'Perla' },
+    { column_name: 'Last name', string_value: 'Delgado' },
+    { column_name: 'Email', string_value: 'perla.delgado@example.com' },
+    { column_name: 'What type of event?', string_value: 'Wedding' }
+  ]);
+  check('the first submission is a new lead', first.action, 'created');
+  check('and the index knows her by name',
+    indexKeys().indexOf('name:perladelgado') !== -1, 'true');
+
+  // Same person, a different form that asked only for a phone number. Nothing
+  // but the name is shared, which is the whole point of matching on it.
+  const second = ads('split-ads-2', [
+    { column_name: 'First name', string_value: 'Perla' },
+    { column_name: 'Last name', string_value: 'Delgado' },
+    { column_name: 'Phone number', string_value: '0917 555 2211' },
+    { column_name: 'What type of event?', string_value: 'Wedding' }
+  ]);
+  check('the second lands on the same lead', /^merged/.test(second.action), 'true');
+  check('and with the same caller', second.tab, first.tab);
+
+  // The live path and rebuildIndex have to agree, or the index changes meaning
+  // depending on whether anybody has rebuilt it.
+  api.rebuildIndex();
+  check('a rebuild produces the same name key',
+    indexKeys().indexOf('name:perladelgado') !== -1, 'true');
+  setSetting('Dedupe On', 'email,phone');
+  api.resetCaches();
+}
+
+realLog('\n--- the new-lead notice says what kind of event it is ---');
+{
+  silence(quiet);
+  setSetting('Notify On New Lead', 'yes');
+  setSetting('Notify Every N Leads', 1);
+  api.resetCaches();
+
+  // Pinned to one caller: the mark that decides whether a mail goes out is per
+  // tab, and leads spread across the roster would each be somebody's first.
+  post({ formName: 'Homepage Inquiry', name: 'Notice One',
+    email: 'notice1@example.com', 'Type of Event': 'Wedding',
+    'Assigned To': 'Bea' }, { source: 'website' });
+  global.__mails.length = 0;
+  post({ formName: 'Homepage Inquiry', name: 'Notice Two',
+    email: 'notice2@example.com', 'Type of Event': 'Wedding',
+    'Event Date': '2027-02-14', 'Assigned To': 'Bea' }, { source: 'website' });
+
+  const notice = global.__mails.filter(function (mail) {
+    return /waiting on/.test(mail.subject) && /Notice Two/.test(mail.body);
+  })[0];
+  check('a caller is told about the lead', !!notice, 'true');
+  if (notice) {
+    // Read through the bound field name. The wrong one is not an error — it
+    // reads as blank, so the line just quietly loses half its meaning.
+    check('and the notice names the event type',
+      /Notice Two — Wedding/.test(notice.body), 'true');
+  }
+  setSetting('Notify On New Lead', 'no');
+  api.resetCaches();
+}
+
+realLog('\n--- raw references stay unique once _Raw stops growing ---');
+{
+  silence(quiet);
+  setSetting('Raw Payload Retention (rows)', 5);
+  api.resetCaches();
+
+  // Retention trims from the top, so _Raw settles at the retention figure and
+  // never grows again. Numbering from the row count meant every payload after
+  // that was filed under the same reference.
+  const refs = [];
+  for (let i = 0; i < 9; i++) {
+    refs.push(api.storeRaw_('Website', 'Retention Probe', { n: i }));
+    api.housekeeping_();
+  }
+  const unique = refs.filter(function (ref, i) { return refs.indexOf(ref) === i; });
+  check('every payload gets its own reference', unique.length, refs.length);
+  check('and they keep counting up past the cap',
+    Number(refs[refs.length - 1].slice(4)) > Number(refs[4].slice(4)), 'true');
+
+  setSetting('Raw Payload Retention (rows)', 2000);
+  api.resetCaches();
+}
+
+realLog('\n--- the Dashboard counts leads, not presenter cells ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  const leadIdLetter = function (tabName) {
+    const sheet = tab(tabName);
+    const col = api.fieldColumns_(sheet).byField['leadId'];
+    let n = col, letter = '';
+    while (n > 0) { const m = (n - 1) % 26; letter = String.fromCharCode(65 + m) + letter; n = Math.floor((n - 1) / 26); }
+    return letter;
+  };
+
+  const formula = api.leadCountFormula_('All Leads');
+  check('the count reads the Lead ID column',
+    formula.indexOf("!" + leadIdLetter('All Leads') + '2:' + leadIdLetter('All Leads')) !== -1, 'true');
+  check('and not column A', /!A2:A/.test(formula), 'false');
+
+  // A tab the team had before the automation keeps its own layout, so the
+  // column has to be resolved per tab rather than assumed.
+  const legacy = book.insertSheet('Legacy Counting');
+  legacy.getRange(1, 1, 1, 4).setValues([['PRESENTER', 'Full name', 'Contact number', 'Lead ID']]);
+  legacy.getRange(2, 1, 2, 4).setValues([
+    ['AJ', 'Real Lead', '09170000001', 'LD-legacy-1'],
+    ['Pam', '', '', '']
+  ]);
+  const legacyFormula = api.leadCountFormula_('Legacy Counting');
+  check('a legacy tab is counted on its own Lead ID column',
+    legacyFormula.indexOf('!D2:D') !== -1, 'true');
+  // Row 3 is a presenter name and nothing else — the shape that made a tab of
+  // leftover cells read as a tab full of leads.
+  check('so a stray presenter cell is not a lead', /!A2:A/.test(legacyFormula), 'false');
+
+  check('a tab with no Lead ID column reads zero',
+    api.leadCountFormula_('_Settings'), '=0');
+}
+
+realLog('\n--- moving several leads at once ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  // Five leads onto one tab, plus a row typed in by hand between them. The
+  // hand-typed row is the case that matters: a selection dragged down a tab
+  // catches rows like it, and they have no Lead ID to move.
+  const names = ['Handover One', 'Handover Two', 'Handover Three', 'Handover Four', 'Handover Five'];
+  names.forEach(function (name, i) {
+    post({ formName: 'Homepage Inquiry', name: name,
+      email: 'handover' + i + '@example.com', 'Type of Event': 'Corporate',
+      'Assigned To': 'Pia' }, { source: 'website' });
+  });
+  const lastRow = tab('Pia').getLastRow();
+  const firstRow = lastRow - names.length + 1;
+
+  // Typed in by hand, the way a caller adds a walk-in: a name and nothing else.
+  setCellOf('Pia', lastRow + 1, 'Full Name', 'Typed By Hand');
+  const handRow = lastRow + 1;
+
+  const selection = [];
+  for (let row = firstRow; row <= handRow; row++) selection.push(row);
+
+  const before = rows('Pia');
+  const result = api.moveLeads('Pia', selection, 'Quin');
+
+  check('the batch reports where it went', result.ok + ' ' + result.to, 'true Quin');
+  check('every real lead moved', result.moved.length, names.length);
+  check('the hand-typed row was left alone', result.skipped.length, 1);
+  check('and it is named', result.skipped[0].row, handRow);
+  check('the rows left the old tab', rows('Pia'), before - names.length);
+
+  // The row-shift trap. Each move deletes a row, so a run that worked downwards
+  // would move the wrong leads from the second row on — and silently, because
+  // every row it lands on is still a real lead. Checking the names arrived
+  // intact is what catches it.
+  const arrived = [];
+  const quinLast = tab('Quin').getLastRow();
+  for (let row = quinLast - names.length + 1; row <= quinLast; row++) {
+    arrived.push(cellOf('Quin', row, 'Full Name'));
+  }
+  check('every selected lead arrived, none of its neighbours',
+    arrived.slice().sort().join(','), names.slice().sort().join(','));
+  check('the hand-typed row stayed put',
+    cellOf('Pia', tab('Pia').getLastRow(), 'Full Name'), 'Typed By Hand');
+
+  // Each moved lead has to be findable where it now sits, or the next
+  // submission from that client is dealt out to somebody else.
+  api.resetCaches();
+  post({ formName: 'Homepage Inquiry', name: 'Handover Three',
+    email: 'handover2@example.com', 'Type of Event': 'Corporate',
+    message: 'following up' }, { source: 'website' });
+  const found = [];
+  for (let row = 2; row <= tab('Quin').getLastRow(); row++) {
+    if (cellOf('Quin', row, 'Full Name') === 'Handover Three') found.push(row);
+  }
+  check('a repeat merges onto the moved row, not a new one', found.length, 1);
+  check('and it counts as a second touch', cellOf('Quin', found[0], 'Touches'), 2);
+
+  check('a selection with no lead rows is refused',
+    api.moveLeads('Pia', [1], 'Quin').ok, 'false');
+  check('an empty selection is refused', api.moveLeads('Pia', [], 'Quin').ok, 'false');
 }
 
 realLog('\n--- the deployment can say which build it is ---');
