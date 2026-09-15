@@ -4,7 +4,8 @@
   "private": true,
   "description": "Lead intake, dedupe, source tagging and event-type routing for website, Google Ads and bridal-fair leads.",
   "scripts": {
-    "test": "node test/run.js",
+    "test": "node test/run.js && node tools/bundle.js --check && node test/run.js dist",
+    "test:src": "node test/run.js",
     "bundle": "node tools/bundle.js",
     "login": "clasp login",
     "push": "clasp push",
@@ -12,7 +13,8 @@
     "open": "clasp open",
     "deploy": "clasp deploy --description \"leads webhook\"",
     "deployments": "clasp deployments",
-    "logs": "clasp logs --watch"
+    "logs": "clasp logs --watch",
+    "check": "node tools/bundle.js --check"
   },
   "devDependencies": {
     "@google/clasp": "^2.4.2"

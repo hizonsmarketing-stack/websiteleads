@@ -1630,9 +1630,28 @@ realLog('\n--- the deployment can say which build it is ---');
   check('the health check reports a build', typeof health.build, 'string');
   check('and it is never empty', health.build.length > 0, 'true');
   // The same suite runs against src/ and against the bundle, so the value
-  // differs by design: "dev" from source, the built commit from dist/.
-  check('it is either dev or a built commit',
-    /^(dev|[0-9a-f]{7,40}(\+local-changes)?)$/.test(health.build), 'true');
+  // differs by design: "dev" from source, a source hash from dist/.
+  check('it is either dev or a source hash',
+    /^(dev|[0-9a-f]{12})$/.test(health.build), 'true');
+
+  // Against the bundle, the stamp has to be the hash of the very file it sits
+  // in, or it is decoration. The stamp it replaced could not be: the bundle is
+  // built before the commit that carries it, so the sha it printed was always
+  // the previous commit's and always carried "+local-changes". A deployment
+  // reporting that told you nothing, which was the one thing it existed to do.
+  if (health.build !== 'dev') {
+    const bundle = fs.readFileSync(path.join(dir, 'Code.gs'), 'utf8');
+    // The stamp block is the comment line and the const line, with the newline
+    // that precedes them — removed as one piece, so what is left is exactly
+    // what the bundler hashed.
+    const withoutStamp = bundle
+      .replace(/\n\/\*\* Which build this is[^\n]*\nconst BUILD_ = '[^']*';\n/, '')
+      .replace(/\n$/, '');
+    const recomputed = require('crypto').createHash('sha256')
+      .update(withoutStamp).digest('hex').slice(0, 12);
+    check('the stamp is the hash of the source it was built from',
+      health.build, recomputed);
+  }
   check('it reports the assignment order too',
     typeof health.assignmentOrder, 'string');
   check('and still says what it is', health.status, 'ok');
