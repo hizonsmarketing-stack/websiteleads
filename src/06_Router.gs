@@ -717,6 +717,24 @@ function leadAtRow_(tabName, row) {
  */
 function moveLead(fromTab, row, target) {
   return withLock_(function () {
+    return moveOneLead_(fromTab, row, target);
+  });
+}
+
+/**
+ * Moves one lead, assuming the caller already holds the lock.
+ *
+ * Split out from moveLead so a bulk move can take the lock once for the whole
+ * run. Taking it per row would let a webhook land between two rows and write a
+ * lead at a row number the next delete is about to shift.
+ *
+ * @param {string} fromTab
+ * @param {number} row
+ * @param {string} target
+ * @return {!Object} Same shape as moveLead.
+ */
+function moveOneLead_(fromTab, row, target) {
+  {
     const found = leadAtRow_(fromTab, row);
     if (!found.ok) return found;
     const sheet = found.sheet;
@@ -792,7 +810,64 @@ function moveLead(fromTab, row, target) {
       assignedTo: moved.assignedTo,
       eventType: cleanText_(moved.eventTypeLabel)
     };
-  });
+  }
+}
+
+/**
+ * Hands a batch of leads to somebody else in one run.
+ *
+ * Rows are moved from the bottom up. Each move deletes the row it came from,
+ * so working downwards would shift every row still to come and the run would
+ * move the wrong leads from the second one onwards — the failure is silent,
+ * which is what makes it worth spelling out here.
+ *
+ * The lock is taken once for the whole batch rather than per row. A webhook
+ * landing between two rows would append a lead at a row number the next delete
+ * is about to move, and the index would point one row off from then on.
+ *
+ * A row that cannot be moved does not stop the run. Rows typed in by hand have
+ * no Lead ID, and a selection over a caller's tab will usually catch a few;
+ * they are collected and reported so the rest of the batch still goes through.
+ *
+ * @param {string} fromTab The tab the leads are on now.
+ * @param {!Array<number>} rows 1-based rows on that tab, in any order.
+ * @param {string} target A salesperson's name, or a tab name.
+ * @return {{ok: boolean, problem: (string|undefined), to: (string|undefined),
+ *     moved: !Array<!Object>, skipped: !Array<{row: number, problem: string}>}}
+ */
+function moveLeads(fromTab, rows, target) {
+  return withLock_(function () {
+    const wanted = (rows || [])
+      .map(Number)
+      .filter(function (row) { return row > 1; })
+      .filter(function (row, i, all) { return all.indexOf(row) === i; })
+      .sort(function (a, b) { return b - a; });
+
+    if (!wanted.length) {
+      return { ok: false, problem: 'No lead rows were selected.', moved: [], skipped: [] };
+    }
+
+    const moved = [];
+    const skipped = [];
+    let to = '';
+
+    wanted.forEach(function (row) {
+      const result = moveOneLead_(fromTab, row, target);
+      if (result.ok) {
+        moved.push(result);
+        to = result.to;
+      } else {
+        skipped.push({ row: row, problem: result.problem });
+      }
+    });
+
+    log_('INFO', 'router', 'Moved leads in bulk', {
+      from: fromTab, to: to || target, moved: moved.length, skipped: skipped.length
+    });
+    // Reported oldest row first, which is the order they appear on the tab —
+    // the run itself had to go the other way.
+    return { ok: moved.length > 0, to: to, moved: moved.reverse(), skipped: skipped.reverse() };
+  }, 300000);
 }
 
 /** @return {?Object} The roster entry that owns a tab, or null. */

@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, loadTeam_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, loadTeam_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -1405,6 +1405,71 @@ realLog('\n--- what a move settles, and what it refuses ---');
   check('and so is moving a lead to where it already is',
     api.moveLead('Pia', piaLast, 'Pia').ok, 'false');
   check('a refusal moves nothing', cellOf('Pia', piaLast, 'Full Name'), 'No Type Given');
+}
+
+realLog('\n--- moving several leads at once ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  // Five leads onto one tab, plus a row typed in by hand between them. The
+  // hand-typed row is the case that matters: a selection dragged down a tab
+  // catches rows like it, and they have no Lead ID to move.
+  const names = ['Handover One', 'Handover Two', 'Handover Three', 'Handover Four', 'Handover Five'];
+  names.forEach(function (name, i) {
+    post({ formName: 'Homepage Inquiry', name: name,
+      email: 'handover' + i + '@example.com', 'Type of Event': 'Corporate',
+      'Assigned To': 'Pia' }, { source: 'website' });
+  });
+  const lastRow = tab('Pia').getLastRow();
+  const firstRow = lastRow - names.length + 1;
+
+  // Typed in by hand, the way a caller adds a walk-in: a name and nothing else.
+  setCellOf('Pia', lastRow + 1, 'Full Name', 'Typed By Hand');
+  const handRow = lastRow + 1;
+
+  const selection = [];
+  for (let row = firstRow; row <= handRow; row++) selection.push(row);
+
+  const before = rows('Pia');
+  const result = api.moveLeads('Pia', selection, 'Quin');
+
+  check('the batch reports where it went', result.ok + ' ' + result.to, 'true Quin');
+  check('every real lead moved', result.moved.length, names.length);
+  check('the hand-typed row was left alone', result.skipped.length, 1);
+  check('and it is named', result.skipped[0].row, handRow);
+  check('the rows left the old tab', rows('Pia'), before - names.length);
+
+  // The row-shift trap. Each move deletes a row, so a run that worked downwards
+  // would move the wrong leads from the second row on — and silently, because
+  // every row it lands on is still a real lead. Checking the names arrived
+  // intact is what catches it.
+  const arrived = [];
+  const quinLast = tab('Quin').getLastRow();
+  for (let row = quinLast - names.length + 1; row <= quinLast; row++) {
+    arrived.push(cellOf('Quin', row, 'Full Name'));
+  }
+  check('every selected lead arrived, none of its neighbours',
+    arrived.slice().sort().join(','), names.slice().sort().join(','));
+  check('the hand-typed row stayed put',
+    cellOf('Pia', tab('Pia').getLastRow(), 'Full Name'), 'Typed By Hand');
+
+  // Each moved lead has to be findable where it now sits, or the next
+  // submission from that client is dealt out to somebody else.
+  api.resetCaches();
+  post({ formName: 'Homepage Inquiry', name: 'Handover Three',
+    email: 'handover2@example.com', 'Type of Event': 'Corporate',
+    message: 'following up' }, { source: 'website' });
+  const found = [];
+  for (let row = 2; row <= tab('Quin').getLastRow(); row++) {
+    if (cellOf('Quin', row, 'Full Name') === 'Handover Three') found.push(row);
+  }
+  check('a repeat merges onto the moved row, not a new one', found.length, 1);
+  check('and it counts as a second touch', cellOf('Quin', found[0], 'Touches'), 2);
+
+  check('a selection with no lead rows is refused',
+    api.moveLeads('Pia', [1], 'Quin').ok, 'false');
+  check('an empty selection is refused', api.moveLeads('Pia', [], 'Quin').ok, 'false');
 }
 
 realLog('\n--- the deployment can say which build it is ---');
