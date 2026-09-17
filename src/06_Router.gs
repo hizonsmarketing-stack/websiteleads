@@ -70,6 +70,7 @@ function loadTeam_() {
         active: /^(yes|y|true|1|on)$/i.test(cleanText_(at(row, 'Active'))),
         count: Number(at(row, 'Assigned Count')) || 0,
         lastAt: cleanText_(at(row, 'Last Assigned At')),
+        presenter: cleanText_(at(row, 'Presenter')),
         row: i + 2
       });
     });
@@ -227,16 +228,45 @@ function presenterRule_(eventTypeLabel) {
  * sequence stays intact however many leads arrive, and a row keeps its
  * presenter when the tab is sorted.
  *
+ * A caller can be paired with one presenter instead, by naming them in the
+ * Presenter column of the _Team roster. That pairing wins wherever it is set:
+ * it is the most specific thing anybody has said about this lead, and a fixed
+ * pair is not expressible as a sequence — a list rotates down the tab by row,
+ * which is the opposite of what a standing pair means. Leave the cell empty
+ * and the caller follows the event type's rule as before.
+ *
  * @param {string} eventTypeLabel Which rule applies.
  * @param {number} row 1-based sheet row; row 1 is the header.
- * @param {string=} callerName Used when the caller presents their own.
- * @return {string} A name, or '' when this event type has no presenters.
+ * @param {string=} callerName Whose tab this lands on. Names the presenter
+ *     where the roster pairs them, and is the presenter itself under "caller".
+ * @return {string} A name, or '' when nothing gives this row a presenter.
  */
 function presenterFor_(eventTypeLabel, row, callerName) {
+  if (row < 2) return '';
+
+  const paired = presenterForCaller_(callerName);
+  if (paired) return paired;
+
   const rule = presenterRule_(eventTypeLabel);
-  if (rule.mode === 'none' || row < 2) return '';
+  if (rule.mode === 'none') return '';
   if (rule.mode === 'caller') return cleanText_(callerName);
   return rule.list[(row - 2) % rule.list.length];
+}
+
+/**
+ * The presenter a caller is permanently paired with, or ''.
+ *
+ * Read from the roster rather than _Settings because it is a fact about a
+ * person, and the roster is where the team already keeps those — their tab,
+ * their event types, whether they are active. A settings row per caller would
+ * be the same information in a second place to forget to update.
+ *
+ * @param {string=} callerName
+ * @return {string}
+ */
+function presenterForCaller_(callerName) {
+  const member = namedMember_(callerName);
+  return member ? cleanText_(member.presenter) : '';
 }
 
 /** @return {?Object} The roster entry for a name, or null. */

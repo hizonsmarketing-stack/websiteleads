@@ -21,7 +21,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '223fcda28970';
+const BUILD_ = '797802e62d5f';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -97,7 +97,12 @@ const TEAM_COLUMNS = [
   'Active',
   'Assigned Count',
   'Last Assigned At',
-  'Notes'
+  'Notes',
+  // Last on purpose. ensureHeaders_ appends a new column after the ones a
+  // sheet already has, and seedTeamTab_ then rewrites the header row from this
+  // list — put it anywhere earlier and a live roster would get the labels
+  // shifted along one while the data underneath stayed where it was.
+  'Presenter'
 ];
 
 /** Extra columns only the Duplicates tab carries, appended after LEAD_COLUMNS. */
@@ -2289,6 +2294,7 @@ function loadTeam_() {
         active: /^(yes|y|true|1|on)$/i.test(cleanText_(at(row, 'Active'))),
         count: Number(at(row, 'Assigned Count')) || 0,
         lastAt: cleanText_(at(row, 'Last Assigned At')),
+        presenter: cleanText_(at(row, 'Presenter')),
         row: i + 2
       });
     });
@@ -2446,16 +2452,45 @@ function presenterRule_(eventTypeLabel) {
  * sequence stays intact however many leads arrive, and a row keeps its
  * presenter when the tab is sorted.
  *
+ * A caller can be paired with one presenter instead, by naming them in the
+ * Presenter column of the _Team roster. That pairing wins wherever it is set:
+ * it is the most specific thing anybody has said about this lead, and a fixed
+ * pair is not expressible as a sequence — a list rotates down the tab by row,
+ * which is the opposite of what a standing pair means. Leave the cell empty
+ * and the caller follows the event type's rule as before.
+ *
  * @param {string} eventTypeLabel Which rule applies.
  * @param {number} row 1-based sheet row; row 1 is the header.
- * @param {string=} callerName Used when the caller presents their own.
- * @return {string} A name, or '' when this event type has no presenters.
+ * @param {string=} callerName Whose tab this lands on. Names the presenter
+ *     where the roster pairs them, and is the presenter itself under "caller".
+ * @return {string} A name, or '' when nothing gives this row a presenter.
  */
 function presenterFor_(eventTypeLabel, row, callerName) {
+  if (row < 2) return '';
+
+  const paired = presenterForCaller_(callerName);
+  if (paired) return paired;
+
   const rule = presenterRule_(eventTypeLabel);
-  if (rule.mode === 'none' || row < 2) return '';
+  if (rule.mode === 'none') return '';
   if (rule.mode === 'caller') return cleanText_(callerName);
   return rule.list[(row - 2) % rule.list.length];
+}
+
+/**
+ * The presenter a caller is permanently paired with, or ''.
+ *
+ * Read from the roster rather than _Settings because it is a fact about a
+ * person, and the roster is where the team already keeps those — their tab,
+ * their event types, whether they are active. A settings row per caller would
+ * be the same information in a second place to forget to update.
+ *
+ * @param {string=} callerName
+ * @return {string}
+ */
+function presenterForCaller_(callerName) {
+  const member = namedMember_(callerName);
+  return member ? cleanText_(member.presenter) : '';
 }
 
 /** @return {?Object} The roster entry for a name, or null. */
@@ -4130,7 +4165,10 @@ function seedTeamTab_() {
     const name = candidate.getName();
     const key = squashKey_(name);
     if (owned[key] || listed[key]) return;
-    sheet.appendRow([name, name, '', '', 'no', 0, '', 'Detected during setup — fill in Event Types and set Active to yes.']);
+    sheet.appendRow([name, name, '', '', 'no', 0, '',
+      'Detected during setup — fill in Event Types and set Active to yes. ' +
+      'Name a Presenter to pair this caller with one; leave it blank to follow ' +
+      'the event type\'s rule.', '']);
     added.push(name);
   });
 
@@ -4144,6 +4182,7 @@ function seedTeamTab_() {
   sheet.setColumnWidth(3, 320);
   sheet.setColumnWidth(4, 240);
   sheet.setColumnWidth(8, 380);
+  sheet.setColumnWidth(9, 180);
   const activeRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['yes', 'no'], true).setAllowInvalid(true).build();
   sheet.getRange(2, 5, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(activeRule);
@@ -5569,6 +5608,17 @@ function rosterReport_() {
         : 'presented by ' + rule.list.join(' → ');
       lines.push('OK — ' + type.label + ': called by ' + names.join(', ') + ', ' + presenters);
     });
+
+    // Reported separately, because a roster pairing overrides whatever the
+    // event type above says — reading only those lines would tell somebody the
+    // wrong thing about every caller who has one.
+    const paired = active.filter(function (member) { return member.presenter; });
+    if (paired.length) {
+      lines.push('OK — paired with one presenter each, whatever the event type: ' +
+        paired.map(function (member) {
+          return member.name + ' → ' + member.presenter;
+        }).join(', '));
+    }
   }
   return lines;
 }
