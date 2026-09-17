@@ -68,7 +68,12 @@ const TEAM_COLUMNS = [
   'Active',
   'Assigned Count',
   'Last Assigned At',
-  'Notes'
+  'Notes',
+  // Last on purpose. ensureHeaders_ appends a new column after the ones a
+  // sheet already has, and seedTeamTab_ then rewrites the header row from this
+  // list — put it anywhere earlier and a live roster would get the labels
+  // shifted along one while the data underneath stayed where it was.
+  'Presenter'
 ];
 
 /** Extra columns only the Duplicates tab carries, appended after LEAD_COLUMNS. */

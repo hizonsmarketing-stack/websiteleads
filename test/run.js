@@ -1556,6 +1556,59 @@ realLog('\n--- the Dashboard counts leads, not presenter cells ---');
     api.leadCountFormula_('_Settings'), '=0');
 }
 
+realLog('\n--- a caller paired with one presenter ---');
+{
+  silence(quiet);
+  // Rue and Sol both take Weddings. Rue is paired with one presenter on the
+  // roster; Sol is not, so Sol still follows the event type's rule.
+  tab('_Team').appendRow(['Rue', 'Rue', 'Wedding', '', 'yes', 0, '', '', 'Tess']);
+  tab('_Team').appendRow(['Sol', 'Sol', 'Wedding', '', 'yes', 0, '', '', '']);
+  setSetting('Presenters', 'AJ, Pam, Mhay, Vanessa');
+  api.resetCaches();
+
+  const land = function (who, name, email) {
+    post({ formName: 'Homepage Inquiry', name: name, email: email,
+      'Type of Event': 'Wedding', 'Assigned To': who }, { source: 'website' });
+    return cellOf(who, tab(who).getLastRow(), 'Presenter');
+  };
+
+  // The point of a pairing: it does not move down the tab.
+  check('the paired caller gets their presenter', land('Rue', 'Pair One', 'pair1@example.com'), 'Tess');
+  check('and again on the next row', land('Rue', 'Pair Two', 'pair2@example.com'), 'Tess');
+  check('and the row after that', land('Rue', 'Pair Three', 'pair3@example.com'), 'Tess');
+
+  // Unpaired, so the sequence still runs — the pairing is per caller, not a
+  // switch that turns the rotation off for everybody.
+  const solFirst = land('Sol', 'Seq One', 'seq1@example.com');
+  const solSecond = land('Sol', 'Seq Two', 'seq2@example.com');
+  check('an unpaired caller still follows the sequence',
+    solFirst !== solSecond && solFirst !== '' && solSecond !== '', 'true');
+
+  // A pairing is the most specific thing said about the lead, so it has to
+  // beat the event type's own rule rather than the other way round.
+  setSetting('Presenters', 'none');
+  api.resetCaches();
+  check('a pairing outlives Presenters being off',
+    land('Rue', 'Pair Four', 'pair4@example.com'), 'Tess');
+  check('while an unpaired caller gets none',
+    land('Sol', 'Seq Three', 'seq3@example.com'), '');
+
+  // Moving a lead has to hand it to the receiver's presenter, not keep the
+  // sender's — the presenter is a fact about whose tab it sits on.
+  const rueRow = tab('Rue').getLastRow();
+  const moved = api.moveLead('Rue', rueRow, 'Sol');
+  check('a moved lead takes the receiver’s rule', moved.ok, 'true');
+  check('so the paired presenter does not follow it',
+    cellOf('Sol', tab('Sol').getLastRow(), 'Presenter'), '');
+
+  const back = api.moveLead('Sol', tab('Sol').getLastRow(), 'Rue');
+  check('and moving it back picks the pairing up again',
+    back.ok + ' ' + cellOf('Rue', tab('Rue').getLastRow(), 'Presenter'), 'true Tess');
+
+  setSetting('Presenters', 'AJ, Pam, Mhay, Vanessa');
+  api.resetCaches();
+}
+
 realLog('\n--- moving several leads at once ---');
 {
   silence(quiet);

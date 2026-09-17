@@ -283,7 +283,10 @@ function seedTeamTab_() {
     const name = candidate.getName();
     const key = squashKey_(name);
     if (owned[key] || listed[key]) return;
-    sheet.appendRow([name, name, '', '', 'no', 0, '', 'Detected during setup — fill in Event Types and set Active to yes.']);
+    sheet.appendRow([name, name, '', '', 'no', 0, '',
+      'Detected during setup — fill in Event Types and set Active to yes. ' +
+      'Name a Presenter to pair this caller with one; leave it blank to follow ' +
+      'the event type\'s rule.', '']);
     added.push(name);
   });
 
@@ -297,6 +300,7 @@ function seedTeamTab_() {
   sheet.setColumnWidth(3, 320);
   sheet.setColumnWidth(4, 240);
   sheet.setColumnWidth(8, 380);
+  sheet.setColumnWidth(9, 180);
   const activeRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['yes', 'no'], true).setAllowInvalid(true).build();
   sheet.getRange(2, 5, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(activeRule);

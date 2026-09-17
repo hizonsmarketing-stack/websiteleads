@@ -458,6 +458,17 @@ function rosterReport_() {
         : 'presented by ' + rule.list.join(' → ');
       lines.push('OK — ' + type.label + ': called by ' + names.join(', ') + ', ' + presenters);
     });
+
+    // Reported separately, because a roster pairing overrides whatever the
+    // event type above says — reading only those lines would tell somebody the
+    // wrong thing about every caller who has one.
+    const paired = active.filter(function (member) { return member.presenter; });
+    if (paired.length) {
+      lines.push('OK — paired with one presenter each, whatever the event type: ' +
+        paired.map(function (member) {
+          return member.name + ' → ' + member.presenter;
+        }).join(', '));
+    }
   }
   return lines;
 }
