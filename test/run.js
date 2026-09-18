@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -1554,6 +1554,64 @@ realLog('\n--- the Dashboard counts leads, not presenter cells ---');
 
   check('a tab with no Lead ID column reads zero',
     api.leadCountFormula_('_Settings'), '=0');
+}
+
+realLog('\n--- saying why a row is not taking its colour ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  const sheet = tab('Bea');
+  const statusCol = api.fieldColumns_(sheet).byField['status'];
+  const firstRow = sheet.getLastRow() + 1;
+  // Four rows, mirroring what a live tab collects: two that colour, one typed
+  // with a trailing space, one word that is not a status at all.
+  [['Valid'], ['NR'], ['Valid '], ['LOS1']].forEach(function (value, i) {
+    sheet.getRange(firstRow + i, 2).setValue('LD-colour-' + i);
+    sheet.getRange(firstRow + i, statusCol).setValue(value[0]);
+  });
+
+  const report = api.statusColourReport_(sheet);
+  const text = report.lines.join('\n');
+  check('the report runs', report.ok, 'true');
+  check('a clean value is passed', /OK {2}"Valid" /.test(text), 'true');
+  check('an alias counts as clean', /OK {2}"NR" /.test(text), 'true');
+
+  // The whole point: a trailing space is invisible in the cell, so it is shown.
+  check('a trailing space is flagged', /✗ {2}"Valid·"/.test(text), 'true');
+  check('and named as a spacing problem, not a spelling one',
+    /"Valid·"[^\n]*the text is right, the spacing is not/.test(text), 'true');
+  check('a word outside the list is flagged',
+    /✗ {2}"LOS1"[^\n]*not one of the statuses/.test(text), 'true');
+  check('the rows are named so they can be found',
+    /"LOS1" × 1[^\n]*rows \d+/.test(text), 'true');
+  check('and the total is counted', /2 values above will never colour/.test(text), 'true');
+  check('the list of what does colour is spelled out',
+    /What colours: .*No Response, NR, Lost/.test(text), 'true');
+
+  // A tab with no leads has nothing to report on, and says so rather than
+  // showing an empty list that reads like a clean bill of health.
+  const empty = api.statusColourReport_(tab('_Settings'));
+  check('a tab with no Status column says so', empty.ok, 'false');
+}
+
+realLog('\n--- colouring covers columns added after setup ---');
+{
+  silence(quiet);
+  api.resetCaches();
+  const sheet = tab('Carlo');
+  api.applyStatusColours_(sheet);
+  const rule = sheet.getConditionalFormatRules().filter(function (r) {
+    return String((r.getBooleanCondition().getCriteriaValues() || [])[0]).indexOf('"Valid"') !== -1;
+  })[0];
+  check('a status rule is on the tab', !!rule, 'true');
+  // Taking the last used column froze the colouring at the width the sheet had
+  // when setup ran, so a column added later stayed white on a coloured row.
+  const covered = rule.getRanges()[0].getNumColumns();
+  check('the rule spans the whole grid, not just the columns in use',
+    covered >= sheet.getMaxColumns(), 'true');
+  check('and it is wider than the columns currently used',
+    covered >= sheet.getLastColumn(), 'true');
 }
 
 realLog('\n--- a caller paired with one presenter ---');

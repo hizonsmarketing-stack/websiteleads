@@ -336,7 +336,12 @@ function applyStatusColours_(sheet) {
   if (!col) return;
 
   const letter = columnLetterFromIndex_(col);
-  const width = Math.max(sheet.getLastColumn(), 1);
+  // The whole grid, not the columns in use right now. Taking getLastColumn()
+  // froze the colouring at whatever width the sheet had the last time setup
+  // ran, so every column the team added afterwards — a Reachout column, a
+  // notes column — stayed white on a row that was otherwise coloured, and
+  // stayed white until somebody thought to run setup again.
+  const width = Math.max(sheet.getMaxColumns(), 1);
   const range = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), width);
 
   // Ours come off first, so running setup again replaces the set instead of
@@ -378,6 +383,107 @@ function isStatusColourRule_(rule) {
       return String(value).indexOf('2="' + status + '"') !== -1;
     });
   });
+}
+
+/** Every spelling that colours a row, flattened from the map and its aliases. */
+function statusSpellings_() {
+  const out = [];
+  Object.keys(STATUS_COLOURS).forEach(function (status) {
+    out.push(status);
+    (STATUS_ALIASES[status] || []).forEach(function (alias) { out.push(alias); });
+  });
+  return out;
+}
+
+/**
+ * Says why a row is not taking its colour.
+ *
+ * Conditional formatting has no way of reporting itself: a cell that does not
+ * match simply stays the colour it was, which looks identical to a rule that
+ * was never written. Working out which of the two it is from a screenshot is
+ * guesswork, and the two causes have nothing to do with each other — one is
+ * fixed by running setup, the other by editing the cell.
+ *
+ * So this reads the tab and answers directly: every distinct thing written in
+ * the Status column, whether it colours, and where it does not, why. Spaces
+ * are shown as · because a trailing one is invisible in the cell and is the
+ * single most common cause — it is what you get by typing the status instead
+ * of picking it from the dropdown.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @return {{ok: boolean, problem: (string|undefined), lines: !Array<string>}}
+ */
+function statusColourReport_(sheet) {
+  const col = headerMap_(sheet)[squashKey_('Status')];
+  if (!col) {
+    return { ok: false, problem: 'No Status column on ' + sheet.getName() + '. ' +
+      'Run Setup / repair tabs first.', lines: [] };
+  }
+  if (sheet.getLastRow() < 2) {
+    return { ok: false, problem: sheet.getName() + ' has no leads on it yet.', lines: [] };
+  }
+
+  const known = {};
+  statusSpellings_().forEach(function (word) { known[word.toLowerCase()] = true; });
+
+  const values = sheet.getRange(2, col, sheet.getLastRow() - 1, 1).getValues();
+  const seen = {};
+  const order = [];
+  values.forEach(function (row, i) {
+    const raw = row[0] === null || row[0] === undefined ? '' : String(row[0]);
+    if (!seen[raw]) { seen[raw] = { count: 0, rows: [] }; order.push(raw); }
+    seen[raw].count++;
+    if (seen[raw].rows.length < 5) seen[raw].rows.push(i + 2);
+  });
+
+  const lines = [];
+  let bad = 0;
+  order.forEach(function (raw) {
+    const entry = seen[raw];
+    if (raw === '') {
+      lines.push('·  (blank) × ' + entry.count + ' — no status set, so no colour');
+      return;
+    }
+    // Sheets compares text without regard to case, so only spacing and the
+    // word itself can put a value outside the list.
+    const trimmed = raw.trim();
+    if (known[trimmed.toLowerCase()] && trimmed === raw) {
+      lines.push('OK  "' + raw + '" × ' + entry.count);
+      return;
+    }
+    bad++;
+    const shown = raw.replace(/ /g, '·');
+    const why = known[trimmed.toLowerCase()]
+      ? 'extra spaces — the text is right, the spacing is not'
+      : 'not one of the statuses that colour';
+    lines.push('✗  "' + shown + '" × ' + entry.count + ' — ' + why +
+      '  (rows ' + entry.rows.join(', ') + (entry.count > entry.rows.length ? ', …' : '') + ')');
+  });
+
+  // Ours are written last on purpose, so a rule the team set up for themselves
+  // still wins. That is the right default and also a way for the colouring to
+  // go quiet, so it is worth saying out loud rather than leaving to be found.
+  const rules = sheet.getConditionalFormatRules();
+  const ours = rules.filter(isStatusColourRule_).length;
+  const others = rules.length - ours;
+  lines.push('');
+  lines.push('Rules on this tab: ' + ours + ' from the automation, ' + others + ' from elsewhere.');
+  if (!ours) {
+    lines.push('None of ours are here — run Setup / repair tabs.');
+  } else if (others) {
+    lines.push('A rule set up by hand is checked before ours, so where one ' +
+      'covers these rows it colours them instead. Format > Conditional formatting ' +
+      'lists them in the order they win.');
+  }
+  lines.push('');
+  lines.push(bad
+    ? bad + ' value' + (bad === 1 ? '' : 's') + ' above will never colour. Retype ' +
+      'those cells from the dropdown.'
+    : 'Every value on this tab is one that colours.');
+  lines.push('');
+  lines.push('What colours: ' + statusSpellings_().join(', ') + '.');
+
+  return { ok: true, lines: lines };
 }
 
 /**
