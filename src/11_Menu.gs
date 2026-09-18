@@ -22,6 +22,7 @@ function onOpen() {
     .addItem('Send lead digest now', 'menuSendDigest')
     .addSeparator()
     .addItem('Move selected leads to…', 'menuMoveLead')
+    .addItem('Check status colours', 'menuCheckStatusColours')
     .addItem('Rebuild dedupe index', 'menuRebuildIndex')
     .addItem('Run self-test', 'menuRunTests')
     .addToUi();
@@ -373,6 +374,23 @@ function menuMoveLead() {
     (result.moved.length === 1 ? 'this client lands on this row.' : 'these clients lands on these rows.'));
 
   ui.alert('Moved', lines.join('\n'), ui.ButtonSet.OK);
+}
+
+/**
+ * Reports why the rows on the active tab are or are not taking their colour.
+ *
+ * Run it on the tab that looks wrong, which is why it reads the active sheet
+ * rather than asking: the person running it is already looking at the problem.
+ */
+function menuCheckStatusColours() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getActiveSheet();
+  const report = statusColourReport_(sheet);
+  if (!report.ok) {
+    ui.alert('Status colours', report.problem, ui.ButtonSet.OK);
+    return;
+  }
+  ui.alert('Status colours on ' + sheet.getName(), report.lines.join('\n'), ui.ButtonSet.OK);
 }
 
 function menuRebuildIndex() {
