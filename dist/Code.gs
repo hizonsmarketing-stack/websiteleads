@@ -21,7 +21,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '0fd3b84c4110';
+const BUILD_ = 'fb2d482109e0';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -2468,29 +2468,68 @@ function presenterRule_(eventTypeLabel) {
 function presenterFor_(eventTypeLabel, row, callerName) {
   if (row < 2) return '';
 
-  const paired = presenterForCaller_(callerName);
-  if (paired) return paired;
+  const own = presenterRuleForCaller_(callerName);
+  if (own.mode !== 'unset') return applyPresenterRule_(own, row, callerName);
 
-  const rule = presenterRule_(eventTypeLabel);
-  if (rule.mode === 'none') return '';
+  return applyPresenterRule_(presenterRule_(eventTypeLabel), row, callerName);
+}
+
+/**
+ * Turns a presenter rule into the name for one row.
+ *
+ * Shared by the caller's own rule and the event type's, so a list written in
+ * the roster rotates exactly the way a list written in _Settings does. Two
+ * implementations of "walk the list by row" would be two chances to disagree.
+ *
+ * @param {{mode: string, list: !Array<string>}} rule
+ * @param {number} row 1-based; row 1 is the header.
+ * @param {string=} callerName
+ * @return {string}
+ */
+function applyPresenterRule_(rule, row, callerName) {
+  if (rule.mode === 'none' || !rule.list.length && rule.mode !== 'caller') return '';
   if (rule.mode === 'caller') return cleanText_(callerName);
   return rule.list[(row - 2) % rule.list.length];
 }
 
 /**
- * The presenter a caller is permanently paired with, or ''.
+ * What the roster says about this caller's presenters.
  *
  * Read from the roster rather than _Settings because it is a fact about a
  * person, and the roster is where the team already keeps those — their tab,
  * their event types, whether they are active. A settings row per caller would
  * be the same information in a second place to forget to update.
  *
+ * The cell takes the same three forms the _Settings rows do, so there is one
+ * vocabulary to learn rather than two:
+ *
+ *   Tess                 one presenter, on every lead this caller takes
+ *   Tess, Mika, Joy      those three in turn, down this caller's tab
+ *   none                 this caller's leads get no presenter
+ *
+ * A list matters because a caller does not always work with one person: three
+ * names here rotate for that caller alone, while everybody else carries on
+ * under whatever their event type says.
+ *
+ * Empty is not the same as "none". Empty means the roster is silent and the
+ * event type decides; "none" is the caller saying no presenter, which has to
+ * be sayable or a caller could never be left out of a general list.
+ *
  * @param {string=} callerName
- * @return {string}
+ * @return {{mode: string, list: !Array<string>}} mode is 'list', 'caller',
+ *     'none', or 'unset' when the roster says nothing about this caller.
  */
-function presenterForCaller_(callerName) {
+function presenterRuleForCaller_(callerName) {
   const member = namedMember_(callerName);
-  return member ? cleanText_(member.presenter) : '';
+  const raw = member ? cleanText_(member.presenter) : '';
+  if (!raw) return { mode: 'unset', list: [] };
+
+  const token = squashKey_(raw);
+  if (token === 'none') return { mode: 'none', list: [] };
+  if (token === 'caller' || token === 'self') return { mode: 'caller', list: [] };
+
+  const list = raw.split(',').map(function (name) { return name.trim(); }).filter(String);
+  return list.length ? { mode: 'list', list: list } : { mode: 'unset', list: [] };
 }
 
 /** @return {?Object} The roster entry for a name, or null. */
@@ -5738,9 +5777,13 @@ function rosterReport_() {
     // wrong thing about every caller who has one.
     const paired = active.filter(function (member) { return member.presenter; });
     if (paired.length) {
-      lines.push('OK — paired with one presenter each, whatever the event type: ' +
-        paired.map(function (member) {
-          return member.name + ' → ' + member.presenter;
+      lines.push('OK — presenters set on the roster, which override the event ' +
+        'type: ' + paired.map(function (member) {
+          const rule = presenterRuleForCaller_(member.name);
+          const how = rule.mode === 'none' ? 'no presenter'
+            : rule.mode === 'caller' ? 'presents their own'
+            : rule.list.join(' → ');
+          return member.name + ' → ' + how;
         }).join(', '));
     }
   }

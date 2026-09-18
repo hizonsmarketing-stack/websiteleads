@@ -464,9 +464,13 @@ function rosterReport_() {
     // wrong thing about every caller who has one.
     const paired = active.filter(function (member) { return member.presenter; });
     if (paired.length) {
-      lines.push('OK — paired with one presenter each, whatever the event type: ' +
-        paired.map(function (member) {
-          return member.name + ' → ' + member.presenter;
+      lines.push('OK — presenters set on the roster, which override the event ' +
+        'type: ' + paired.map(function (member) {
+          const rule = presenterRuleForCaller_(member.name);
+          const how = rule.mode === 'none' ? 'no presenter'
+            : rule.mode === 'caller' ? 'presents their own'
+            : rule.list.join(' → ');
+          return member.name + ' → ' + how;
         }).join(', '));
     }
   }

@@ -1614,7 +1614,7 @@ realLog('\n--- colouring covers columns added after setup ---');
     covered >= sheet.getLastColumn(), 'true');
 }
 
-realLog('\n--- a caller paired with one presenter ---');
+realLog('\n--- presenters set per caller on the roster ---');
 {
   silence(quiet);
   // Rue and Sol both take Weddings. Rue is paired with one presenter on the
@@ -1665,6 +1665,34 @@ realLog('\n--- a caller paired with one presenter ---');
 
   setSetting('Presenters', 'AJ, Pam, Mhay, Vanessa');
   api.resetCaches();
+
+  // A caller who works with three people, not one. The list rotates down that
+  // caller's tab alone — written literally it would have put "Tess, Mika, Joy"
+  // into every Presenter cell.
+  tab('_Team').appendRow(['Vic', 'Vic', 'Wedding', '', 'yes', 0, '', '', 'Tess, Mika, Joy']);
+  // And a caller left out of the general rotation entirely.
+  tab('_Team').appendRow(['Wes', 'Wes', 'Wedding', '', 'yes', 0, '', '', 'none']);
+  api.resetCaches();
+
+  const takes = function (who, name, email) {
+    post({ formName: 'Homepage Inquiry', name: name, email: email,
+      'Type of Event': 'Wedding', 'Assigned To': who }, { source: 'website' });
+    return cellOf(who, tab(who).getLastRow(), 'Presenter');
+  };
+
+  const cycle = ['Trio One', 'Trio Two', 'Trio Three', 'Trio Four'].map(function (name, i) {
+    return takes('Vic', name, 'trio' + i + '@example.com');
+  });
+  check('three presenters rotate rather than landing as one string',
+    cycle.slice(0, 3).join(','), 'Tess,Mika,Joy');
+  check('and the list starts over after the third', cycle[3], 'Tess');
+  check('no cell holds the whole list', /,/.test(cycle[0]), 'false');
+
+  // Empty means the event type decides; "none" is the caller saying no.
+  check('a caller can be left out of the general rotation',
+    takes('Wes', 'Opted Out', 'optout@example.com'), '');
+  check('while everybody else carries on under their event type',
+    takes('Sol', 'Still Rotating', 'stillrot@example.com') !== '', 'true');
 }
 
 realLog('\n--- moving several leads at once ---');
