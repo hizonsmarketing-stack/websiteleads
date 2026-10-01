@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, writeDailySummaries, dailySummaryCounts_, pendingNotifyRows_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -1581,6 +1581,91 @@ realLog('\n--- the Dashboard counts leads, not presenter cells ---');
 
   check('a tab with no Lead ID column reads zero',
     api.leadCountFormula_('_Settings'), '=0');
+}
+
+realLog('\n--- the daily summary block ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  const sheet = tab('Carlo');
+  const cols = api.fieldColumns_(sheet).byField;
+  const nameCol = cols.fullName;
+  const put = function (row, leadId, received, status, touches, name) {
+    sheet.getRange(row, cols.leadId).setValue(leadId);
+    sheet.getRange(row, cols.receivedAt).setValue(received);
+    sheet.getRange(row, cols.status).setValue(status);
+    sheet.getRange(row, cols.touches).setValue(touches);
+    sheet.getRange(row, nameCol).setValue(name);
+  };
+
+  // The day from the screenshot: three leads, one valid, one NR, one handed to
+  // the corporate desk under a word that is not on the status list.
+  let at = sheet.getLastRow() + 1;
+  put(at,     'LD-sum-1', '2026-09-29 09:10:00', 'Valid', 1, 'Kym');
+  put(at + 1, 'LD-sum-2', '2026-09-29 11:02:00', 'NR', 1, 'Ayesha');
+  put(at + 2, 'LD-sum-3', '2026-09-29 15:40:00', 'CORPO', 1, 'Antoinette');
+  // A lead from another day, which must not be counted into it.
+  put(at + 3, 'LD-sum-4', '2026-09-30 08:00:00', 'Valid', 2, 'Katrina');
+
+  const counts = api.dailySummaryCounts_(sheet, '2026-09-29');
+  check('the day is counted, not the tab', counts.total, 3);
+  check('and touches are summed', counts.touches, 3);
+  check('a status the script does not know still gets a line',
+    counts.byStatus.map(function (e) { return e.label + '=' + e.count; }).join(' '),
+    'Valid=1 NR=1 CORPO=1');
+
+  const wrote = api.writeDailySummaries('2026-09-29', 'Carlo');
+  check('the block is written', wrote.written.length, 1);
+  check('and says how many it covered', wrote.written[0].total, 3);
+
+  const blockRow = wrote.written[0] && sheet.getLastRow() - 5;
+  const read = function (offset) {
+    return String(sheet.getRange(blockRow + offset, nameCol).getValue()) + '|' +
+      String(sheet.getRange(blockRow + offset, nameCol + 1).getValue());
+  };
+  check('it opens with the date', read(0), 'Date Received : 2026-09-29|');
+  check('then the count', read(1), 'Total Leads Received : |3');
+  check('then each status as written', read(2) + ' ' + read(3) + ' ' + read(4),
+    'Valid : |1 NR : |1 CORPO : |1');
+  check('and closes with the touches', read(5), 'Total Leads Touch : |3');
+
+  // A summary is a statement about a day, and a day has one.
+  const again = api.writeDailySummaries('2026-09-29', 'Carlo');
+  check('running it again updates rather than duplicates', again.written[0].action, 'updated');
+  check('and there is still only one block',
+    api.fieldColumns_(sheet).headers.length > 0 &&
+    sheet.getRange(2, nameCol, sheet.getLastRow() - 1, 1).getValues()
+      .filter(function (r) { return /^Date Received : 2026-09-29$/.test(String(r[0])); }).length, 1);
+
+  // A day with nothing on this tab writes nothing at all.
+  const quietDay = api.writeDailySummaries('2026-08-01', 'Carlo');
+  check('a day with no leads writes no block', quietDay.written.length, 0);
+
+  // The block must not be counted as leads waiting for the caller. Counting
+  // rows instead of Lead IDs told a caller six leads were waiting when the
+  // block was six of them. Asserted on the count itself rather than on a mail,
+  // because whether a mail goes out also depends on the roster carrying an
+  // address — a test that quietly tests nothing is worse than no test.
+  api.resetCaches();
+  // Measured as a difference rather than against zero: this tab already has
+  // leads waiting from earlier in the suite, and pendingNotifyRows_ is a read
+  // that does not consume them.
+  const waitingNow = function () {
+    const pending = api.pendingNotifyRows_('Carlo');
+    return pending ? pending.count : 0;
+  };
+  const beforeBlock = waitingNow();
+  const rowsBefore = tab('Carlo').getLastRow();
+  api.writeDailySummaries('2026-09-30', 'Carlo');
+  check('the block really did add rows', tab('Carlo').getLastRow() > rowsBefore, 'true');
+  check('but none of them count as leads waiting', waitingNow(), beforeBlock);
+
+  post({ formName: 'Homepage Inquiry', name: 'After Summary',
+    email: 'aftersummary@example.com', 'Type of Event': 'Wedding',
+    'Assigned To': 'Carlo' }, { source: 'website' });
+  check('and a lead landing after one counts as exactly one',
+    waitingNow(), beforeBlock + 1);
 }
 
 realLog('\n--- saying why a row is not taking its colour ---');

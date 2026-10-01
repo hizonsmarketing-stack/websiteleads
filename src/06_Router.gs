@@ -479,7 +479,24 @@ function pendingNotifyRows_(tabName) {
   }
   if (lastRow <= mark) return null;
 
-  return { from: mark + 1, to: lastRow, count: lastRow - mark };
+  // Counted by Lead ID rather than by row. A tab carries rows that are not
+  // leads — a daily summary block typed or written between one day's leads and
+  // the next — and counting rows told a caller seven leads were waiting when
+  // the block was six of them.
+  const columns = fieldColumns_(sheet).byField;
+  let count = lastRow - mark;
+  if (columns.leadId) {
+    const ids = sheet.getRange(mark + 1, columns.leadId, lastRow - mark, 1).getValues();
+    count = ids.filter(function (row) { return cleanText_(row[0]) !== ''; }).length;
+  }
+  // The mark still moves to the last row, so the rows that were not leads are
+  // not offered again next time.
+  if (!count) {
+    props.setProperty(key, String(lastRow));
+    return null;
+  }
+
+  return { from: mark + 1, to: lastRow, count: count };
 }
 
 /**
@@ -505,6 +522,8 @@ function sendTabNotice_(tabName, pending) {
 
   const leads = [];
   for (let row = pending.from; row <= pending.to; row++) {
+    // Same reason the count skips them: a summary block is not somebody's lead.
+    if (columns.leadId && !cleanText_(sheet.getRange(row, columns.leadId).getValue())) continue;
     leads.push({
       name: read(row, 'fullName') || read(row, 'email') || read(row, 'phone') || '(no name given)',
       eventType: read(row, 'eventTypeLabel'),
