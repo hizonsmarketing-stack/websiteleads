@@ -20,7 +20,6 @@ function onOpen() {
     .addItem('Set Google Ads key…', 'menuSetGoogleAdsKey')
     .addSeparator()
     .addItem('Send lead digest now', 'menuSendDigest')
-    .addItem('Write today\'s summary blocks', 'menuWriteDailySummary')
     .addSeparator()
     .addItem('Move selected leads to…', 'menuMoveLead')
     .addItem('Check status colours', 'menuCheckStatusColours')
@@ -277,50 +276,6 @@ function selectedRows_(sheet) {
  * ID, and "move 40 leads" when it is really 31 is how somebody finds out
  * afterwards that nine clients stayed put.
  */
-/**
- * Writes the day's summary block under each tab's leads.
- *
- * Offers yesterday as well as today, because the block is usually written at
- * the end of a day and sometimes remembered the next morning.
- */
-function menuWriteDailySummary() {
-  const ui = SpreadsheetApp.getUi();
-  const today = nowStamp_().slice(0, 10);
-  const response = ui.prompt(
-    'Write summary blocks',
-    'Which day? Leave it as it is for today.\n\n' +
-    'A block goes under the leads on every caller tab that took one that day: ' +
-    'the date, the count, a line per status as written, and the touches.\n\n' +
-    'Run it again for the same day and the block is brought up to date rather ' +
-    'than written twice.',
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (response.getSelectedButton() !== ui.Button.OK) return;
-
-  const day = cleanText_(response.getResponseText()) || today;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-    ui.alert('Not a date', 'Write the day as ' + today + '.', ui.ButtonSet.OK);
-    return;
-  }
-
-  const result = writeDailySummaries(day);
-  if (!result.written.length && !result.skipped.length) {
-    ui.alert('Nothing to summarise', 'No leads landed on ' + day + '.', ui.ButtonSet.OK);
-    return;
-  }
-
-  const lines = result.written.map(function (one) {
-    return '  • ' + one.tab + ': ' + one.total + ' lead' + (one.total === 1 ? '' : 's') +
-      ' (' + one.action + ')';
-  });
-  if (result.skipped.length) {
-    lines.push('');
-    lines.push('Left alone:');
-    result.skipped.forEach(function (one) { lines.push('  • ' + one.problem); });
-  }
-  ui.alert('Summary blocks for ' + day, lines.join('\n'), ui.ButtonSet.OK);
-}
-
 function menuMoveLead() {
   const ui = SpreadsheetApp.getUi();
   const sheet = getSpreadsheet_().getActiveSheet();
