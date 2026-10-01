@@ -298,8 +298,23 @@ function runSelfTest() {
   check('presenter: third row', presenterFor_('Debut', 4, 'Bea'), 'Mhay');
   check('presenter: fourth row', presenterFor_("Kid's Party", 5, 'Bea'), 'Vanessa');
   check('presenter: sequence repeats', presenterFor_('Private Event', 6, 'Bea'), 'AJ');
-  check('presenter: still repeating far down', presenterFor_('Wedding', 42, 'Bea'), 'AJ');
-  check('presenter: and off the cycle boundary', presenterFor_('Wedding', 45, 'Bea'), 'Vanessa');
+  // The row number is no longer part of the answer, which is the whole point:
+  // a tab with a summary block typed between one day's leads and the next, or
+  // rows deleted from under them, used to hand whole presenters their turn and
+  // step straight past. Jumping forty rows now takes the next name, not the one
+  // that row would have given.
+  // Asked twice for the same row. Under the old rule that was the same answer
+  // both times; a rotation that counts leads has to move on.
+  const wedList = presenterRule_('Wedding').list;
+  const once = presenterFor_('Wedding', 42, 'Bea');
+  const twice = presenterFor_('Wedding', 42, 'Bea');
+  check('presenter: the row number no longer decides who is next',
+    wedList[(wedList.indexOf(once) + 1) % wedList.length], twice);
+  // The reported case: seven rows of daily summary between two leads.
+  const beforeBlock = presenterFor_('Wedding', 56, 'Bea');
+  const afterBlock = presenterFor_('Wedding', 64, 'Bea');
+  check('presenter: a block of non-lead rows skips nobody',
+    wedList[(wedList.indexOf(beforeBlock) + 1) % wedList.length], afterBlock);
   check('presenter: header row has none', presenterFor_('Wedding', 1, 'Bea'), '');
 
   const twoPhones = mapRecord_({

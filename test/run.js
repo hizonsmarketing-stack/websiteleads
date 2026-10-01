@@ -318,13 +318,40 @@ check('the tab is named in the subject', /waiting on /.test(notices[0].subject),
 setSetting('Notify On New Lead', 'no');
 api.resetCaches();
 // Everything that is not corporate runs the AJ / Pam / Mhay / Vanessa sequence.
-check('a non-corporate lead starts the sequence', cellOf(s1.tab, 2, 'Presenter'), 'AJ');
-check('and so does the first lead in another tab', cellOf(s2.tab, 2, 'Presenter'), 'AJ');
-const s5 = inquiry('Soc Five', 's5@example.com', '0917 111 0005', 'Wedding');
-check('the second lead in a tab moves down the sequence',
-  cellOf(s5.tab, 3, 'Presenter'), 'Pam');
+const presenterCycle = ['AJ', 'Pam', 'Mhay', 'Vanessa'];
+check('a non-corporate lead takes a name from the sequence',
+  presenterCycle.indexOf(String(cellOf(s1.tab, 2, 'Presenter'))) !== -1, 'true');
+check('and so does one on another tab',
+  presenterCycle.indexOf(String(cellOf(s2.tab, 2, 'Presenter'))) !== -1, 'true');
+
+// Two leads pinned to one caller take consecutive names. Asserted as a step
+// rather than a fixed name: the rotation counts that caller's leads now, so
+// what any given row holds depends on how many they have had, not on the row.
+// Pinned because an unpinned pair can land on two different callers, and each
+// caller's rotation runs on its own.
+const pinned = function (name, email) {
+  api.resetCaches();
+  return post({ formName: 'Homepage Inquiry', name: name, email: email,
+    'Type of Event': 'Wedding', 'Assigned To': 'Bea' }, { source: 'website' });
+};
+pinned('Step One', 'step1@example.com');
+const stepA = String(cellOf('Bea', tab('Bea').getLastRow(), 'Presenter'));
+pinned('Step Two', 'step2@example.com');
+const stepB = String(cellOf('Bea', tab('Bea').getLastRow(), 'Presenter'));
+check('consecutive leads on a tab move down the sequence',
+  presenterCycle[(presenterCycle.indexOf(stepA) + 1) % presenterCycle.length], stepB);
+
+// A gap in the rows is what broke the old rule: a summary block typed between
+// one day's leads and the next handed whole presenters their turn in rows that
+// were never leads, and the sequence stepped straight past them.
+tab('Bea').getRange(tab('Bea').getLastRow() + 3, 3).setValue('Total Leads Recieved : 2');
+pinned('After The Block', 'afterblock@example.com');
+const stepC = String(cellOf('Bea', tab('Bea').getLastRow(), 'Presenter'));
+check('and rows that are not leads skip nobody',
+  presenterCycle[(presenterCycle.indexOf(stepB) + 1) % presenterCycle.length], stepC);
+
 check('the presenter sequence never touches corporate',
-  ['AJ', 'Pam', 'Mhay', 'Vanessa'].indexOf(String(cellOf('Gina', 2, 'Presenter'))), -1);
+  presenterCycle.indexOf(String(cellOf('Gina', 2, 'Presenter'))), -1);
 
 api.resetCaches();
 const rosterOk = api.runSelfTest().roster;

@@ -205,38 +205,60 @@ function nextInRosterOrder_(candidates, eventTypeLabel) {
  * @return {{mode: string, list: !Array<string>}} mode is 'list', 'caller' or 'none'.
  */
 function presenterRule_(eventTypeLabel) {
-  let raw = cleanText_(setting_('Presenters - ' + eventTypeLabel, ''));
-  if (!raw) raw = cleanText_(setting_('Presenters', ''));
+  // Which row supplied the list is carried out with it. The rotation is kept
+  // per source, so two event types both falling back to the general Presenters
+  // row share one sequence — they are the same list — while an event type with
+  // a list of its own runs separately. Keying on the event type instead would
+  // make the shared case restart on every type; keying on the list contents
+  // would restart it every time somebody edited the names.
+  let source = 'Presenters - ' + eventTypeLabel;
+  let raw = cleanText_(setting_(source, ''));
+  if (!raw) {
+    source = 'Presenters';
+    raw = cleanText_(setting_(source, ''));
+  }
 
   const token = squashKey_(raw);
-  if (!raw || token === 'none') return { mode: 'none', list: [] };
-  if (token === 'caller' || token === 'self') return { mode: 'caller', list: [] };
+  if (!raw || token === 'none') return { mode: 'none', list: [], source: source };
+  if (token === 'caller' || token === 'self') return { mode: 'caller', list: [], source: source };
 
   const list = raw.split(',').map(function (name) { return name.trim(); }).filter(String);
-  return list.length ? { mode: 'list', list: list } : { mode: 'none', list: [] };
+  return list.length
+    ? { mode: 'list', list: list, source: source }
+    : { mode: 'none', list: [], source: source };
 }
 
 /**
- * The presenter a row belongs to.
+ * The presenter a lead goes to.
  *
- * Where a sequence applies, it runs down each caller's tab by row — row 2 to
- * the first presenter, row 3 to the second, back to the top after the last.
- * The caller works the lead and hands it to whoever their row names, so the
- * split is decided by the sheet rather than negotiated each time.
+ * Where a sequence applies it is walked one lead at a time, and where it
+ * stopped is remembered rather than worked out from the row.
  *
- * Because it is derived from the row number and written into the cell, the
- * sequence stays intact however many leads arrive, and a row keeps its
- * presenter when the tab is sorted.
+ * It used to be derived: row 2 to the first presenter, row 3 to the second,
+ * and so on. That holds only while row numbers and leads are the same thing,
+ * and on a working tab they are not. Deleting a row shifts every row under it.
+ * Moving a lead to another caller deletes it here. A lead promoted out of
+ * Unassigned is deleted there. And a team that types a daily summary into the
+ * middle of its own tab — seven rows of counts between one day's leads and the
+ * next — hands the rotation seven rows that are not leads. One tab ran
+ * AJ, PAM, REINA and then PAM, because the block between them was worth two
+ * full cycles. Every value was correct when it was written, which is what made
+ * it so hard to see.
+ *
+ * Counting leads instead of rows makes all of that irrelevant. The cost is
+ * that the sequence can no longer be read back off the sheet: the position
+ * lives in a script property, and clearing it restarts the list. That is the
+ * better trade here, because the position that could be read off the sheet was
+ * the wrong one.
  *
  * A caller can be paired with one presenter instead, by naming them in the
  * Presenter column of the _Team roster. That pairing wins wherever it is set:
- * it is the most specific thing anybody has said about this lead, and a fixed
- * pair is not expressible as a sequence — a list rotates down the tab by row,
- * which is the opposite of what a standing pair means. Leave the cell empty
- * and the caller follows the event type's rule as before.
+ * it is the most specific thing anybody has said about this lead. Leave the
+ * cell empty and the caller follows the event type's rule as before.
  *
  * @param {string} eventTypeLabel Which rule applies.
- * @param {number} row 1-based sheet row; row 1 is the header.
+ * @param {number} row 1-based sheet row. Only used to tell a lead from the
+ *     header — the rotation no longer counts rows.
  * @param {string=} callerName Whose tab this lands on. Names the presenter
  *     where the roster pairs them, and is the presenter itself under "caller".
  * @return {string} A name, or '' when nothing gives this row a presenter.
@@ -244,28 +266,71 @@ function presenterRule_(eventTypeLabel) {
 function presenterFor_(eventTypeLabel, row, callerName) {
   if (row < 2) return '';
 
+  // Which rotation this lead belongs to. A caller's own list is one sequence
+  // across everything they take, because it was written about them rather than
+  // about an event type.
   const own = presenterRuleForCaller_(callerName);
-  if (own.mode !== 'unset') return applyPresenterRule_(own, row, callerName);
+  const rule = own.mode !== 'unset' ? own : presenterRule_(eventTypeLabel);
+  return applyPresenterRule_(rule, callerName,
+    squashKey_(callerName) + '-' + squashKey_(rule.source));
+}
 
-  return applyPresenterRule_(presenterRule_(eventTypeLabel), row, callerName);
+/** Prefix for who each presenter rotation last handed a lead to. */
+const PRESENTER_KEY = 'PRESENTER_AT_';
+
+/**
+ * Turns a presenter rule into the name for the next lead.
+ *
+ * Shared by the caller's own rule and the event type's, so a list written in
+ * the roster advances exactly the way a list written in _Settings does. Two
+ * implementations of "take the next one" would be two chances to disagree.
+ *
+ * A one-name list needs no pointer and takes none: there is nothing to
+ * advance, and writing one per lead would be a wasted round trip on what is
+ * the common case now that callers can be paired.
+ *
+ * @param {{mode: string, list: !Array<string>, source: string}} rule
+ * @param {string=} callerName The presenter itself under "caller".
+ * @param {string} scope Which rotation to advance.
+ * @return {string}
+ */
+function applyPresenterRule_(rule, callerName, scope) {
+  if (rule.mode === 'caller') return cleanText_(callerName);
+  if (rule.mode === 'none' || !rule.list.length) return '';
+  if (rule.list.length === 1) return rule.list[0];
+  return nextPresenter_(rule.list, scope);
 }
 
 /**
- * Turns a presenter rule into the name for one row.
+ * The next name in a presenter list, and moves the rotation along it.
  *
- * Shared by the caller's own rule and the event type's, so a list written in
- * the roster rotates exactly the way a list written in _Settings does. Two
- * implementations of "walk the list by row" would be two chances to disagree.
+ * Where it stopped is kept as a name rather than a position, so adding a
+ * presenter or reordering the list carries the rotation with the names instead
+ * of jumping to whoever now happens to sit at that index. This is the lesson
+ * nextInRosterOrder_ already learned: a position is only meaningful against
+ * the list it was recorded for, and these lists get edited.
  *
- * @param {{mode: string, list: !Array<string>}} rule
- * @param {number} row 1-based; row 1 is the header.
- * @param {string=} callerName
+ * A name that has since left the list starts again at the top, which is what
+ * an unset pointer does too.
+ *
+ * @param {!Array<string>} list At least two names.
+ * @param {string} scope Which rotation this is. Rotations are kept apart so
+ *     one caller's lead cannot move another caller's turn.
  * @return {string}
  */
-function applyPresenterRule_(rule, row, callerName) {
-  if (rule.mode === 'none' || !rule.list.length && rule.mode !== 'caller') return '';
-  if (rule.mode === 'caller') return cleanText_(callerName);
-  return rule.list[(row - 2) % rule.list.length];
+function nextPresenter_(list, scope) {
+  const props = PropertiesService.getScriptProperties();
+  const key = PRESENTER_KEY + scope;
+  const last = props.getProperty(key) || '';
+
+  let at = -1;
+  list.forEach(function (name, i) {
+    if (squashKey_(name) === last) at = i;
+  });
+
+  const next = list[(at + 1) % list.length];
+  props.setProperty(key, squashKey_(next));
+  return next;
 }
 
 /**
@@ -298,14 +363,16 @@ function applyPresenterRule_(rule, row, callerName) {
 function presenterRuleForCaller_(callerName) {
   const member = namedMember_(callerName);
   const raw = member ? cleanText_(member.presenter) : '';
-  if (!raw) return { mode: 'unset', list: [] };
+  if (!raw) return { mode: 'unset', list: [], source: 'roster' };
 
   const token = squashKey_(raw);
-  if (token === 'none') return { mode: 'none', list: [] };
-  if (token === 'caller' || token === 'self') return { mode: 'caller', list: [] };
+  if (token === 'none') return { mode: 'none', list: [], source: 'roster' };
+  if (token === 'caller' || token === 'self') return { mode: 'caller', list: [], source: 'roster' };
 
   const list = raw.split(',').map(function (name) { return name.trim(); }).filter(String);
-  return list.length ? { mode: 'list', list: list } : { mode: 'unset', list: [] };
+  return list.length
+    ? { mode: 'list', list: list, source: 'roster' }
+    : { mode: 'unset', list: [], source: 'roster' };
 }
 
 /** @return {?Object} The roster entry for a name, or null. */
