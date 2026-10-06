@@ -21,7 +21,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '98afa923f6ba';
+const BUILD_ = '45f75ab37215';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -317,6 +317,14 @@ const FIELD_ALIASES = {
     'received at', 'timestamp', 'date submitted', 'submitted at', 'submission date',
     'submission time', 'submitted on',
     'date received', 'created at', 'date and time'
+  ],
+  // The day a lead was consolidated into the sheet, which is the day it
+  // arrived. A column of its own because the tabs that carry it also carry a
+  // Timestamp, and binding this to receivedAt would take the value off the
+  // Timestamp column rather than fill both — the leftmost match wins.
+  consoDate: [
+    'conso date', 'conso', 'consolidated date', 'consolidation date',
+    'date consolidated'
   ],
   assignedTo: ['assigned to', 'owner', 'sales rep', 'account executive', 'ae', 'handler'],
   status: ['status', 'lead status', 'stage']
@@ -690,6 +698,7 @@ const COLUMN_TO_FIELD = {
   'Presenter': 'presenter',
   'Lead ID': 'leadId',
   'Received At': 'receivedAt',
+  'Conso Date': 'consoDate',
   'Source': 'source',
   'Sub-Source': 'subSource',
   'Event Type': 'eventTypeLabel',
@@ -728,6 +737,7 @@ const COLUMN_TO_FIELD = {
  */
 const ALIAS_BINDABLE_FIELDS = {
   fullName: true, firstName: true, lastName: true, email: true, phone: true,
+  consoDate: true,
   company: true, eventType: true, eventDate: true, guestCount: true,
   venue: true, budget: true, campaign: true, presenter: true,
   assignedTo: true, status: true, receivedAt: true, source: true, subSource: true
@@ -1726,6 +1736,10 @@ function buildLead_(input) {
     presenter: cleanText_(fields.presenter),
     leadId: makeLeadId_(),
     receivedAt: receivedAt,
+    // The day part of the same moment. Written separately rather than left to
+    // a formula so it survives being sorted, copied or exported, and so the
+    // tabs that group a day's leads under a block have something to group on.
+    consoDate: cleanText_(receivedAt).slice(0, 10),
     source: subSourceInfo.source,
     subSource: subSourceInfo.label,
     eventTypeKey: eventType.key,
@@ -6228,6 +6242,7 @@ function applyMigratedRow_(values, bound, lead, dateInfo) {
   fill('presenter', lead.presenter);
   fill('leadId', lead.leadId);
   fill('receivedAt', lead.receivedAt);
+  fill('consoDate', lead.consoDate);
   fill('source', lead.source);
   fill('subSource', lead.subSource);
   fill('eventTypeLabel', lead.eventTypeLabel);

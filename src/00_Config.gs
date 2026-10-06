@@ -289,6 +289,14 @@ const FIELD_ALIASES = {
     'submission time', 'submitted on',
     'date received', 'created at', 'date and time'
   ],
+  // The day a lead was consolidated into the sheet, which is the day it
+  // arrived. A column of its own because the tabs that carry it also carry a
+  // Timestamp, and binding this to receivedAt would take the value off the
+  // Timestamp column rather than fill both — the leftmost match wins.
+  consoDate: [
+    'conso date', 'conso', 'consolidated date', 'consolidation date',
+    'date consolidated'
+  ],
   assignedTo: ['assigned to', 'owner', 'sales rep', 'account executive', 'ae', 'handler'],
   status: ['status', 'lead status', 'stage']
 };

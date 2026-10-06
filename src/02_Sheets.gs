@@ -9,6 +9,7 @@ const COLUMN_TO_FIELD = {
   'Presenter': 'presenter',
   'Lead ID': 'leadId',
   'Received At': 'receivedAt',
+  'Conso Date': 'consoDate',
   'Source': 'source',
   'Sub-Source': 'subSource',
   'Event Type': 'eventTypeLabel',
@@ -47,6 +48,7 @@ const COLUMN_TO_FIELD = {
  */
 const ALIAS_BINDABLE_FIELDS = {
   fullName: true, firstName: true, lastName: true, email: true, phone: true,
+  consoDate: true,
   company: true, eventType: true, eventDate: true, guestCount: true,
   venue: true, budget: true, campaign: true, presenter: true,
   assignedTo: true, status: true, receivedAt: true, source: true, subSource: true

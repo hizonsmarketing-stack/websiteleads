@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, pendingNotifyRows_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, pendingNotifyRows_, forgetFieldColumns_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -1581,6 +1581,47 @@ realLog('\n--- the Dashboard counts leads, not presenter cells ---');
 
   check('a tab with no Lead ID column reads zero',
     api.leadCountFormula_('_Settings'), '=0');
+}
+
+realLog('\n--- Conso Date on a tab that carries one ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  // The real header row from a caller tab: a CONSO DATE of the team's own,
+  // and a TIMESTAMP further along that already serves Received At.
+  const legacy = book.insertSheet('Conso Tab');
+  legacy.getRange(1, 1, 1, 8).setValues([[
+    'PRESENTER', 'CONSO DATE', 'SOURCE', 'SUB-SOURCE', 'TIMESTAMP',
+    'Full name', 'Contact number', 'Email'
+  ]]);
+  api.forgetFieldColumns_('Conso Tab');
+  const bound = api.fieldColumns_(legacy).byField;
+
+  check('CONSO DATE binds to its own field', bound.consoDate, 2);
+  // The one that matters: binding it to receivedAt would have taken the value
+  // off TIMESTAMP instead of filling both, because the leftmost match wins.
+  check('and TIMESTAMP still serves Received At', bound.receivedAt, 5);
+
+  tab('_Team').appendRow(['Conso', 'Conso Tab', 'Wedding', '', 'yes', 0, '', '', '']);
+  api.resetCaches();
+  post({ formName: 'Homepage Inquiry', name: 'Conso Client',
+    email: 'conso@example.com', 'Type of Event': 'Wedding',
+    'Assigned To': 'Conso' }, { source: 'website' });
+
+  const row = legacy.getLastRow();
+  const consoDate = String(legacy.getRange(row, bound.consoDate).getValue());
+  const received = String(legacy.getRange(row, bound.receivedAt).getValue());
+  check('the lead landed on the tab',
+    String(legacy.getRange(row, bound.fullName).getValue()), 'Conso Client');
+  check('Received At is still written', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(received), 'true');
+  check('Conso Date is the day of it', consoDate, received.slice(0, 10));
+  check('and carries no time', /:/.test(consoDate), 'false');
+
+  // A tab without the column is untouched — nothing is appended for it.
+  const plain = tab('Bea');
+  check('a tab with no Conso Date column does not grow one',
+    api.fieldColumns_(plain).headers.indexOf('Conso Date'), -1);
 }
 
 realLog('\n--- a hand-written summary block is not a lead ---');

@@ -305,6 +305,10 @@ function buildLead_(input) {
     presenter: cleanText_(fields.presenter),
     leadId: makeLeadId_(),
     receivedAt: receivedAt,
+    // The day part of the same moment. Written separately rather than left to
+    // a formula so it survives being sorted, copied or exported, and so the
+    // tabs that group a day's leads under a block have something to group on.
+    consoDate: cleanText_(receivedAt).slice(0, 10),
     source: subSourceInfo.source,
     subSource: subSourceInfo.label,
     eventTypeKey: eventType.key,
