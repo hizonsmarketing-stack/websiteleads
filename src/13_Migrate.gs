@@ -331,7 +331,6 @@ function applyMigratedRow_(values, bound, lead, dateInfo) {
   fill('presenter', lead.presenter);
   fill('leadId', lead.leadId);
   fill('receivedAt', lead.receivedAt);
-  fill('consoDate', lead.consoDate);
   fill('source', lead.source);
   fill('subSource', lead.subSource);
   fill('eventTypeLabel', lead.eventTypeLabel);
