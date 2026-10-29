@@ -205,6 +205,41 @@ function moveIndexEntries_(leadId, tab, row) {
 }
 
 /**
+ * Points every index entry at a tab's new name.
+ *
+ * The index records where a lead lives by tab name, so a renamed tab leaves
+ * every entry naming something that no longer exists. A returning client then
+ * looks new, or is refiled onto whatever tab has taken the old name — which is
+ * how one client ends up on two tabs under one lead id.
+ *
+ * @param {string} from The name the tab had.
+ * @param {string} to The name it has now.
+ * @return {number} How many entries were moved.
+ */
+function retargetIndexTab_(from, to) {
+  if (!from || !to || from === to) return 0;
+  const index = loadIndex_();
+  // Addressed by their row in _Index, so anything still buffered has to reach
+  // the sheet before it can be updated.
+  flushIndex_();
+
+  let moved = 0;
+  Object.keys(index.byKey).forEach(function (key) {
+    const entry = index.byKey[key];
+    if (entry.tab !== from || !entry.indexRow) return;
+    entry.tab = to;
+    index.sheet.getRange(entry.indexRow, 3).setValue(to);
+    moved++;
+  });
+  if (moved) {
+    log_('INFO', 'dedupe', 'Followed a renamed tab in the index', {
+      from: from, to: to, entries: moved
+    });
+  }
+  return moved;
+}
+
+/**
  * Adds the incoming lead's contact keys to an existing lead's index entries.
  * A repeat inquiry often carries a phone number the first submission lacked;
  * capturing it means the next arrival from either channel is caught.

@@ -1583,6 +1583,68 @@ realLog('\n--- the Dashboard counts leads, not presenter cells ---');
     api.leadCountFormula_('_Settings'), '=0');
 }
 
+realLog('\n--- a caller tab that somebody renames ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  tab('_Team').appendRow(['Nerissa', 'Nerissa', 'Wedding', '', 'yes', 0, '', '', '']);
+  api.resetCaches();
+  api.setupWorkbook();
+
+  const pin = function (name, email) {
+    api.resetCaches();
+    return post({ formName: 'Homepage Inquiry', name: name, email: email,
+      'Type of Event': 'Wedding', 'Assigned To': 'Nerissa' }, { source: 'website' });
+  };
+  pin('Renamed One', 'renamed1@example.com');
+  pin('Renamed Two', 'renamed2@example.com');
+
+  const sheet = tab('Nerissa');
+  const sheetId = sheet.getSheetId();
+  check('the tab was created and took its leads', rows('Nerissa'), 2);
+
+  // Taking a caller off the rotation by renaming their tab is a thing people
+  // do, and it used to cost them every lead on it.
+  sheet.setName('Nerissa (off)');
+  api.resetCaches();
+  const landed = pin('Renamed Three', 'renamed3@example.com');
+
+  check('no second tab appears under the old name', !!tab('Nerissa'), 'false');
+  check('and the lead lands on the renamed one', landed.tab, 'Nerissa (off)');
+  check('with the leads it already had', rows('Nerissa (off)'), 3);
+  check('the tab keeps its id through the rename', tab('Nerissa (off)').getSheetId(), sheetId);
+
+  // The roster is a label for people, brought back into line so nobody reading
+  // it is told the tab is still called something it is not.
+  api.resetCaches();
+  const entry = api.loadTeam_().filter(function (m) { return m.name === 'Nerissa'; })[0];
+  check('the roster follows the new name', entry.tab, 'Nerissa (off)');
+  check('and records the id it is bound to', entry.sheetId, sheetId);
+
+  // The one that cost real money: a returning client used to be refiled onto
+  // whatever tab had taken the old name, so one client sat on two tabs under
+  // one lead id.
+  api.resetCaches();
+  const again = pin('Renamed One', 'renamed1@example.com');
+  check('a returning client merges rather than being refiled',
+    /^merged/.test(again.action), 'true');
+  check('onto the tab they were already on', again.tab, 'Nerissa (off)');
+  check('and no row was added for them', rows('Nerissa (off)'), 3);
+
+  const ix = tab('_Index');
+  const named = ix.getRange(2, 3, ix.getLastRow() - 1, 1).getValues()
+    .map(function (r) { return String(r[0]); });
+  check('the index names the tab as it is now', named.indexOf('Nerissa (off)') !== -1, 'true');
+  check('and no longer under the name it had', named.indexOf('Nerissa'), -1);
+
+  // Setup must not undo any of it by making the old tab again.
+  api.resetCaches();
+  api.setupWorkbook();
+  check('setup does not resurrect the old tab', !!tab('Nerissa'), 'false');
+  check('and leaves the leads where they are', rows('Nerissa (off)'), 3);
+}
+
 realLog('\n--- Conso Date on a tab that carries one ---');
 {
   silence(quiet);
