@@ -251,7 +251,15 @@ function createRosterTabs_() {
   loadTeam_().forEach(function (member) {
     if (!member.active || !member.tab) return;
     if (getSpreadsheet_().getSheetByName(member.tab)) return;
-    styleLeadSheet_(getOrCreateSheet_(member.tab, LEAD_COLUMNS));
+    const sheet = getOrCreateSheet_(member.tab, LEAD_COLUMNS);
+    styleLeadSheet_(sheet);
+    // Bound to the tab straight away, so renaming it tomorrow is followed
+    // rather than answered with a second tab.
+    const roster = getSpreadsheet_().getSheetByName(SHEETS.team);
+    if (roster && member.row) {
+      member.sheetId = sheet.getSheetId();
+      updateRowCells_(roster, member.row, { 'Sheet ID': member.sheetId });
+    }
     created.push(member.tab);
   });
   if (created.length) log_('INFO', 'setup', 'Created roster tabs', { tabs: created });
@@ -301,6 +309,7 @@ function seedTeamTab_() {
   sheet.setColumnWidth(4, 240);
   sheet.setColumnWidth(8, 380);
   sheet.setColumnWidth(9, 180);
+  sheet.setColumnWidth(10, 110);
   const activeRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['yes', 'no'], true).setAllowInvalid(true).build();
   sheet.getRange(2, 5, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(activeRule);

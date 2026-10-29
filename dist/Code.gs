@@ -21,7 +21,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '98afa923f6ba';
+const BUILD_ = 'd0c1d7a523ea';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -102,7 +102,11 @@ const TEAM_COLUMNS = [
   // sheet already has, and seedTeamTab_ then rewrites the header row from this
   // list — put it anywhere earlier and a live roster would get the labels
   // shifted along one while the data underneath stayed where it was.
-  'Presenter'
+  'Presenter',
+  // Written by the script, not by hand. Sheets keeps a tab's id across a
+  // rename, so this is what lets a tab renamed to "MIKA (off)" still be
+  // recognised as MIKA's instead of being replaced by a new empty one.
+  'Sheet ID'
 ];
 
 /** Extra columns only the Duplicates tab carries, appended after LEAD_COLUMNS. */
@@ -2138,6 +2142,41 @@ function moveIndexEntries_(leadId, tab, row) {
 }
 
 /**
+ * Points every index entry at a tab's new name.
+ *
+ * The index records where a lead lives by tab name, so a renamed tab leaves
+ * every entry naming something that no longer exists. A returning client then
+ * looks new, or is refiled onto whatever tab has taken the old name — which is
+ * how one client ends up on two tabs under one lead id.
+ *
+ * @param {string} from The name the tab had.
+ * @param {string} to The name it has now.
+ * @return {number} How many entries were moved.
+ */
+function retargetIndexTab_(from, to) {
+  if (!from || !to || from === to) return 0;
+  const index = loadIndex_();
+  // Addressed by their row in _Index, so anything still buffered has to reach
+  // the sheet before it can be updated.
+  flushIndex_();
+
+  let moved = 0;
+  Object.keys(index.byKey).forEach(function (key) {
+    const entry = index.byKey[key];
+    if (entry.tab !== from || !entry.indexRow) return;
+    entry.tab = to;
+    index.sheet.getRange(entry.indexRow, 3).setValue(to);
+    moved++;
+  });
+  if (moved) {
+    log_('INFO', 'dedupe', 'Followed a renamed tab in the index', {
+      from: from, to: to, entries: moved
+    });
+  }
+  return moved;
+}
+
+/**
  * Adds the incoming lead's contact keys to an existing lead's index entries.
  * A repeat inquiry often carries a phone number the first submission lacked;
  * capturing it means the next arrival from either channel is caught.
@@ -2295,12 +2334,72 @@ function loadTeam_() {
         count: Number(at(row, 'Assigned Count')) || 0,
         lastAt: cleanText_(at(row, 'Last Assigned At')),
         presenter: cleanText_(at(row, 'Presenter')),
+        sheetId: Number(at(row, 'Sheet ID')) || 0,
         row: i + 2
       });
     });
   }
+  // Set before reconciling, so anything the reconcile reaches cannot come back
+  // round into loadTeam_ and start again.
   TEAM_CACHE_ = members;
+  reconcileRosterTabs_(members);
   return members;
+}
+
+/**
+ * Follows a caller's tab when somebody renames it.
+ *
+ * Renaming a tab used to cost a caller their leads. The roster still named the
+ * old tab, nothing on the sheet answered to that name any more, so setup made a
+ * second tab under it and every new lead went there — while the leads already
+ * worked sat on the renamed one. Worse, a client who enquired again was refiled
+ * onto the new tab under the same lead id, so one client ended up on both: the
+ * exact thing the index exists to prevent.
+ *
+ * Sheets keeps a tab's id across a rename, so the id is what the roster is
+ * really bound to. The name in Tab Name is a label for people, brought back
+ * into line whenever it has drifted, and the index entries are carried over
+ * with it so a returning client still lands on the row they already have.
+ *
+ * An id is recorded the first time a member's tab is seen, so a roster written
+ * before any of this still gets bound on its next run.
+ *
+ * @param {!Array<!Object>} members Mutated in place.
+ */
+function reconcileRosterTabs_(members) {
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.team);
+  if (!sheet) return;
+
+  const byId = {};
+  getSpreadsheet_().getSheets().forEach(function (tab) {
+    byId[tab.getSheetId()] = tab.getName();
+  });
+
+  members.forEach(function (member) {
+    if (!member.tab || !member.row) return;
+
+    const current = member.sheetId ? byId[member.sheetId] : undefined;
+
+    if (current === undefined) {
+      // No id yet, or the tab it named is gone. Bind to the tab that answers to
+      // the name now, if one does; a missing tab is left for setup to create.
+      const named = getSpreadsheet_().getSheetByName(member.tab);
+      if (!named) return;
+      member.sheetId = named.getSheetId();
+      updateRowCells_(sheet, member.row, { 'Sheet ID': member.sheetId });
+      return;
+    }
+
+    if (current === member.tab) return;
+
+    const was = member.tab;
+    member.tab = current;
+    updateRowCells_(sheet, member.row, { 'Tab Name': current });
+    retargetIndexTab_(was, current);
+    log_('INFO', 'roster', 'A caller tab was renamed; following it', {
+      salesperson: member.name, from: was, to: current, sheetId: member.sheetId
+    });
+  });
 }
 
 /** @return {!Array<!Object>} Active roster members who cover an event type. */
@@ -4258,7 +4357,15 @@ function createRosterTabs_() {
   loadTeam_().forEach(function (member) {
     if (!member.active || !member.tab) return;
     if (getSpreadsheet_().getSheetByName(member.tab)) return;
-    styleLeadSheet_(getOrCreateSheet_(member.tab, LEAD_COLUMNS));
+    const sheet = getOrCreateSheet_(member.tab, LEAD_COLUMNS);
+    styleLeadSheet_(sheet);
+    // Bound to the tab straight away, so renaming it tomorrow is followed
+    // rather than answered with a second tab.
+    const roster = getSpreadsheet_().getSheetByName(SHEETS.team);
+    if (roster && member.row) {
+      member.sheetId = sheet.getSheetId();
+      updateRowCells_(roster, member.row, { 'Sheet ID': member.sheetId });
+    }
     created.push(member.tab);
   });
   if (created.length) log_('INFO', 'setup', 'Created roster tabs', { tabs: created });
@@ -4308,6 +4415,7 @@ function seedTeamTab_() {
   sheet.setColumnWidth(4, 240);
   sheet.setColumnWidth(8, 380);
   sheet.setColumnWidth(9, 180);
+  sheet.setColumnWidth(10, 110);
   const activeRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['yes', 'no'], true).setAllowInvalid(true).build();
   sheet.getRange(2, 5, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(activeRule);

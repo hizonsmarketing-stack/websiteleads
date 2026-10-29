@@ -52,9 +52,14 @@ class FakeRange {
   applyRowBanding() { this.sheet._bandings.push({}); return {}; }
 }
 
+let nextSheetId = 1;
+
 class FakeSheet {
   constructor(name) {
     this.name = name;
+    // Sheets gives every tab an id that survives a rename, which is the whole
+    // point of binding the roster to it.
+    this.sheetId = nextSheetId++;
     this.grid = [];
     this.maxRows = 1000;
     this.maxCols = 30;
@@ -62,6 +67,8 @@ class FakeSheet {
     this._bandings = [];
   }
   getName() { return this.name; }
+  getSheetId() { return this.sheetId; }
+  setName(name) { this.name = name; return this; }
   cell(row, col) {
     const line = this.grid[row - 1];
     const v = line ? line[col - 1] : undefined;

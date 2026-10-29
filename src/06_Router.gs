@@ -71,12 +71,72 @@ function loadTeam_() {
         count: Number(at(row, 'Assigned Count')) || 0,
         lastAt: cleanText_(at(row, 'Last Assigned At')),
         presenter: cleanText_(at(row, 'Presenter')),
+        sheetId: Number(at(row, 'Sheet ID')) || 0,
         row: i + 2
       });
     });
   }
+  // Set before reconciling, so anything the reconcile reaches cannot come back
+  // round into loadTeam_ and start again.
   TEAM_CACHE_ = members;
+  reconcileRosterTabs_(members);
   return members;
+}
+
+/**
+ * Follows a caller's tab when somebody renames it.
+ *
+ * Renaming a tab used to cost a caller their leads. The roster still named the
+ * old tab, nothing on the sheet answered to that name any more, so setup made a
+ * second tab under it and every new lead went there — while the leads already
+ * worked sat on the renamed one. Worse, a client who enquired again was refiled
+ * onto the new tab under the same lead id, so one client ended up on both: the
+ * exact thing the index exists to prevent.
+ *
+ * Sheets keeps a tab's id across a rename, so the id is what the roster is
+ * really bound to. The name in Tab Name is a label for people, brought back
+ * into line whenever it has drifted, and the index entries are carried over
+ * with it so a returning client still lands on the row they already have.
+ *
+ * An id is recorded the first time a member's tab is seen, so a roster written
+ * before any of this still gets bound on its next run.
+ *
+ * @param {!Array<!Object>} members Mutated in place.
+ */
+function reconcileRosterTabs_(members) {
+  const sheet = getSpreadsheet_().getSheetByName(SHEETS.team);
+  if (!sheet) return;
+
+  const byId = {};
+  getSpreadsheet_().getSheets().forEach(function (tab) {
+    byId[tab.getSheetId()] = tab.getName();
+  });
+
+  members.forEach(function (member) {
+    if (!member.tab || !member.row) return;
+
+    const current = member.sheetId ? byId[member.sheetId] : undefined;
+
+    if (current === undefined) {
+      // No id yet, or the tab it named is gone. Bind to the tab that answers to
+      // the name now, if one does; a missing tab is left for setup to create.
+      const named = getSpreadsheet_().getSheetByName(member.tab);
+      if (!named) return;
+      member.sheetId = named.getSheetId();
+      updateRowCells_(sheet, member.row, { 'Sheet ID': member.sheetId });
+      return;
+    }
+
+    if (current === member.tab) return;
+
+    const was = member.tab;
+    member.tab = current;
+    updateRowCells_(sheet, member.row, { 'Tab Name': current });
+    retargetIndexTab_(was, current);
+    log_('INFO', 'roster', 'A caller tab was renamed; following it', {
+      salesperson: member.name, from: was, to: current, sheetId: member.sheetId
+    });
+  });
 }
 
 /** @return {!Array<!Object>} Active roster members who cover an event type. */

@@ -73,7 +73,11 @@ const TEAM_COLUMNS = [
   // sheet already has, and seedTeamTab_ then rewrites the header row from this
   // list — put it anywhere earlier and a live roster would get the labels
   // shifted along one while the data underneath stayed where it was.
-  'Presenter'
+  'Presenter',
+  // Written by the script, not by hand. Sheets keeps a tab's id across a
+  // rename, so this is what lets a tab renamed to "MIKA (off)" still be
+  // recognised as MIKA's instead of being replaced by a new empty one.
+  'Sheet ID'
 ];
 
 /** Extra columns only the Duplicates tab carries, appended after LEAD_COLUMNS. */
