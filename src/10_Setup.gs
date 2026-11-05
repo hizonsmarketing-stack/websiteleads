@@ -65,8 +65,16 @@ const STATUS_COLOURS = {
   'No Response': '#CFE2F3',
   'Lost': '#F4CCCC',
   'Transferred': '#D9D2E9',
-  // Only ever written onto rows in the Duplicates tab.
-  'Duplicate': '#FCE5CD'
+  // A lead handed to the corporate desk. Not one of the dropdown's five: it is
+  // a word the team writes for itself, and it is coloured because they write
+  // it often enough that a row carrying it should be recognisable without
+  // reading the cell.
+  'Corporate': '#FFF2CC',
+  // Only ever written onto rows in the Duplicates tab. A full orange rather
+  // than the pale tint it used to be: that sat a shade away from the yellow a
+  // corporate lead takes, and two statuses that have nothing to do with each
+  // other should not need a second look to tell apart.
+  'Duplicate': '#F9CB9C'
 };
 
 /**
@@ -101,7 +109,9 @@ const WEEK_BUCKETS = [
  * there, so nobody has to choose between two ways of saying the same thing.
  */
 const STATUS_ALIASES = {
-  'No Response': ['NR']
+  'No Response': ['NR'],
+  // What actually gets typed, most of the time.
+  'Corporate': ['CORPO']
 };
 
 /**
