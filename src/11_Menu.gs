@@ -423,19 +423,48 @@ function menuRepairColumns() {
     return;
   }
 
-  const go = ui.alert(
-    'Repair ' + preview.tab + '?',
-    'Taking the header row from ' + preview.model + '.\n\n' +
+  // The header row is shown in full. Where the model is not the same width,
+  // whether the names still line up is a judgement only somebody who knows the
+  // tab can make, and they can only make it by reading them.
+  const lines = [
+    'Taking the header row from ' + preview.model + '.',
+    '',
     (preview.headerRowAdded
-      ? '  • a header row goes in above row 1, which holds a lead\n'
-      : '  • row 1 is rewritten as the header row\n') +
+      ? '  • a header row goes in above row 1, which holds a lead'
+      : '  • row 1 is rewritten as the header row'),
     '  • ' + preview.moved + ' lead' + (preview.moved === 1 ? '' : 's') +
-    ' move back into the columns they belong in\n' +
-    '  • the ' + preview.columnsRemoved + ' appended columns are then removed\n\n' +
+      ' move back into the columns they belong in',
+    '  • the ' + preview.columnsRemoved + ' appended columns are then removed',
+    '',
     'In that order: removing the columns first would throw away every lead ' +
     'that arrived since the paste.',
-    ui.ButtonSet.OK_CANCEL
-  );
+    ''
+  ];
+
+  if (preview.modelWidth !== preview.free) {
+    lines.push(preview.model + ' has ' + preview.modelWidth + ' columns and ' +
+      preview.tab + ' has room for ' + preview.free + '.');
+    if (preview.dropped.length) {
+      lines.push('These are past the end and will not be used: ' +
+        preview.dropped.filter(String).join(', ') + '.');
+    }
+    if (preview.unnamed) {
+      lines.push('The last ' + preview.unnamed + ' column' +
+        (preview.unnamed === 1 ? '' : 's') + ' will be left without a name.');
+    }
+    lines.push('That is right only if the extra columns are at the end of ' +
+      preview.model + '. If any sit in the middle, every name after it is one ' +
+      'column out — check the row below before saying yes.');
+    lines.push('');
+  }
+
+  lines.push('The header row it will write:');
+  lines.push(preview.headers.map(function (header, i) {
+    return (i + 1) + '. ' + (header || '(blank)');
+  }).join('   '));
+
+  const go = ui.alert('Repair ' + preview.tab + '?', lines.join('\n'),
+    ui.ButtonSet.OK_CANCEL);
   if (go !== ui.Button.OK) return;
 
   const done = repairTabColumns(sheet.getName(), model, false);
