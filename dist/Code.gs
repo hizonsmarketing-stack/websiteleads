@@ -22,7 +22,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '12e0c7684003';
+const BUILD_ = 'db5fff5d8629';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -4130,6 +4130,12 @@ function describeMapping_(headers) {
  *                form in by mistake — or the venue is too far to serve.
  *   Transferred  Moved to another team: socials to corporate or back, or
  *                handed to the food order team.
+ *   Duplicate    The same client already reached us another way, and this row
+ *                is the second copy. Offered because the automation only
+ *                catches what it can match: a client who filled a form in
+ *                under one email and walked up to the booth under another is
+ *                two records it has no way of joining, and the caller is the
+ *                one who finds out.
  *
  * The distinction worth keeping straight is Lost against No Response: Lost is
  * for a decision, whether the client's or ours. Not reaching someone is not a
@@ -4140,7 +4146,7 @@ function describeMapping_(headers) {
  * old word keep it — the dropdown allows values outside the list on purpose —
  * so they need a find-and-replace, or they are counted under nothing.
  */
-const STATUS_OPTIONS = ['New', 'Valid', 'No Response', 'Lost', 'Transferred'];
+const STATUS_OPTIONS = ['New', 'Valid', 'No Response', 'Lost', 'Transferred', 'Duplicate'];
 
 /**
  * Statuses the automation sets, which nobody picks from a dropdown.
@@ -4177,10 +4183,11 @@ const STATUS_COLOURS = {
   // it often enough that a row carrying it should be recognisable without
   // reading the cell.
   'Corporate': '#FFF2CC',
-  // Only ever written onto rows in the Duplicates tab. A full orange rather
-  // than the pale tint it used to be: that sat a shade away from the yellow a
-  // corporate lead takes, and two statuses that have nothing to do with each
-  // other should not need a second look to tell apart.
+  // Written by the automation onto rows in the Duplicates tab, and picked by a
+  // caller on their own tab for the ones it could not match. A full orange
+  // rather than the pale tint it used to be: that sat a shade away from the
+  // yellow a corporate lead takes, and two statuses that have nothing to do
+  // with each other should not need a second look to tell apart.
   'Duplicate': '#F9CB9C'
 };
 
@@ -4264,7 +4271,9 @@ function setupWorkbook() {
     // would dress a stale value up as a current one.
     leadTabNames_().concat([SHEETS.duplicates]).forEach(function (name) {
       const sheet = getSpreadsheet_().getSheetByName(name);
-      if (sheet) applyStatusColours_(sheet);
+      if (!sheet) return;
+      applyStatusColours_(sheet);
+      applyStatusDropdown_(sheet);
     });
     buildDashboard_();
     hideInternalTabs_();
@@ -4487,6 +4496,34 @@ function applyStatusColours_(sheet) {
 
   // Ours go last, so a rule somebody set up for themselves still wins.
   sheet.setConditionalFormatRules(kept.concat(added));
+}
+
+/**
+ * Puts the Status dropdown on a tab, or brings it up to date.
+ *
+ * styleLeadSheet_ sets it when it lays a tab out, which is once: a tab that
+ * already existed is deliberately left alone, so it never got one, and a tab
+ * that did get one kept whatever the list said that day. Adding a status to
+ * the list therefore reached new tabs and nothing else — which is no use,
+ * since the tabs that matter are the ones already being worked.
+ *
+ * Applied beside the colours, for the same reason and on the same tabs: both
+ * describe what the Status column may say, and both should say it everywhere
+ * on every run.
+ *
+ * Values outside the list are still allowed. The dropdown is there to save
+ * typing and typos, not to refuse a word somebody needs.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ */
+function applyStatusDropdown_(sheet) {
+  const col = headerMap_(sheet)[squashKey_('Status')];
+  if (!col) return;
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(STATUS_OPTIONS, true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, col, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
 }
 
 /**
