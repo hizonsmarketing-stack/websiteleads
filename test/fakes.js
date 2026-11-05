@@ -117,6 +117,12 @@ class FakeSheet {
   }
   deleteRow(row) { this.grid.splice(row - 1, 1); }
   deleteRows(row, count) { this.grid.splice(row - 1, count); }
+  insertRowBefore(row) { this.grid.splice(row - 1, 0, []); this.maxRows++; return this; }
+  deleteColumns(col, count) {
+    this.grid.forEach(line => line.splice(col - 1, count));
+    this.maxCols = Math.max(this.maxCols - count, 1);
+    return this;
+  }
   insertColumnsAfter() { return this; }
   setFrozenRows() { return this; }
   setRowHeight() { return this; }
