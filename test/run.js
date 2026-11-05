@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, pendingNotifyRows_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; FIELD_COLUMNS_CACHE_ = {}; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, repairTabColumns, pendingNotifyRows_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -1581,6 +1581,83 @@ realLog('\n--- the Dashboard counts leads, not presenter cells ---');
 
   check('a tab with no Lead ID column reads zero',
     api.leadCountFormula_('_Settings'), '=0');
+}
+
+realLog('\n--- a tab whose header row was pasted over ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  tab('_Team').appendRow(['Mhay', 'Mhay', 'Wedding', '', 'yes', 0, '', '', '']);
+  api.resetCaches();
+  api.setupWorkbook();
+
+  const pin = function (who, name, email) {
+    api.resetCaches();
+    return post({ formName: 'Homepage Inquiry', name: name, email: email,
+      'Type of Event': 'Wedding', 'Assigned To': who }, { source: 'website' });
+  };
+  pin('Mhay', 'Before Paste', 'beforepaste@example.com');
+
+  const mhay = tab('Mhay');
+  const goodWidth = mhay.getLastColumn();
+  const goodHeaders = mhay.getRange(1, 1, 1, goodWidth).getValues()[0].join('|');
+
+  // What actually happened: a block of leads pasted from another caller's tab,
+  // landing on row 1 and taking the header row with it.
+  pin('Bea', 'Transferred One', 'transferred1@example.com');
+  const source = tab('Bea');
+  const pasted = source.getRange(source.getLastRow(), 1, 1, goodWidth).getValues();
+  mhay.getRange(1, 1, 1, goodWidth).setValues(pasted);
+  api.resetCaches();
+
+  // From here the script cannot read the tab, so it appends a set of its own
+  // and writes every lead into it.
+  pin('Mhay', 'After Paste One', 'after1@example.com');
+  pin('Mhay', 'After Paste Two', 'after2@example.com');
+  api.resetCaches();
+
+  check('the tab grew a second set of columns', mhay.getLastColumn() > goodWidth, 'true');
+  const strandedCol = api.fieldColumns_(mhay).byField.fullName;
+  check('and the leads went into it', strandedCol > goodWidth, 'true');
+
+  // The repair, previewed first.
+  const preview = api.repairTabColumns('Mhay', 'Bea', true);
+  check('the preview reads the tab', preview.ok, 'true');
+  check('it counts the stranded leads', preview.moved, 2);
+  check('it knows row 1 holds a lead, not headers', preview.headerRowAdded, 'true');
+  check('and nothing moved yet', mhay.getLastColumn() > goodWidth, 'true');
+
+  const done = api.repairTabColumns('Mhay', 'Bea', false);
+  check('the repair runs', done.ok, 'true');
+  check('the appended columns are gone', mhay.getLastColumn(), goodWidth);
+  check('the header row is back',
+    mhay.getRange(1, 1, 1, goodWidth).getValues()[0].join('|'), goodHeaders);
+
+  // The whole point: every lead readable in the columns the team looks at.
+  api.resetCaches();
+  const names = [];
+  for (let r = 2; r <= mhay.getLastRow(); r++) {
+    const v = cellOf('Mhay', r, 'Full Name');
+    if (v) names.push(String(v));
+  }
+  check('the leads stranded off to the right are back in view',
+    names.indexOf('After Paste One') !== -1 && names.indexOf('After Paste Two') !== -1, 'true');
+  check('the pasted lead that landed on row 1 was not lost',
+    names.indexOf('Transferred One') !== -1, 'true');
+  check('and the lead from before the paste is still there',
+    names.indexOf('Before Paste') !== -1, 'true');
+
+  // And new leads land where people can see them again.
+  api.resetCaches();
+  pin('Mhay', 'After Repair', 'afterrepair@example.com');
+  check('a new lead lands in the visible columns',
+    String(cellOf('Mhay', tab('Mhay').getLastRow(), 'Full Name')), 'After Repair');
+
+  check('a tab that is not damaged is refused',
+    api.repairTabColumns('Bea', 'Carlo', true).ok, 'false');
+  check('and a tab cannot be its own model',
+    api.repairTabColumns('Mhay', 'Mhay', true).ok, 'false');
 }
 
 realLog('\n--- a caller tab that somebody renames ---');

@@ -23,6 +23,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Move selected leads to…', 'menuMoveLead')
     .addItem('Check status colours', 'menuCheckStatusColours')
+    .addItem('Repair a tab\'s columns…', 'menuRepairColumns')
     .addItem('Rebuild dedupe index', 'menuRebuildIndex')
     .addItem('Run self-test', 'menuRunTests')
     .addToUi();
@@ -391,6 +392,63 @@ function menuCheckStatusColours() {
     return;
   }
   ui.alert('Status colours on ' + sheet.getName(), report.lines.join('\n'), ui.ButtonSet.OK);
+}
+
+/**
+ * Puts back a tab whose header row was pasted over.
+ *
+ * Runs on the tab somebody is looking at, and always previews first: this moves
+ * data and removes columns, and a person should see the shape of it before it
+ * happens rather than after.
+ */
+function menuRepairColumns() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getActiveSheet();
+
+  const ask = ui.prompt(
+    'Repair ' + sheet.getName(),
+    'This is for a tab whose header row was pasted over, so the leads have ' +
+    'been landing in a second set of columns off to the right.\n\n' +
+    'The header names cannot be recovered from this tab — they were ' +
+    'overwritten. Type the name of another caller tab laid out the same way ' +
+    'and they will be copied from it:\n  ' + leadTabNames_().join(', '),
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (ask.getSelectedButton() !== ui.Button.OK) return;
+
+  const model = cleanText_(ask.getResponseText());
+  const preview = repairTabColumns(sheet.getName(), model, true);
+  if (!preview.ok) {
+    ui.alert('Cannot repair this tab', preview.problem, ui.ButtonSet.OK);
+    return;
+  }
+
+  const go = ui.alert(
+    'Repair ' + preview.tab + '?',
+    'Taking the header row from ' + preview.model + '.\n\n' +
+    (preview.headerRowAdded
+      ? '  • a header row goes in above row 1, which holds a lead\n'
+      : '  • row 1 is rewritten as the header row\n') +
+    '  • ' + preview.moved + ' lead' + (preview.moved === 1 ? '' : 's') +
+    ' move back into the columns they belong in\n' +
+    '  • the ' + preview.columnsRemoved + ' appended columns are then removed\n\n' +
+    'In that order: removing the columns first would throw away every lead ' +
+    'that arrived since the paste.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (go !== ui.Button.OK) return;
+
+  const done = repairTabColumns(sheet.getName(), model, false);
+  if (!done.ok) {
+    ui.alert('Not repaired', done.problem, ui.ButtonSet.OK);
+    return;
+  }
+  ui.alert('Repaired ' + done.tab,
+    done.moved + ' lead' + (done.moved === 1 ? '' : 's') + ' moved back, ' +
+    done.columnsRemoved + ' columns removed.\n\n' +
+    'Run Setup / repair tabs next, to put the status colours and the dropdown ' +
+    'back on the columns that are there now.',
+    ui.ButtonSet.OK);
 }
 
 function menuRebuildIndex() {
