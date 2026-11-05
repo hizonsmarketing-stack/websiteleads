@@ -24,6 +24,7 @@ const api = global.__api;
 
 let failures = 0;
 const quiet = process.argv.indexOf('--verbose') === -1;
+const STATUS_COLOURS_DUPLICATE = '#F9CB9C';
 const realLog = console.log;
 function silence(on) { console.log = on ? function () {} : realLog; }
 
@@ -1220,7 +1221,7 @@ realLog('\n--- a worked lead colours its own row ---');
   check('lost is red', ruleFor('Bea', 'Lost').__background, '#F4CCCC');
   check('transferred is purple', ruleFor('Bea', 'Transferred').__background, '#D9D2E9');
   check('no response is blue', ruleFor('Bea', 'No Response').__background, '#CFE2F3');
-  check('duplicate is orange', ruleFor('Duplicates', 'Duplicate').__background, '#FCE5CD');
+  check('duplicate is orange', ruleFor('Duplicates', 'Duplicate').__background, '#F9CB9C');
   check('new is plain white', ruleFor('Bea', 'New').__background, '#FFFFFF');
 
   // The rule has to read the tab's own Status column, wherever it sits, and
@@ -1851,6 +1852,54 @@ realLog('\n--- a hand-written summary block is not a lead ---');
     'Assigned To': 'Carlo' }, { source: 'website' });
   check('and a lead landing after one counts as exactly one',
     waitingNow(), before + 1);
+}
+
+realLog('\n--- a corporate lead is yellow, however it is written ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  const sheet = tab('Dina');
+  api.applyStatusColours_(sheet);
+  const rules = sheet.getConditionalFormatRules();
+  const ruleFor = function (word) {
+    return rules.filter(function (r) {
+      const values = (r.getBooleanCondition().getCriteriaValues() || []);
+      return String(values[0]).indexOf('="' + word + '"') !== -1;
+    })[0];
+  };
+
+  const corporate = ruleFor('Corporate');
+  check('there is a rule for Corporate', !!corporate, 'true');
+  check('and it is yellow', corporate && corporate.__background, '#FFF2CC');
+  // The spelling the team actually types has to ride on the same rule, or the
+  // rows they write are the ones that stay white.
+  check('the same rule covers CORPO',
+    corporate && /="CORPO"/.test(String(corporate.__formula)), 'true');
+  check('and it is not the Duplicate colour',
+    corporate && corporate.__background !== STATUS_COLOURS_DUPLICATE, 'true');
+
+  // Duplicate is a full orange, not the pale tint that sat a shade from the
+  // yellow. Pinned so the two cannot drift back together.
+  const duplicate = ruleFor('Duplicate');
+  check('Duplicate is orange', duplicate && duplicate.__background, '#F9CB9C');
+  check('and clearly apart from the corporate yellow',
+    duplicate && corporate && duplicate.__background !== corporate.__background, 'true');
+
+  // The report has to own up to it too, or somebody checking a white row is
+  // told Corporate is not a status that colours.
+  const statusCol = api.fieldColumns_(sheet).byField['status'];
+  const at = sheet.getLastRow() + 1;
+  sheet.getRange(at, 2).setValue('LD-corp-1');
+  sheet.getRange(at, statusCol).setValue('CORPO');
+  sheet.getRange(at + 1, 2).setValue('LD-corp-2');
+  sheet.getRange(at + 1, statusCol).setValue('Corporate');
+  const report = api.statusColourReport_(sheet);
+  const text = report.lines.join('\n');
+  check('CORPO is reported as a value that colours', /OK {2}"CORPO"/.test(text), 'true');
+  check('and so is Corporate', /OK {2}"Corporate"/.test(text), 'true');
+  check('both are listed among what colours',
+    /What colours: .*Corporate, CORPO/.test(text), 'true');
 }
 
 realLog('\n--- saying why a row is not taking its colour ---');
