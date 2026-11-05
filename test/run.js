@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; FIELD_COLUMNS_CACHE_ = {}; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, repairTabColumns, pendingNotifyRows_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; FIELD_COLUMNS_CACHE_ = {}; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, repairTabColumns, LEAD_COLUMNS, pendingNotifyRows_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -1656,8 +1656,94 @@ realLog('\n--- a tab whose header row was pasted over ---');
 
   check('a tab that is not damaged is refused',
     api.repairTabColumns('Bea', 'Carlo', true).ok, 'false');
+
+  // A tab that carries its own columns AND an appended set is the normal shape
+  // of a tab the team had before the automation. It must not be "repaired".
+  const legacy = book.insertSheet('Legacy Healthy');
+  legacy.getRange(1, 1, 1, 4).setValues([['PRESENTER', 'Full name', 'Contact number', 'Email']]);
+  legacy.getRange(2, 1, 1, 4).setValues([['AJ', 'Ana', '0917', 'a@e.com']]);
+  api.resetCaches();
+  api.fieldColumns_(legacy);
+  tab('_Team').appendRow(['LegacyH', 'Legacy Healthy', 'Wedding', '', 'yes', 0, '', '', '']);
+  api.resetCaches();
+  pin('LegacyH', 'Legacy Lead', 'legacylead@example.com');
+  api.resetCaches();
+  const healthy = api.repairTabColumns('Legacy Healthy', 'Bea', true);
+  check('a legacy tab with an appended set is left alone', healthy.ok, 'false');
+  // Refused for the plainer reason: a tab whose own columns already bind only
+  // gets the columns it lacks, so it never ends in a full appended set. The
+  // readable-header-row guard behind it is a second net for the case where it
+  // somehow does.
+  check('and is told why, naming the tab',
+    /Legacy Healthy/.test(String(healthy.problem)) &&
+    /nothing of that kind to undo/.test(String(healthy.problem)), 'true');
   check('and a tab cannot be its own model',
     api.repairTabColumns('Mhay', 'Mhay', true).ok, 'false');
+}
+
+realLog('\n--- repairing with a model of a different width ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  // Caller tabs drift apart — a Reachout column added to one and not another —
+  // so the tab nearest to hand is rarely exactly as wide. Refusing on that left
+  // nobody with a usable model.
+  const wide = book.insertSheet('Wide Model');
+  wide.getRange(1, 1, 1, 10).setValues([[
+    'PRESENTER', 'CONSO DATE', 'SOURCE', 'SUB-SOURCE', 'TIMESTAMP',
+    'Full name', 'Contact number', 'Email', '1st Reachout', '2nd Reachout'
+  ]]);
+
+  const broken = book.insertSheet('Broken Narrow');
+  // Eight of its own columns, their header row pasted over by a lead, and the
+  // appended set the script added afterwards.
+  broken.getRange(1, 1, 1, 8).setValues([[
+    'AJ', '2026-10-29', 'Website', 'Homepage', '2026-10-29 12:00:00',
+    'Pasted Client', '09170000001', 'pasted@example.com'
+  ]]);
+  broken.getRange(1, 9, 1, api.LEAD_COLUMNS.length).setValues([api.LEAD_COLUMNS]);
+  const idCol = 9 + api.LEAD_COLUMNS.indexOf('Lead ID');
+  const nameCol = 9 + api.LEAD_COLUMNS.indexOf('Full Name');
+  broken.getRange(2, idCol).setValue('LD-stranded-1');
+  broken.getRange(2, nameCol).setValue('Stranded Client');
+  api.resetCaches();
+
+  const plan = api.repairTabColumns('Broken Narrow', 'Wide Model', true);
+  check('a wider model is accepted', plan.ok, 'true');
+  check('it says how wide each is', plan.modelWidth + '/' + plan.free, '10/8');
+  check('and names what will not be used', plan.dropped.join(','),
+    '1st Reachout,2nd Reachout');
+  check('the header row it offers fits the tab', plan.headers.length, 8);
+
+  const done = api.repairTabColumns('Broken Narrow', 'Wide Model', false);
+  check('the repair runs', done.ok, 'true');
+  check('the appended columns are gone', broken.getLastColumn(), 8);
+  check('the header row is the model, trimmed',
+    broken.getRange(1, 1, 1, 8).getValues()[0].join('|'),
+    'PRESENTER|CONSO DATE|SOURCE|SUB-SOURCE|TIMESTAMP|Full name|Contact number|Email');
+
+  api.resetCaches();
+  const names = [];
+  for (let r = 2; r <= broken.getLastRow(); r++) {
+    const v = broken.getRange(r, 6).getValue();
+    if (v) names.push(String(v));
+  }
+  check('the pasted lead survived', names.indexOf('Pasted Client') !== -1, 'true');
+  check('and the stranded one came back', names.indexOf('Stranded Client') !== -1, 'true');
+
+  // A model narrower than the tab leaves the surplus unnamed rather than
+  // guessing at it.
+  const narrow = book.insertSheet('Narrow Model');
+  narrow.getRange(1, 1, 1, 3).setValues([['PRESENTER', 'Full name', 'Email']]);
+  const broken2 = book.insertSheet('Broken Wide');
+  broken2.getRange(1, 1, 1, 6).setValues([[
+    'AJ', '2026-10-29', 'Website', 'Pasted Two', '09170000002', 'p2@example.com']]);
+  broken2.getRange(1, 7, 1, api.LEAD_COLUMNS.length).setValues([api.LEAD_COLUMNS]);
+  api.resetCaches();
+  const thin = api.repairTabColumns('Broken Wide', 'Narrow Model', true);
+  check('a narrower model is accepted too', thin.ok, 'true');
+  check('and says how many columns go unnamed', thin.unnamed, 3);
 }
 
 realLog('\n--- a caller tab that somebody renames ---');

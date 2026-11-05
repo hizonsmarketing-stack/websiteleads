@@ -51,15 +51,43 @@ function planColumnRepair_(sheet, model) {
       'columns this script appended, so there is nothing of that kind to undo. ' +
       'If its leads are landing somewhere unexpected, it is for another reason.' };
   }
-
-  const modelWidth = model.getLastColumn();
-  const modelHeaders = model.getRange(1, 1, 1, modelWidth).getValues()[0]
-    .map(function (h) { return cleanText_(h); });
-  if (modelWidth > blockStart - 1) {
-    return { ok: false, problem: model.getName() + ' has ' + modelWidth +
-      ' columns but only ' + (blockStart - 1) + ' are free on ' + sheet.getName() +
-      '. Pick a tab laid out the way this one was before the paste.' };
+  if (blockStart <= 1) {
+    return { ok: false, problem: sheet.getName() + ' is laid out the way this ' +
+      'script lays a tab out, with nothing to the left of those columns. There ' +
+      'is no second set here to undo.' };
   }
+
+  // A tab can hold its own columns and an appended set at the same time and be
+  // perfectly healthy: that is what happens to a tab the team had before the
+  // automation, whose own columns are read through their aliases while the
+  // ones it lacked are added on the right. What marks the damaged case is that
+  // the left-hand header row says nothing a column name could be — because it
+  // holds a lead that was pasted over it.
+  const readable = Object.keys(fieldColumnsWithin_(sheet, 1, blockStart - 1));
+  if (readable.length >= 3) {
+    return { ok: false, problem: sheet.getName() + ' still has a header row ' +
+      'that reads — ' + readable.length + ' of its columns are understood. The ' +
+      'set on the right was added because this tab was missing those columns, ' +
+      'which is normal. Nothing here needs undoing.' };
+  }
+
+  const free = blockStart - 1;
+  const modelWidth = model.getLastColumn();
+  const modelAll = model.getRange(1, 1, 1, modelWidth).getValues()[0]
+    .map(function (h) { return cleanText_(h); });
+
+  // Caller tabs drift apart: a team adds a Reachout column to one and not to
+  // another, so the tab nearest to hand is rarely exactly as wide. Refusing on
+  // that left nobody with a usable model. The names are taken as far as they
+  // go, and what does not line up is reported for a person to judge, because
+  // only they know whether the extra columns on the model were added at the
+  // end — in which case the rest still lines up — or dropped in the middle, in
+  // which case everything after moves and the model is the wrong one.
+  const modelHeaders = modelAll.slice(0, free);
+  while (modelHeaders.length < free) modelHeaders.push('');
+
+  const dropped = modelAll.slice(free);
+  const unnamed = Math.max(free - modelWidth, 0);
 
   // Row 1 holds a lead rather than headers, so the headers go in above it and
   // that lead keeps its place. Judged on whether anything in the row reads like
@@ -77,7 +105,8 @@ function planColumnRepair_(sheet, model) {
 
   return {
     ok: true, headers: modelHeaders, blockStart: blockStart,
-    blockWidth: blockWidth, stranded: stranded, firstRowIsLead: firstRowIsLead
+    blockWidth: blockWidth, stranded: stranded, firstRowIsLead: firstRowIsLead,
+    free: free, modelWidth: modelWidth, dropped: dropped, unnamed: unnamed
   };
 }
 
@@ -105,7 +134,9 @@ function repairTabColumns(tabName, modelTabName, dryRun) {
     const summary = {
       ok: true, tab: sheet.getName(), model: model.getName(),
       headerRowAdded: plan.firstRowIsLead, moved: 0,
-      columnsRemoved: plan.blockWidth, dryRun: !!dryRun
+      columnsRemoved: plan.blockWidth, dryRun: !!dryRun,
+      headers: plan.headers, free: plan.free, modelWidth: plan.modelWidth,
+      dropped: plan.dropped, unnamed: plan.unnamed
     };
     if (dryRun) {
       summary.moved = plan.stranded;
