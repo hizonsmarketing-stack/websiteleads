@@ -22,6 +22,7 @@ function onOpen() {
     .addItem('Send lead digest now', 'menuSendDigest')
     .addSeparator()
     .addItem('Move selected leads to…', 'menuMoveLead')
+    .addItem('Delete selected leads…', 'menuDeleteLeads')
     .addItem('Check status colours', 'menuCheckStatusColours')
     .addItem('Repair a tab\'s columns…', 'menuRepairColumns')
     .addItem('Rebuild dedupe index', 'menuRebuildIndex')
@@ -478,6 +479,83 @@ function menuRepairColumns() {
     'Run Setup / repair tabs next, to put the status colours and the dropdown ' +
     'back on the columns that are there now.',
     ui.ButtonSet.OK);
+}
+
+/**
+ * Deletes the selected leads outright.
+ *
+ * Shown with the names and contacts before anything happens, because this is
+ * the one operation the menu cannot undo.
+ */
+function menuDeleteLeads() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getActiveSheet();
+  const rows = selectedRows_(sheet);
+
+  if (!rows.length) {
+    ui.alert('Nothing to delete',
+      'Select the lead rows first — click any cell on a lead\'s row, or drag ' +
+      'down the rows to take several.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const going = [];
+  const leaveAlone = [];
+  rows.forEach(function (row) {
+    const found = leadAtRow_(sheet.getName(), row);
+    if (!found.ok) {
+      leaveAlone.push({ row: row, problem: found.problem });
+      return;
+    }
+    going.push({
+      row: row,
+      name: cleanText_(found.lead.fullName) || cleanText_(found.lead.email) ||
+        cleanText_(found.lead.phone) || found.leadId,
+      contact: cleanText_(found.lead.email) || cleanText_(found.lead.phone) || '(no contact)'
+    });
+  });
+
+  if (!going.length) {
+    ui.alert('Nothing to delete', leaveAlone[0].problem, ui.ButtonSet.OK);
+    return;
+  }
+
+  const listed = going.slice(0, 10).map(function (one) {
+    return '  • ' + one.name + '  (' + one.contact + ')';
+  }).join('\n') + (going.length > 10 ? '\n  • …and ' + (going.length - 10) + ' more' : '');
+
+  const go = ui.alert('Delete ' + going.length + ' lead' + (going.length === 1 ? '' : 's') + '?',
+    'From ' + sheet.getName() + ':\n\n' + listed + '\n\n' +
+    (leaveAlone.length ? leaveAlone.length + ' selected row' +
+      (leaveAlone.length === 1 ? '' : 's') + ' will be left alone — no Lead ID.\n\n' : '') +
+    'The row goes, the All Leads copy goes, and the dedupe index forgets them, ' +
+    'so the deletion holds rather than coming back on the next submission.\n\n' +
+    'This cannot be undone from the menu. The original payloads are still in ' +
+    SHEETS.raw + '. If the same sender writes again it is a new lead, routed ' +
+    'like any other.',
+    ui.ButtonSet.OK_CANCEL);
+  if (go !== ui.Button.OK) return;
+
+  const result = deleteLeads(sheet.getName(), going.map(function (one) {
+    return one.row;
+  }));
+
+  if (!result.ok) {
+    ui.alert('Not deleted', result.problem ||
+      (result.skipped.length ? result.skipped[0].problem : 'Nothing was deleted.'),
+      ui.ButtonSet.OK);
+    return;
+  }
+
+  const lines = [result.deleted.length + ' lead' +
+    (result.deleted.length === 1 ? '' : 's') + ' deleted from ' + sheet.getName() + '.'];
+  if (result.skipped.length) {
+    lines.push('');
+    lines.push('Left alone: ' + result.skipped.map(function (one) {
+      return 'row ' + one.row;
+    }).join(', ') + '.');
+  }
+  ui.alert('Deleted', lines.join('\n'), ui.ButtonSet.OK);
 }
 
 function menuRebuildIndex() {
