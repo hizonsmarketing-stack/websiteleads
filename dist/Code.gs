@@ -22,7 +22,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '12e0c7684003';
+const BUILD_ = '430074c6df2f';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -2283,7 +2283,9 @@ function routeLead_(lead) {
   const tabName = (assignment && assignment.tab) || lead.eventTypeTab || FALLBACK_EVENT_TYPE.tab;
   const teamSheet = getOrCreateSheet_(tabName, LEAD_COLUMNS);
 
-  if (assignment && !lead.assignedTo) lead.assignedTo = assignment.name;
+  // Whoever the rotation landed on, not whoever the record asked for: where a
+  // named person has left, the two differ, and the row has to say who holds it.
+  if (assignment) lead.assignedTo = assignment.name;
   // The row this is about to land on decides the presenter. Reading it before
   // the append is safe: the whole intake runs under the document lock.
   if (assignment && !lead.presenter) {
@@ -2430,8 +2432,19 @@ function membersFor_(eventTypeLabel) {
  * @return {?Object} The roster entry, or null when nobody covers this type.
  */
 function pickAssignee_(lead) {
+  // A name on the record is honoured only while that person is still active.
+  // Setting Active to "no" used to take somebody out of the rotation and
+  // nothing else, so a form or an import carrying their name went on filling a
+  // tab nobody works. The name is still written to the row — history should
+  // say who had a lead, even after they leave — but the work goes to somebody
+  // who is here.
   const named = namedMember_(lead.assignedTo);
-  if (named) return named;
+  if (named && named.active) return named;
+  if (named) {
+    log_('INFO', 'router', 'Named salesperson is no longer active; routing instead', {
+      named: named.name, lead: lead.leadId
+    });
+  }
   if (!settingIsOn_('Round Robin Assignment')) return null;
 
   const candidates = membersFor_(lead.eventTypeLabel);
@@ -2958,12 +2971,57 @@ function mergeDuplicate_(incoming, match) {
   recordDuplicate_(incoming, match, entry.leadId, entry.tab);
 
   const promoted = maybePromote_(sheet, row, original, incoming, entry.leadId);
+  const handed = promoted ? null : handOnFromRetired_(entry.tab, row);
+  const landed = promoted || handed;
   return {
-    action: promoted ? 'merged+promoted' : 'merged',
-    tab: promoted ? promoted.tab : entry.tab,
-    row: promoted ? promoted.row : row,
+    action: promoted ? 'merged+promoted' : (handed ? 'merged+handed on' : 'merged'),
+    tab: landed ? landed.tab : entry.tab,
+    row: landed ? landed.row : row,
     leadId: entry.leadId
   };
+}
+
+/**
+ * Moves a lead off a tab whose salesperson has left.
+ *
+ * A client enquiring again is a live enquiry, whatever the age of the row it
+ * merges into. Merging it onto a retired salesperson's tab recorded the touch
+ * and told nobody: the tab is not worked, so the enquiry sat there. Setting
+ * Active to "no" stopped the rotation and nothing else, which is how a tab
+ * somebody thought they had closed went on collecting.
+ *
+ * Only for a tab the roster says belongs to an inactive person. A shared
+ * event-type tab has no salesperson and is left alone, and so is a tab whose
+ * owner is still here.
+ *
+ * @param {string} tabName The tab the lead is on.
+ * @param {number} row Its row there.
+ * @return {?{tab: string, row: number}} Where it went, or null if it stayed.
+ */
+function handOnFromRetired_(tabName, row) {
+  const owner = memberByTab_(tabName);
+  if (!owner || owner.active) return null;
+
+  const found = leadAtRow_(tabName, row);
+  if (!found.ok) return null;
+
+  // Asked for without the old name, so the rotation answers rather than the
+  // record. Nobody active covering this event type means there is nowhere
+  // better to put it, and it stays where it is.
+  const taker = pickAssignee_(Object.assign({}, found.lead, { assignedTo: '' }));
+  if (!taker || !taker.tab || taker.tab === tabName) return null;
+
+  const moved = moveOneLead_(tabName, row, taker.name);
+  if (!moved.ok) {
+    log_('WARN', 'router', 'Could not hand a lead on from a retired tab', {
+      from: tabName, to: taker.name, problem: moved.problem
+    });
+    return null;
+  }
+  log_('INFO', 'router', 'Handed a returning client on from a retired tab', {
+    from: tabName, to: moved.to, leadId: found.leadId
+  });
+  return { tab: moved.to, row: moved.row };
 }
 
 /**
@@ -2983,9 +3041,24 @@ function mergeDuplicate_(incoming, match) {
  * @return {{action: string, tab: string, row: number, leadId: string}}
  */
 function refileWithSameOwner_(sheet, entry, incoming) {
+  const owner = memberByTab_(entry.tab);
+
+  // Writing a brand-new row onto a tab whose salesperson has left is the worst
+  // of both: the lead is lost to everybody, and a tab somebody retired grows
+  // after they thought it was finished. Keeping it with the owner is the point
+  // of this function, and it stops being the point when there is no owner.
+  if (owner && !owner.active) {
+    log_('INFO', 'dedupe', 'Indexed row is gone and its salesperson has left; routing instead', {
+      tab: entry.tab, salesperson: owner.name, leadId: entry.leadId
+    });
+    incoming.assignedTo = '';
+    const placed = routeLead_(incoming);
+    moveIndexEntries_(entry.leadId, placed.tab, placed.row);
+    return Object.assign({ action: 'created' }, placed, { leadId: entry.leadId });
+  }
+
   log_('WARN', 'dedupe', 'Indexed row is gone; re-filing with the same caller', entry);
 
-  const owner = memberByTab_(entry.tab);
   if (owner && !cleanText_(incoming.assignedTo)) incoming.assignedTo = owner.name;
   incoming.presenter = presenterFor_(
     incoming.eventTypeLabel, sheet.getLastRow() + 1, owner ? owner.name : '');
