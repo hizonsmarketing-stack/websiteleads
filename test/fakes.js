@@ -41,7 +41,14 @@ class FakeRange {
     }
     return this;
   }
-  setDataValidation() { return this; }
+  setDataValidation(rule) {
+    // Recorded so a test can ask what the dropdown on a column actually
+    // offers, rather than asserting against the constant it was built from.
+    for (let c = 0; c < this.numCols; c++) {
+      this.sheet._validation[this.col + c] = rule && rule.__values ? rule.__values : [];
+    }
+    return this;
+  }
   setNumberFormat() { return this; }
   setWrapStrategy() { return this; }
   setFontWeight() { return this; }
@@ -65,6 +72,7 @@ class FakeSheet {
     this.maxCols = 30;
     this._hidden = false;
     this._bandings = [];
+    this._validation = {};
   }
   getName() { return this.name; }
   getSheetId() { return this.sheetId; }
@@ -179,9 +187,10 @@ function installFakes(global, options) {
     getActiveSpreadsheet: () => book,
     openById: () => book,
     newDataValidation: () => ({
-      requireValueInList() { return this; },
+      __values: [],
+      requireValueInList(values) { this.__values = values.slice(); return this; },
       setAllowInvalid() { return this; },
-      build() { return {}; }
+      build() { return { __values: this.__values }; }
     }),
     newConditionalFormatRule: () => ({
       _r: { text: '', formula: '', background: '', font: '', ranges: [] },

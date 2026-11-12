@@ -975,9 +975,13 @@ realLog('\n--- a strict rotation follows the roster, top to bottom ---');
   // Everyone the earlier blocks put on the roster steps aside, so the rotation
   // under test is exactly these seven -- the rotation is the whole roster.
   const team = tab('_Team');
-  if (team.getLastRow() > 1) {
-    team.getRange(2, 5, team.getLastRow() - 1, 1).setValues(
-      team.getRange(2, 5, team.getLastRow() - 1, 1).getValues().map(() => ['no']));
+  // Remembered so they can be put back. An inactive salesperson no longer
+  // takes a lead even when a record names them, so leaving the whole roster
+  // switched off here would quietly change what every later block is testing.
+  const activeBefore = team.getLastRow() > 1
+    ? team.getRange(2, 5, team.getLastRow() - 1, 1).getValues() : [];
+  if (activeBefore.length) {
+    team.getRange(2, 5, activeBefore.length, 1).setValues(activeBefore.map(() => ['no']));
   }
   // GWEN and LEA are the only two who also take Corporate.
   order.forEach(function (name) {
@@ -1069,6 +1073,15 @@ realLog('\n--- a strict rotation follows the roster, top to bottom ---');
     resumed, wanted[wanted.indexOf(after[1]) + 1]);
 
   setSetting('Assignment Order', 'roster');
+
+  // The seven under test step aside again and the original roster comes back,
+  // so the blocks after this one pin leads to the people they expect.
+  if (activeBefore.length) {
+    team.getRange(2, 5, activeBefore.length, 1).setValues(activeBefore);
+  }
+  for (let r = 2 + activeBefore.length; r <= team.getLastRow(); r++) {
+    team.getRange(r, 5).setValue('no');
+  }
   api.resetCaches();
 }
 
@@ -1747,6 +1760,85 @@ realLog('\n--- repairing with a model of a different width ---');
   check('and says how many columns go unnamed', thin.unnamed, 3);
 }
 
+realLog('\n--- a salesperson who has left stops receiving ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  tab('_Team').appendRow(['Oldie', 'Oldie', 'Wedding', '', 'yes', 0, '', '', '']);
+  tab('_Team').appendRow(['Newbie', 'Newbie', 'Wedding', '', 'yes', 0, '', '', '']);
+  api.resetCaches();
+  api.setupWorkbook();
+
+  const send = function (extra) {
+    api.resetCaches();
+    return post(Object.assign({ formName: 'Homepage Inquiry',
+      'Type of Event': 'Wedding' }, extra), { source: 'website' });
+  };
+
+  // A client pinned to Oldie while they were still here.
+  send({ name: 'Loyal Client', email: 'loyal@example.com', 'Assigned To': 'Oldie' });
+  check('the client starts on their tab', rows('Oldie'), 1);
+
+  const team = tab('_Team');
+  for (let r = 2; r <= team.getLastRow(); r++) {
+    if (String(team.getRange(r, 1).getValue()) === 'Oldie') team.getRange(r, 5).setValue('no');
+  }
+  api.resetCaches();
+
+  // 1. Active already took them out of the rotation. That part always worked.
+  const rota = [send({ name: 'R1', email: 'r1@example.com' }).tab,
+                send({ name: 'R2', email: 'r2@example.com' }).tab];
+  check('the rotation skips them', rota.indexOf('Oldie'), -1);
+
+  // 2. A record naming them no longer hands them the lead. An import or a form
+  //    carrying an old name used to go straight onto the tab regardless.
+  const named = send({ name: 'Named At Oldie', email: 'named@example.com',
+    'Assigned To': 'Oldie' });
+  check('a record naming them does not reach them', named.tab === 'Oldie', 'false');
+  // Compared against the roster, not the tab name: a salesperson's name and
+  // their tab's name are not always the same word.
+  const holder = String(cellOf(named.tab, tab(named.tab).getLastRow(), 'Assigned To'));
+  check('and the row names whoever actually holds it',
+    holder !== '' && holder !== 'Oldie', 'true');
+  check('matching the roster entry for that tab',
+    api.loadTeam_().filter(function (m) { return m.tab === named.tab; })[0].name, holder);
+
+  // 3. A client coming back is a live enquiry, whatever the age of the row it
+  //    merges into. It used to record a touch on a tab nobody reads.
+  const back = send({ name: 'Loyal Client', email: 'loyal@example.com',
+    message: 'following up' });
+  check('a returning client is handed on', /handed on/.test(back.action), 'true');
+  check('to somebody who is still here', back.tab === 'Oldie', 'false');
+  check('and the row leaves the retired tab', rows('Oldie'), 0);
+  check('carrying its history', Number(cellOf(back.tab, tab(back.tab).getLastRow(), 'Touches')), 2);
+
+  // 4. The nastiest one: with the indexed row gone, a refile wrote a brand-new
+  //    row onto the retired tab, so it grew after it was thought closed.
+  const target = tab(back.tab);
+  target.deleteRow(target.getLastRow());
+  api.resetCaches();
+  const refiled = send({ name: 'Loyal Client', email: 'loyal@example.com',
+    message: 'third time' });
+  check('a refile does not resurrect the retired tab', refiled.tab === 'Oldie', 'false');
+  check('and the tab stays empty', rows('Oldie'), 0);
+
+  // Turning them back on puts everything back as it was.
+  for (let r = 2; r <= team.getLastRow(); r++) {
+    if (String(team.getRange(r, 1).getValue()) === 'Oldie') team.getRange(r, 5).setValue('yes');
+  }
+  api.resetCaches();
+  const returned = send({ name: 'Came Back', email: 'cameback@example.com',
+    'Assigned To': 'Oldie' });
+  check('and an active salesperson is named as before', returned.tab, 'Oldie');
+
+  for (let r = 2; r <= team.getLastRow(); r++) {
+    const who = String(team.getRange(r, 1).getValue());
+    if (who === 'Oldie' || who === 'Newbie') team.getRange(r, 5).setValue('no');
+  }
+  api.resetCaches();
+}
+
 realLog('\n--- a caller tab that somebody renames ---');
 {
   silence(quiet);
@@ -1852,6 +1944,46 @@ realLog('\n--- a hand-written summary block is not a lead ---');
     'Assigned To': 'Carlo' }, { source: 'website' });
   check('and a lead landing after one counts as exactly one',
     waitingNow(), before + 1);
+}
+
+realLog('\n--- a caller marking a duplicate on their own tab ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  // The automation only catches what it can match. A client who filled a form
+  // in under one email and walked up to the booth under another is two records
+  // it has no way of joining, and the caller is the one who finds out — so the
+  // word has to be theirs to pick.
+  // Setup is what puts the dropdown on a tab, so it runs first — the same
+  // order a person follows after deploying.
+  api.setupWorkbook();
+  api.resetCaches();
+  const sheet = tab('Fred');
+  const statusCol = api.fieldColumns_(sheet).byField['status'];
+  check('the Status column offers Duplicate',
+    (sheet._validation[statusCol] || []).indexOf('Duplicate') !== -1, 'true');
+  check('alongside the five it always had',
+    (sheet._validation[statusCol] || []).join(','),
+    'New,Valid,No Response,Lost,Transferred,Duplicate');
+
+  // The orange rule was already on every caller tab; only the dropdown was
+  // missing. Pinned so a row marked by hand colours the same as one the
+  // automation filed itself.
+  api.applyStatusColours_(sheet);
+  const rule = sheet.getConditionalFormatRules().filter(function (r) {
+    return /="Duplicate"/.test(String((r.getBooleanCondition().getCriteriaValues() || [])[0]));
+  })[0];
+  check('and a caller tab carries the Duplicate rule', !!rule, 'true');
+  check('in the same orange the Duplicates tab uses', rule && rule.__background, '#F9CB9C');
+
+  // And the report agrees it is a value that colours, so somebody checking a
+  // row is not told otherwise.
+  const at = sheet.getLastRow() + 1;
+  sheet.getRange(at, 2).setValue('LD-dup-by-hand');
+  sheet.getRange(at, statusCol).setValue('Duplicate');
+  const text = api.statusColourReport_(sheet).lines.join('\n');
+  check('the report counts it as colouring', /OK {2}"Duplicate"/.test(text), 'true');
 }
 
 realLog('\n--- a corporate lead is yellow, however it is written ---');
