@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; FIELD_COLUMNS_CACHE_ = {}; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, repairTabColumns, LEAD_COLUMNS, pendingNotifyRows_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; FIELD_COLUMNS_CACHE_ = {}; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, deleteLeads, repairTabColumns, LEAD_COLUMNS, pendingNotifyRows_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
 
 const api = global.__api;
 
@@ -1758,6 +1758,72 @@ realLog('\n--- repairing with a model of a different width ---');
   const thin = api.repairTabColumns('Broken Wide', 'Narrow Model', true);
   check('a narrower model is accepted too', thin.ok, 'true');
   check('and says how many columns go unnamed', thin.unnamed, 3);
+}
+
+realLog('\n--- deleting a lead for good ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  tab('_Team').appendRow(['Binman', 'Binman', 'Wedding', '', 'yes', 0, '', '', '']);
+  api.resetCaches();
+  api.setupWorkbook();
+
+  const send = function (extra) {
+    api.resetCaches();
+    return post(Object.assign({ formName: 'Homepage Inquiry',
+      'Type of Event': 'Wedding', 'Assigned To': 'Binman' }, extra),
+      { source: 'website' });
+  };
+  const spam = { name: 'Cheap SEO Services', email: 'spam@spammer.test',
+    'Contact Number': '0917 999 8888', message: 'buy backlinks' };
+
+  send(spam);
+  const sheet = tab('Binman');
+  const allBefore = rows('All Leads');
+  check('the spam lands like any other lead', rows('Binman'), 1);
+
+  const result = api.deleteLeads('Binman', [sheet.getLastRow()]);
+  check('the delete reports what went', result.deleted.length, 1);
+  check('and names the sender', result.deleted[0].name, 'Cheap SEO Services');
+  check('the row is gone', rows('Binman'), 0);
+  check('the All Leads copy is gone too', rows('All Leads'), allBefore - 1);
+
+  api.resetCaches();
+  const keys = tab('_Index').getLastRow() > 1
+    ? tab('_Index').getRange(2, 1, tab('_Index').getLastRow() - 1, 1).getValues()
+        .map(function (r) { return String(r[0]); })
+    : [];
+  check('and the index has forgotten them',
+    keys.filter(function (k) { return /spammer\.test|9998888/.test(k); }).length, 0);
+
+  // The point of clearing all three. Deleting the row alone left the id in the
+  // index, so the next submission was re-filed as a fresh row on the same tab
+  // and the deletion looked undone.
+  api.resetCaches();
+  const again = send(spam);
+  check('a later submission is a new lead, not a refile', again.action, 'created');
+  check('and there is exactly one row for it', rows('Binman'), 1);
+
+  // Deleting is unrecoverable from the menu, so it only touches rows it can
+  // account for.
+  const realRow = sheet.getLastRow();
+  const stray = realRow + 1;
+  sheet.getRange(stray, api.fieldColumns_(sheet).byField.fullName).setValue('Typed By Hand');
+  api.resetCaches();
+  const mixed = api.deleteLeads('Binman', [realRow, stray]);
+  check('a row with no Lead ID is left alone', mixed.skipped.length, 1);
+  check('and is named', mixed.skipped[0].row, stray);
+  check('while the real lead goes', mixed.deleted.length, 1);
+  check('an empty selection is refused', api.deleteLeads('Binman', []).ok, 'false');
+  check('and so is a tab that is not there',
+    api.deleteLeads('No Such Tab', [2]).ok, 'false');
+
+  const team = tab('_Team');
+  for (let r = 2; r <= team.getLastRow(); r++) {
+    if (String(team.getRange(r, 1).getValue()) === 'Binman') team.getRange(r, 5).setValue('no');
+  }
+  api.resetCaches();
 }
 
 realLog('\n--- a salesperson who has left stops receiving ---');

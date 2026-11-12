@@ -265,6 +265,43 @@ function mergeIndexKeys_(incoming, entry) {
 }
 
 /**
+ * Forgets a lead entirely: every index entry it has.
+ *
+ * Deleting a row by hand does not do this, which is why spam kept coming
+ * back. The row went, the lead id stayed in the index, and the next
+ * submission matched it, failed to find the row and was re-filed as a fresh
+ * one on the same tab — so the caller deleted it again, and so did it.
+ *
+ * Rows are taken out from the bottom up, because removing one shifts every
+ * entry under it.
+ *
+ * @param {string} leadId
+ * @return {number} How many entries went.
+ */
+function forgetIndexEntries_(leadId) {
+  if (!cleanText_(leadId)) return 0;
+  const index = loadIndex_();
+  flushIndex_();
+
+  const entries = (index.rowsByLeadId[leadId] || [])
+    .filter(function (entry) { return entry.indexRow; })
+    .sort(function (a, b) { return b.indexRow - a.indexRow; });
+  if (!entries.length) return 0;
+
+  entries.forEach(function (entry) {
+    index.sheet.deleteRow(entry.indexRow);
+    delete index.byKey[entry.key];
+  });
+  delete index.rowsByLeadId[leadId];
+
+  // Everything still held in memory is addressed by a row number that has just
+  // moved. Read afresh rather than patched: this runs once per deletion, and a
+  // patched copy that is wrong is worse than a reload that is slow.
+  INDEX_CACHE_ = null;
+  return entries.length;
+}
+
+/**
  * Rebuilds the index from what is actually in the team tabs. Safe to run any
  * time; it is the repair tool for a spreadsheet that was edited by hand.
  * @return {number} Number of leads indexed.

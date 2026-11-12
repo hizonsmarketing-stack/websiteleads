@@ -19,10 +19,11 @@
  *   src/13_Migrate.gs
  *   src/14_Digest.gs
  *   src/15_RepairColumns.gs
+ *   src/16_Delete.gs
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '3ed74e49d631';
+const BUILD_ = '50a55d72971f';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -2200,6 +2201,43 @@ function mergeIndexKeys_(incoming, entry) {
     if (!index.rowsByLeadId[entry.leadId]) index.rowsByLeadId[entry.leadId] = [];
     index.rowsByLeadId[entry.leadId].push(added);
   });
+}
+
+/**
+ * Forgets a lead entirely: every index entry it has.
+ *
+ * Deleting a row by hand does not do this, which is why spam kept coming
+ * back. The row went, the lead id stayed in the index, and the next
+ * submission matched it, failed to find the row and was re-filed as a fresh
+ * one on the same tab — so the caller deleted it again, and so did it.
+ *
+ * Rows are taken out from the bottom up, because removing one shifts every
+ * entry under it.
+ *
+ * @param {string} leadId
+ * @return {number} How many entries went.
+ */
+function forgetIndexEntries_(leadId) {
+  if (!cleanText_(leadId)) return 0;
+  const index = loadIndex_();
+  flushIndex_();
+
+  const entries = (index.rowsByLeadId[leadId] || [])
+    .filter(function (entry) { return entry.indexRow; })
+    .sort(function (a, b) { return b.indexRow - a.indexRow; });
+  if (!entries.length) return 0;
+
+  entries.forEach(function (entry) {
+    index.sheet.deleteRow(entry.indexRow);
+    delete index.byKey[entry.key];
+  });
+  delete index.rowsByLeadId[leadId];
+
+  // Everything still held in memory is addressed by a row number that has just
+  // moved. Read afresh rather than patched: this runs once per deletion, and a
+  // patched copy that is wrong is worse than a reload that is slow.
+  INDEX_CACHE_ = null;
+  return entries.length;
 }
 
 /**
@@ -5089,6 +5127,7 @@ function onOpen() {
     .addItem('Send lead digest now', 'menuSendDigest')
     .addSeparator()
     .addItem('Move selected leads to…', 'menuMoveLead')
+    .addItem('Delete selected leads…', 'menuDeleteLeads')
     .addItem('Check status colours', 'menuCheckStatusColours')
     .addItem('Repair a tab\'s columns…', 'menuRepairColumns')
     .addItem('Rebuild dedupe index', 'menuRebuildIndex')
@@ -5545,6 +5584,83 @@ function menuRepairColumns() {
     'Run Setup / repair tabs next, to put the status colours and the dropdown ' +
     'back on the columns that are there now.',
     ui.ButtonSet.OK);
+}
+
+/**
+ * Deletes the selected leads outright.
+ *
+ * Shown with the names and contacts before anything happens, because this is
+ * the one operation the menu cannot undo.
+ */
+function menuDeleteLeads() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getActiveSheet();
+  const rows = selectedRows_(sheet);
+
+  if (!rows.length) {
+    ui.alert('Nothing to delete',
+      'Select the lead rows first — click any cell on a lead\'s row, or drag ' +
+      'down the rows to take several.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const going = [];
+  const leaveAlone = [];
+  rows.forEach(function (row) {
+    const found = leadAtRow_(sheet.getName(), row);
+    if (!found.ok) {
+      leaveAlone.push({ row: row, problem: found.problem });
+      return;
+    }
+    going.push({
+      row: row,
+      name: cleanText_(found.lead.fullName) || cleanText_(found.lead.email) ||
+        cleanText_(found.lead.phone) || found.leadId,
+      contact: cleanText_(found.lead.email) || cleanText_(found.lead.phone) || '(no contact)'
+    });
+  });
+
+  if (!going.length) {
+    ui.alert('Nothing to delete', leaveAlone[0].problem, ui.ButtonSet.OK);
+    return;
+  }
+
+  const listed = going.slice(0, 10).map(function (one) {
+    return '  • ' + one.name + '  (' + one.contact + ')';
+  }).join('\n') + (going.length > 10 ? '\n  • …and ' + (going.length - 10) + ' more' : '');
+
+  const go = ui.alert('Delete ' + going.length + ' lead' + (going.length === 1 ? '' : 's') + '?',
+    'From ' + sheet.getName() + ':\n\n' + listed + '\n\n' +
+    (leaveAlone.length ? leaveAlone.length + ' selected row' +
+      (leaveAlone.length === 1 ? '' : 's') + ' will be left alone — no Lead ID.\n\n' : '') +
+    'The row goes, the All Leads copy goes, and the dedupe index forgets them, ' +
+    'so the deletion holds rather than coming back on the next submission.\n\n' +
+    'This cannot be undone from the menu. The original payloads are still in ' +
+    SHEETS.raw + '. If the same sender writes again it is a new lead, routed ' +
+    'like any other.',
+    ui.ButtonSet.OK_CANCEL);
+  if (go !== ui.Button.OK) return;
+
+  const result = deleteLeads(sheet.getName(), going.map(function (one) {
+    return one.row;
+  }));
+
+  if (!result.ok) {
+    ui.alert('Not deleted', result.problem ||
+      (result.skipped.length ? result.skipped[0].problem : 'Nothing was deleted.'),
+      ui.ButtonSet.OK);
+    return;
+  }
+
+  const lines = [result.deleted.length + ' lead' +
+    (result.deleted.length === 1 ? '' : 's') + ' deleted from ' + sheet.getName() + '.'];
+  if (result.skipped.length) {
+    lines.push('');
+    lines.push('Left alone: ' + result.skipped.map(function (one) {
+      return 'row ' + one.row;
+    }).join(', ') + '.');
+  }
+  ui.alert('Deleted', lines.join('\n'), ui.ButtonSet.OK);
 }
 
 function menuRebuildIndex() {
@@ -7188,4 +7304,99 @@ function fieldColumnsWithin_(sheet, from, to) {
     byField[field] = from + i;
   });
   return byField;
+}
+
+// ==========================================================================
+// src/16_Delete.gs
+// ==========================================================================
+
+/**
+ * Deleting a lead for good.
+ *
+ * A lead lives in three places: the caller's row, the All Leads copy, and its
+ * entries in the dedupe index. Deleting the row by hand clears one of them,
+ * and that is worse than doing nothing. The lead id stays in the index, so the
+ * next submission from that sender matches, fails to find the row it points
+ * at, and is re-filed as a fresh row on the same tab. The caller deletes it
+ * again, and so does it — which reads as the automation fighting them.
+ *
+ * Clearing all three is what makes a deletion hold. The sender writing again
+ * is then simply a new lead, routed like any other: this removes a record, it
+ * does not turn anybody away.
+ *
+ * Nothing here is truly unrecoverable. The original payload of every lead
+ * stays in the _Raw archive.
+ */
+
+/**
+ * Deletes leads outright, everywhere they are recorded.
+ *
+ * Rows are taken from the bottom up: each deletion shifts the rows under it,
+ * so working downwards would delete the wrong ones from the second onwards —
+ * the same trap the bulk move has, and silent in the same way.
+ *
+ * A row that is not a lead is reported rather than deleted. Deletion is the
+ * one operation where guessing is unrecoverable, so it only ever touches rows
+ * carrying a Lead ID it can account for.
+ *
+ * @param {string} fromTab
+ * @param {!Array<number>} rows 1-based, in any order.
+ * @return {{ok: boolean, problem: (string|undefined), deleted: !Array<!Object>,
+ *     skipped: !Array<!Object>}}
+ */
+function deleteLeads(fromTab, rows) {
+  return withLock_(function () {
+    const wanted = (rows || [])
+      .map(Number)
+      .filter(function (row) { return row > 1; })
+      .filter(function (row, i, all) { return all.indexOf(row) === i; })
+      .sort(function (a, b) { return b - a; });
+
+    if (!wanted.length) {
+      return { ok: false, problem: 'No lead rows were selected.',
+        deleted: [], skipped: [] };
+    }
+
+    const sheet = getSpreadsheet_().getSheetByName(fromTab);
+    if (!sheet) {
+      return { ok: false, problem: 'There is no tab called ' + fromTab + '.',
+        deleted: [], skipped: [] };
+    }
+
+    const deleted = [];
+    const skipped = [];
+
+    wanted.forEach(function (row) {
+      const found = leadAtRow_(fromTab, row);
+      if (!found.ok) {
+        skipped.push({ row: row, problem: found.problem });
+        return;
+      }
+      const lead = found.lead;
+      const name = cleanText_(lead.fullName) || cleanText_(lead.email) ||
+        cleanText_(lead.phone) || found.leadId;
+
+      // The index first, while the row it names is still there to be found.
+      forgetIndexEntries_(found.leadId);
+
+      const allLeads = getSpreadsheet_().getSheetByName(SHEETS.allLeads);
+      if (allLeads) {
+        const copy = findLeadRow_(allLeads, found.leadId, 0);
+        if (copy) allLeads.deleteRow(copy);
+      }
+
+      sheet.deleteRow(row);
+      shiftIndexRowsAfterDelete_(fromTab, row);
+      deleted.push({ row: row, name: name, leadId: found.leadId });
+    });
+
+    log_('INFO', 'delete', 'Deleted leads', {
+      tab: fromTab, deleted: deleted.length, skipped: skipped.length
+    });
+    return {
+      ok: deleted.length > 0,
+      deleted: deleted.reverse(),
+      skipped: skipped.reverse()
+    };
+  }, 300000);
 }
