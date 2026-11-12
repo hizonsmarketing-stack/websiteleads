@@ -33,6 +33,7 @@ const COLUMN_TO_FIELD = {
   'Last Touch At': 'lastTouchAt',
   'All Sub-Sources': 'allSubSources',
   'Raw Ref': 'rawRef',
+  'Re-inquired': 'reInquired',
   'Matched On': 'matchedOn',
   'Original Lead ID': 'originalLeadId',
   'Original Tab': 'originalTab'

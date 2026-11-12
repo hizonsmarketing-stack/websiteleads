@@ -23,7 +23,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '50a55d72971f';
+const BUILD_ = '551d48ad7dfc';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -84,7 +84,12 @@ const LEAD_COLUMNS = [
   'First Seen At',
   'Last Touch At',
   'All Sub-Sources',
-  'Raw Ref'
+  'Raw Ref',
+  // Stamped when a client the team already has writes in again. Its own
+  // column because Status answers "how did the call go" and this answers
+  // "has something new come in" — one cell cannot hold both, and writing
+  // the second over the first loses whatever the caller decided.
+  'Re-inquired'
 ];
 
 /**
@@ -720,6 +725,7 @@ const COLUMN_TO_FIELD = {
   'Last Touch At': 'lastTouchAt',
   'All Sub-Sources': 'allSubSources',
   'Raw Ref': 'rawRef',
+  'Re-inquired': 'reInquired',
   'Matched On': 'matchedOn',
   'Original Lead ID': 'originalLeadId',
   'Original Tab': 'originalTab'
@@ -1949,6 +1955,15 @@ const SOURCES_COLUMNS = [
 
 const INDEX_COLUMNS = ['Key', 'Lead ID', 'Tab', 'Row', 'Updated At'];
 
+/**
+ * What a match on the sender's own id is called.
+ *
+ * Named rather than written twice, because the merge has to tell this match
+ * apart from the others: it means the same delivery arrived again, not that
+ * the client did anything.
+ */
+const MATCHED_ON_EXTERNAL_ID = 'Lead ID from the source';
+
 let INDEX_CACHE_ = null;
 
 /**
@@ -2043,7 +2058,7 @@ function dedupeKeys_(lead) {
   // it. That costs nothing: a retry arrives within seconds of the original,
   // long before anybody rebuilds.
   if (lead.externalKey) {
-    keys.push({ key: lead.externalKey, matchedOn: 'Lead ID from the source' });
+    keys.push({ key: lead.externalKey, matchedOn: MATCHED_ON_EXTERNAL_ID });
   }
   if (fields.indexOf('email') !== -1 && lead.emailKey) {
     keys.push({ key: 'email:' + lead.emailKey, matchedOn: 'Email' });
@@ -3009,57 +3024,12 @@ function mergeDuplicate_(incoming, match) {
   recordDuplicate_(incoming, match, entry.leadId, entry.tab);
 
   const promoted = maybePromote_(sheet, row, original, incoming, entry.leadId);
-  const handed = promoted ? null : handOnFromRetired_(entry.tab, row);
-  const landed = promoted || handed;
   return {
-    action: promoted ? 'merged+promoted' : (handed ? 'merged+handed on' : 'merged'),
-    tab: landed ? landed.tab : entry.tab,
-    row: landed ? landed.row : row,
+    action: promoted ? 'merged+promoted' : 'merged',
+    tab: promoted ? promoted.tab : entry.tab,
+    row: promoted ? promoted.row : row,
     leadId: entry.leadId
   };
-}
-
-/**
- * Moves a lead off a tab whose salesperson has left.
- *
- * A client enquiring again is a live enquiry, whatever the age of the row it
- * merges into. Merging it onto a retired salesperson's tab recorded the touch
- * and told nobody: the tab is not worked, so the enquiry sat there. Setting
- * Active to "no" stopped the rotation and nothing else, which is how a tab
- * somebody thought they had closed went on collecting.
- *
- * Only for a tab the roster says belongs to an inactive person. A shared
- * event-type tab has no salesperson and is left alone, and so is a tab whose
- * owner is still here.
- *
- * @param {string} tabName The tab the lead is on.
- * @param {number} row Its row there.
- * @return {?{tab: string, row: number}} Where it went, or null if it stayed.
- */
-function handOnFromRetired_(tabName, row) {
-  const owner = memberByTab_(tabName);
-  if (!owner || owner.active) return null;
-
-  const found = leadAtRow_(tabName, row);
-  if (!found.ok) return null;
-
-  // Asked for without the old name, so the rotation answers rather than the
-  // record. Nobody active covering this event type means there is nowhere
-  // better to put it, and it stays where it is.
-  const taker = pickAssignee_(Object.assign({}, found.lead, { assignedTo: '' }));
-  if (!taker || !taker.tab || taker.tab === tabName) return null;
-
-  const moved = moveOneLead_(tabName, row, taker.name);
-  if (!moved.ok) {
-    log_('WARN', 'router', 'Could not hand a lead on from a retired tab', {
-      from: tabName, to: taker.name, problem: moved.problem
-    });
-    return null;
-  }
-  log_('INFO', 'router', 'Handed a returning client on from a retired tab', {
-    from: tabName, to: moved.to, leadId: found.leadId
-  });
-  return { tab: moved.to, row: moved.row };
 }
 
 /**
@@ -3127,6 +3097,20 @@ function buildMergeUpdates_(original, incoming, matchedOn) {
     'Touches': (Number(original.touches) || 1) + 1,
     'Last Touch At': incoming.receivedAt
   };
+
+  // The client has written in again, which the row otherwise says nowhere a
+  // person would see: the touch count moves, the message grows a note, and the
+  // colour stays whatever the caller last set. Stamped with the day and the
+  // form, so somebody covering the tab can tell a fresh question from a lead
+  // that was answered weeks ago.
+  //
+  // Not for a delivery the sender repeated. Google Ads retries anything it
+  // does not get a prompt 200 for, carrying the same lead id, and that is the
+  // network talking rather than the client.
+  if (squashKey_(matchedOn) !== squashKey_(MATCHED_ON_EXTERNAL_ID)) {
+    updates['Re-inquired'] = cleanText_(incoming.receivedAt).slice(0, 10) +
+      (incoming.subSource ? ' · ' + incoming.subSource : '');
+  }
 
   const subSources = String(original.allSubSources || original.subSource || '')
     .split(/\s*\|\s*/)
@@ -3327,6 +3311,9 @@ function moveOneLead_(fromTab, row, target) {
   {
     const found = leadAtRow_(fromTab, row);
     if (!found.ok) return found;
+
+    const refusal = moveRefusal_(found.lead);
+    if (refusal) return { ok: false, problem: refusal };
     const sheet = found.sheet;
     const lead = found.lead;
     const leadId = found.leadId;
@@ -3357,6 +3344,11 @@ function moveOneLead_(fromTab, row, target) {
 
     // Transferred is what the sender wrote when they let go of it. To the
     // receiver it is a lead nobody has worked, so it reads as one.
+    //
+    // Every other status is carried across untouched. Blanking them was tried
+    // and dropped: a Valid lead can no longer be moved at all, and for the
+    // rest the status is the caller's own record of what happened on the
+    // phone. Resetting it to New threw that away to fix a colour.
     if (squashKey_(moved.status) === squashKey_('Transferred')) moved.status = 'New';
 
     const targetSheet = getOrCreateSheet_(targetTab, LEAD_COLUMNS);
@@ -3401,6 +3393,27 @@ function moveOneLead_(fromTab, row, target) {
       eventType: cleanText_(moved.eventTypeLabel)
     };
   }
+}
+
+/**
+ * Why a lead should not be handed to somebody else, or '' when it may be.
+ *
+ * Valid means the client answered and has a real inquiry — the one status a
+ * caller earns rather than records, and the one worth protecting from a
+ * mis-drag. A qualified client changing hands should be a decision somebody
+ * took on purpose, so the status is cleared first and the move made after.
+ *
+ * Shared by the move itself and by the menu, so the dialog can say which rows
+ * it will leave before anything happens rather than reporting it afterwards.
+ *
+ * @param {!Object} lead As read from the row.
+ * @return {string}
+ */
+function moveRefusal_(lead) {
+  if (squashKey_(lead && lead.status) !== squashKey_('Valid')) return '';
+  return (cleanText_(lead.fullName) || cleanText_(lead.email) || 'That lead') +
+    ' is marked Valid. A qualified client is not moved by accident — change ' +
+    'the status first if you mean to hand them over.';
 }
 
 /**
@@ -4385,6 +4398,7 @@ function setupWorkbook() {
       if (!sheet) return;
       applyStatusColours_(sheet);
       applyStatusDropdown_(sheet);
+      applyReInquiredHighlight_(sheet);
     });
     buildDashboard_();
     hideInternalTabs_();
@@ -4607,6 +4621,62 @@ function applyStatusColours_(sheet) {
 
   // Ours go last, so a rule somebody set up for themselves still wins.
   sheet.setConditionalFormatRules(kept.concat(added));
+}
+
+/** The fill a Re-inquired cell takes while it still has something in it. */
+const REINQUIRED_COLOUR = '#FFF2CC';
+
+/**
+ * Lights up the Re-inquired cell while it has something in it.
+ *
+ * One cell rather than the row. The row's colour is the Status colour and
+ * belongs to the caller; covering it would hide what they decided to say the
+ * moment a client wrote in, which is exactly when it matters most.
+ *
+ * It clears itself in the ordinary way: the cell is emptied once somebody has
+ * answered, and the highlight goes with it.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ */
+function applyReInquiredHighlight_(sheet) {
+  const col = headerMap_(sheet)[squashKey_('Re-inquired')];
+  if (!col) return;
+
+  const letter = columnLetterFromIndex_(col);
+  const range = sheet.getRange(2, col, Math.max(sheet.getMaxRows() - 1, 1), 1);
+  const formula = reInquiredFormula_(letter);
+
+  const added = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(formula)
+    .setBackground(REINQUIRED_COLOUR)
+    .setRanges([range])
+    .build();
+
+  // Between the team's rules and ours. The first match wins the background, so
+  // this has to come before the status rules, which span the same cell — and
+  // after anything somebody set up for themselves, which outranks everything
+  // the script writes.
+  const theirs = [];
+  const status = [];
+  sheet.getConditionalFormatRules().forEach(function (rule) {
+    if (isReInquiredRule_(rule)) return;
+    (isStatusColourRule_(rule) ? status : theirs).push(rule);
+  });
+  sheet.setConditionalFormatRules(theirs.concat([added], status));
+}
+
+/** @return {string} The formula a Re-inquired highlight is written with. */
+function reInquiredFormula_(letter) {
+  return '=LEN($' + letter + '2)>0';
+}
+
+/** @return {boolean} Whether this rule is one applyReInquiredHighlight_ wrote. */
+function isReInquiredRule_(rule) {
+  const condition = rule.getBooleanCondition && rule.getBooleanCondition();
+  const values = (condition && condition.getCriteriaValues()) || [];
+  return values.some(function (value) {
+    return /^=LEN\(\$[A-Z]+2\)>0$/.test(String(value));
+  });
 }
 
 /**
@@ -5399,8 +5469,18 @@ function menuMoveLead() {
   const blocked = [];
   rows.forEach(function (row) {
     const found = leadAtRow_(sheet.getName(), row);
-    if (found.ok) movable.push({ row: row, lead: found.lead, leadId: found.leadId });
-    else blocked.push({ row: row, problem: found.problem });
+    if (!found.ok) {
+      blocked.push({ row: row, problem: found.problem });
+      return;
+    }
+    // Said before the move rather than after, so the count in the prompt is
+    // the number that will really go.
+    const refusal = moveRefusal_(found.lead);
+    if (refusal) {
+      blocked.push({ row: row, problem: refusal });
+      return;
+    }
+    movable.push({ row: row, lead: found.lead, leadId: found.leadId });
   });
 
   if (!movable.length) {
@@ -5425,9 +5505,9 @@ function menuMoveLead() {
 
   const caveat = blocked.length
     ? '\n\n' + blocked.length + ' selected row' + (blocked.length === 1 ? '' : 's') +
-      ' will be left alone — no Lead ID, so ' +
-      (blocked.length === 1 ? 'it is not a lead' : 'they are not leads') +
-      ' the automation knows about.'
+      ' will be left alone:\n  ' + blocked.slice(0, 5).map(function (one) {
+        return 'row ' + one.row + ' — ' + one.problem;
+      }).join('\n  ') + (blocked.length > 5 ? '\n  …and ' + (blocked.length - 5) + ' more' : '')
     : '';
 
   const response = ui.prompt(

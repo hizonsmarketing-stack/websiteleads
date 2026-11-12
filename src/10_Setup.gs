@@ -167,6 +167,7 @@ function setupWorkbook() {
       if (!sheet) return;
       applyStatusColours_(sheet);
       applyStatusDropdown_(sheet);
+      applyReInquiredHighlight_(sheet);
     });
     buildDashboard_();
     hideInternalTabs_();
@@ -389,6 +390,62 @@ function applyStatusColours_(sheet) {
 
   // Ours go last, so a rule somebody set up for themselves still wins.
   sheet.setConditionalFormatRules(kept.concat(added));
+}
+
+/** The fill a Re-inquired cell takes while it still has something in it. */
+const REINQUIRED_COLOUR = '#FFF2CC';
+
+/**
+ * Lights up the Re-inquired cell while it has something in it.
+ *
+ * One cell rather than the row. The row's colour is the Status colour and
+ * belongs to the caller; covering it would hide what they decided to say the
+ * moment a client wrote in, which is exactly when it matters most.
+ *
+ * It clears itself in the ordinary way: the cell is emptied once somebody has
+ * answered, and the highlight goes with it.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ */
+function applyReInquiredHighlight_(sheet) {
+  const col = headerMap_(sheet)[squashKey_('Re-inquired')];
+  if (!col) return;
+
+  const letter = columnLetterFromIndex_(col);
+  const range = sheet.getRange(2, col, Math.max(sheet.getMaxRows() - 1, 1), 1);
+  const formula = reInquiredFormula_(letter);
+
+  const added = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(formula)
+    .setBackground(REINQUIRED_COLOUR)
+    .setRanges([range])
+    .build();
+
+  // Between the team's rules and ours. The first match wins the background, so
+  // this has to come before the status rules, which span the same cell — and
+  // after anything somebody set up for themselves, which outranks everything
+  // the script writes.
+  const theirs = [];
+  const status = [];
+  sheet.getConditionalFormatRules().forEach(function (rule) {
+    if (isReInquiredRule_(rule)) return;
+    (isStatusColourRule_(rule) ? status : theirs).push(rule);
+  });
+  sheet.setConditionalFormatRules(theirs.concat([added], status));
+}
+
+/** @return {string} The formula a Re-inquired highlight is written with. */
+function reInquiredFormula_(letter) {
+  return '=LEN($' + letter + '2)>0';
+}
+
+/** @return {boolean} Whether this rule is one applyReInquiredHighlight_ wrote. */
+function isReInquiredRule_(rule) {
+  const condition = rule.getBooleanCondition && rule.getBooleanCondition();
+  const values = (condition && condition.getCriteriaValues()) || [];
+  return values.some(function (value) {
+    return /^=LEN\(\$[A-Z]+2\)>0$/.test(String(value));
+  });
 }
 
 /**

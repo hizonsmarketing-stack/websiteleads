@@ -1443,7 +1443,46 @@ realLog('\n--- what a move settles, and what it refuses ---');
     cellOf('Pia', tab('Pia').getLastRow(), 'Status'), 'New');
   check('the onward move is reported too', onward.to, 'Pia');
 
+  // Every other status is the caller's own record of what happened on the
+  // phone, so it travels with the lead rather than being blanked.
+  const workedRow = tab('Pia').getLastRow();
+  setCellOf('Pia', workedRow, 'Status', 'No Response');
+  const fresh = api.moveLead('Pia', workedRow, 'Quin');
+  check('a worked lead still moves', fresh.ok, 'true');
+  const landed = tab('Quin').getLastRow();
+  check('and keeps what the sender recorded',
+    cellOf('Quin', landed, 'Status'), 'No Response');
+  check('the move is still noted on the row',
+    /moved from Pia to Quin/.test(String(cellOf('Quin', landed, 'Message'))), 'true');
+
+  // Valid is the one status a caller earns rather than records, so a
+  // qualified client is not handed on by a mis-drag.
+  setCellOf('Quin', landed, 'Status', 'Valid');
+  const beforeQuin = rows('Quin');
+  const refusedValid = api.moveLead('Quin', landed, 'Pia');
+  check('a Valid lead is not moved', refusedValid.ok, 'false');
+  check('and the refusal says why',
+    /marked Valid/.test(String(refusedValid.problem)), 'true');
+  check('the row stays where it is', rows('Quin'), beforeQuin);
+  // Clearing the status is the way to mean it.
+  setCellOf('Quin', landed, 'Status', 'New');
+  check('clearing the status lets it move',
+    api.moveLead('Quin', landed, 'Pia').ok, 'true');
+
+  // In bulk the Valid ones are reported and the rest still go.
+  const a1 = tab('Pia').getLastRow();
+  post({ formName: 'Homepage Inquiry', name: 'Bulk Valid', email: 'bulkvalid@example.com',
+    'Type of Event': 'Corporate', 'Assigned To': 'Pia' }, { source: 'website' });
+  const a2 = tab('Pia').getLastRow();
+  setCellOf('Pia', a2, 'Status', 'Valid');
+  api.resetCaches();
+  const mixed = api.moveLeads('Pia', [a1, a2], 'Quin');
+  check('a bulk move takes the rest', mixed.moved.length, 1);
+  check('and leaves the Valid one', mixed.skipped.length, 1);
+  check('naming it', /marked Valid/.test(String(mixed.skipped[0].problem)), 'true');
+
   const piaLast = tab('Pia').getLastRow();
+  const piaLastName = String(cellOf('Pia', piaLast, 'Full Name'));
   check('the header row is not a lead', api.moveLead('Pia', 1, 'Quin').ok, 'false');
   check('nor is a row past the end',
     api.moveLead('Pia', piaLast + 5, 'Quin').ok, 'false');
@@ -1453,7 +1492,7 @@ realLog('\n--- what a move settles, and what it refuses ---');
     api.moveLead('Pia', piaLast, 'Somebody Else').ok, 'false');
   check('and so is moving a lead to where it already is',
     api.moveLead('Pia', piaLast, 'Pia').ok, 'false');
-  check('a refusal moves nothing', cellOf('Pia', piaLast, 'Full Name'), 'No Type Given');
+  check('a refusal moves nothing', cellOf('Pia', piaLast, 'Full Name'), piaLastName);
 }
 
 realLog('\n--- a form that sends first and last name separately ---');
@@ -1623,6 +1662,10 @@ realLog('\n--- a tab whose header row was pasted over ---');
   const source = tab('Bea');
   const pasted = source.getRange(source.getLastRow(), 1, 1, goodWidth).getValues();
   mhay.getRange(1, 1, 1, goodWidth).setValues(pasted);
+  // Measured here rather than assumed: the pasted lead may leave a trailing
+  // column empty, and what the repair restores is the width the tab actually
+  // had when the script started appending, not the width before the paste.
+  const freeWidth = mhay.getLastColumn();
   api.resetCaches();
 
   // From here the script cannot read the tab, so it appends a set of its own
@@ -1644,9 +1687,10 @@ realLog('\n--- a tab whose header row was pasted over ---');
 
   const done = api.repairTabColumns('Mhay', 'Bea', false);
   check('the repair runs', done.ok, 'true');
-  check('the appended columns are gone', mhay.getLastColumn(), goodWidth);
+  check('the appended columns are gone', mhay.getLastColumn(), freeWidth);
   check('the header row is back',
-    mhay.getRange(1, 1, 1, goodWidth).getValues()[0].join('|'), goodHeaders);
+    mhay.getRange(1, 1, 1, freeWidth).getValues()[0].join('|'),
+    goodHeaders.split('|').slice(0, freeWidth).join('|'));
 
   // The whole point: every lead readable in the columns the team looks at.
   api.resetCaches();
@@ -1870,24 +1914,26 @@ realLog('\n--- a salesperson who has left stops receiving ---');
   check('matching the roster entry for that tab',
     api.loadTeam_().filter(function (m) { return m.tab === named.tab; })[0].name, holder);
 
-  // 3. A client coming back is a live enquiry, whatever the age of the row it
-  //    merges into. It used to record a touch on a tab nobody reads.
+  // 3. A client coming back stays with the person who already has them. The
+  //    lead is not moved: ownership is the team's to decide, not the script's,
+  //    and a row quietly changing hands is worse than one waiting for somebody
+  //    who is away. What the merge does instead is say so — see the re-enquiry
+  //    block below.
   const back = send({ name: 'Loyal Client', email: 'loyal@example.com',
     message: 'following up' });
-  check('a returning client is handed on', /handed on/.test(back.action), 'true');
-  check('to somebody who is still here', back.tab === 'Oldie', 'false');
-  check('and the row leaves the retired tab', rows('Oldie'), 0);
-  check('carrying its history', Number(cellOf(back.tab, tab(back.tab).getLastRow(), 'Touches')), 2);
+  check('a returning client stays with the person who has them', back.tab, 'Oldie');
+  check('and is not moved off the tab', rows('Oldie'), 1);
+  check('its history is kept', Number(cellOf('Oldie', 2, 'Touches')), 2);
 
-  // 4. The nastiest one: with the indexed row gone, a refile wrote a brand-new
-  //    row onto the retired tab, so it grew after it was thought closed.
-  const target = tab(back.tab);
+  // 4. With the indexed row gone there is nothing to keep together, so a
+  //    refile routes rather than writing a fresh row onto a tab nobody works.
+  const target = tab('Oldie');
   target.deleteRow(target.getLastRow());
   api.resetCaches();
   const refiled = send({ name: 'Loyal Client', email: 'loyal@example.com',
     message: 'third time' });
   check('a refile does not resurrect the retired tab', refiled.tab === 'Oldie', 'false');
-  check('and the tab stays empty', rows('Oldie'), 0);
+  check('and the tab stays as it was', rows('Oldie'), 0);
 
   // Turning them back on puts everything back as it was.
   for (let r = 2; r <= team.getLastRow(); r++) {

@@ -294,8 +294,18 @@ function menuMoveLead() {
   const blocked = [];
   rows.forEach(function (row) {
     const found = leadAtRow_(sheet.getName(), row);
-    if (found.ok) movable.push({ row: row, lead: found.lead, leadId: found.leadId });
-    else blocked.push({ row: row, problem: found.problem });
+    if (!found.ok) {
+      blocked.push({ row: row, problem: found.problem });
+      return;
+    }
+    // Said before the move rather than after, so the count in the prompt is
+    // the number that will really go.
+    const refusal = moveRefusal_(found.lead);
+    if (refusal) {
+      blocked.push({ row: row, problem: refusal });
+      return;
+    }
+    movable.push({ row: row, lead: found.lead, leadId: found.leadId });
   });
 
   if (!movable.length) {
@@ -320,9 +330,9 @@ function menuMoveLead() {
 
   const caveat = blocked.length
     ? '\n\n' + blocked.length + ' selected row' + (blocked.length === 1 ? '' : 's') +
-      ' will be left alone — no Lead ID, so ' +
-      (blocked.length === 1 ? 'it is not a lead' : 'they are not leads') +
-      ' the automation knows about.'
+      ' will be left alone:\n  ' + blocked.slice(0, 5).map(function (one) {
+        return 'row ' + one.row + ' — ' + one.problem;
+      }).join('\n  ') + (blocked.length > 5 ? '\n  …and ' + (blocked.length - 5) + ' more' : '')
     : '';
 
   const response = ui.prompt(

@@ -53,7 +53,12 @@ const LEAD_COLUMNS = [
   'First Seen At',
   'Last Touch At',
   'All Sub-Sources',
-  'Raw Ref'
+  'Raw Ref',
+  // Stamped when a client the team already has writes in again. Its own
+  // column because Status answers "how did the call go" and this answers
+  // "has something new come in" — one cell cannot hold both, and writing
+  // the second over the first loses whatever the caller decided.
+  'Re-inquired'
 ];
 
 /**
