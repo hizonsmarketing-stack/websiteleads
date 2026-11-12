@@ -1443,7 +1443,21 @@ realLog('\n--- what a move settles, and what it refuses ---');
     cellOf('Pia', tab('Pia').getLastRow(), 'Status'), 'New');
   check('the onward move is reported too', onward.to, 'Pia');
 
+  // Any status, not only Transferred. A lead arriving already green or
+  // already blue reads as handled by somebody who has never touched it.
+  const workedRow = tab('Pia').getLastRow();
+  setCellOf('Pia', workedRow, 'Status', 'Valid');
+  const fresh = api.moveLead('Pia', workedRow, 'Quin');
+  check('a worked lead arrives unworked too', fresh.ok, 'true');
+  const landed = tab('Quin').getLastRow();
+  check('so the row is white on the receiving tab',
+    cellOf('Quin', landed, 'Status'), 'New');
+  // What the sender knew is not lost, only moved out of the colour.
+  check('and the note says what it was',
+    /moved from Pia to Quin, was Valid/.test(String(cellOf('Quin', landed, 'Message'))), 'true');
+
   const piaLast = tab('Pia').getLastRow();
+  const piaLastName = String(cellOf('Pia', piaLast, 'Full Name'));
   check('the header row is not a lead', api.moveLead('Pia', 1, 'Quin').ok, 'false');
   check('nor is a row past the end',
     api.moveLead('Pia', piaLast + 5, 'Quin').ok, 'false');
@@ -1453,7 +1467,7 @@ realLog('\n--- what a move settles, and what it refuses ---');
     api.moveLead('Pia', piaLast, 'Somebody Else').ok, 'false');
   check('and so is moving a lead to where it already is',
     api.moveLead('Pia', piaLast, 'Pia').ok, 'false');
-  check('a refusal moves nothing', cellOf('Pia', piaLast, 'Full Name'), 'No Type Given');
+  check('a refusal moves nothing', cellOf('Pia', piaLast, 'Full Name'), piaLastName);
 }
 
 realLog('\n--- a form that sends first and last name separately ---');
@@ -1870,24 +1884,26 @@ realLog('\n--- a salesperson who has left stops receiving ---');
   check('matching the roster entry for that tab',
     api.loadTeam_().filter(function (m) { return m.tab === named.tab; })[0].name, holder);
 
-  // 3. A client coming back is a live enquiry, whatever the age of the row it
-  //    merges into. It used to record a touch on a tab nobody reads.
+  // 3. A client coming back stays with the person who already has them. The
+  //    lead is not moved: ownership is the team's to decide, not the script's,
+  //    and a row quietly changing hands is worse than one waiting for somebody
+  //    who is away. What the merge does instead is say so — see the re-enquiry
+  //    block below.
   const back = send({ name: 'Loyal Client', email: 'loyal@example.com',
     message: 'following up' });
-  check('a returning client is handed on', /handed on/.test(back.action), 'true');
-  check('to somebody who is still here', back.tab === 'Oldie', 'false');
-  check('and the row leaves the retired tab', rows('Oldie'), 0);
-  check('carrying its history', Number(cellOf(back.tab, tab(back.tab).getLastRow(), 'Touches')), 2);
+  check('a returning client stays with the person who has them', back.tab, 'Oldie');
+  check('and is not moved off the tab', rows('Oldie'), 1);
+  check('its history is kept', Number(cellOf('Oldie', 2, 'Touches')), 2);
 
-  // 4. The nastiest one: with the indexed row gone, a refile wrote a brand-new
-  //    row onto the retired tab, so it grew after it was thought closed.
-  const target = tab(back.tab);
+  // 4. With the indexed row gone there is nothing to keep together, so a
+  //    refile routes rather than writing a fresh row onto a tab nobody works.
+  const target = tab('Oldie');
   target.deleteRow(target.getLastRow());
   api.resetCaches();
   const refiled = send({ name: 'Loyal Client', email: 'loyal@example.com',
     message: 'third time' });
   check('a refile does not resurrect the retired tab', refiled.tab === 'Oldie', 'false');
-  check('and the tab stays empty', rows('Oldie'), 0);
+  check('and the tab stays as it was', rows('Oldie'), 0);
 
   // Turning them back on puts everything back as it was.
   for (let r = 2; r <= team.getLastRow(); r++) {

@@ -23,7 +23,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '50a55d72971f';
+const BUILD_ = 'e5dc7f89267c';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -3009,57 +3009,12 @@ function mergeDuplicate_(incoming, match) {
   recordDuplicate_(incoming, match, entry.leadId, entry.tab);
 
   const promoted = maybePromote_(sheet, row, original, incoming, entry.leadId);
-  const handed = promoted ? null : handOnFromRetired_(entry.tab, row);
-  const landed = promoted || handed;
   return {
-    action: promoted ? 'merged+promoted' : (handed ? 'merged+handed on' : 'merged'),
-    tab: landed ? landed.tab : entry.tab,
-    row: landed ? landed.row : row,
+    action: promoted ? 'merged+promoted' : 'merged',
+    tab: promoted ? promoted.tab : entry.tab,
+    row: promoted ? promoted.row : row,
     leadId: entry.leadId
   };
-}
-
-/**
- * Moves a lead off a tab whose salesperson has left.
- *
- * A client enquiring again is a live enquiry, whatever the age of the row it
- * merges into. Merging it onto a retired salesperson's tab recorded the touch
- * and told nobody: the tab is not worked, so the enquiry sat there. Setting
- * Active to "no" stopped the rotation and nothing else, which is how a tab
- * somebody thought they had closed went on collecting.
- *
- * Only for a tab the roster says belongs to an inactive person. A shared
- * event-type tab has no salesperson and is left alone, and so is a tab whose
- * owner is still here.
- *
- * @param {string} tabName The tab the lead is on.
- * @param {number} row Its row there.
- * @return {?{tab: string, row: number}} Where it went, or null if it stayed.
- */
-function handOnFromRetired_(tabName, row) {
-  const owner = memberByTab_(tabName);
-  if (!owner || owner.active) return null;
-
-  const found = leadAtRow_(tabName, row);
-  if (!found.ok) return null;
-
-  // Asked for without the old name, so the rotation answers rather than the
-  // record. Nobody active covering this event type means there is nowhere
-  // better to put it, and it stays where it is.
-  const taker = pickAssignee_(Object.assign({}, found.lead, { assignedTo: '' }));
-  if (!taker || !taker.tab || taker.tab === tabName) return null;
-
-  const moved = moveOneLead_(tabName, row, taker.name);
-  if (!moved.ok) {
-    log_('WARN', 'router', 'Could not hand a lead on from a retired tab', {
-      from: tabName, to: taker.name, problem: moved.problem
-    });
-    return null;
-  }
-  log_('INFO', 'router', 'Handed a returning client on from a retired tab', {
-    from: tabName, to: moved.to, leadId: found.leadId
-  });
-  return { tab: moved.to, row: moved.row };
 }
 
 /**
@@ -3355,9 +3310,16 @@ function moveOneLead_(fromTab, row, target) {
 
     moved.assignedTo = member ? member.name : '';
 
-    // Transferred is what the sender wrote when they let go of it. To the
-    // receiver it is a lead nobody has worked, so it reads as one.
-    if (squashKey_(moved.status) === squashKey_('Transferred')) moved.status = 'New';
+    // A moved lead arrives unworked, whatever it said before, so the row turns
+    // white on the receiving tab instead of carrying the sender's colour
+    // across. Only Transferred used to be reset, which left a lead that had
+    // been marked Valid or No Response arriving already green or already blue
+    // — read as handled by somebody who had never touched it.
+    //
+    // What the sender knew is not lost: the move writes a dated note into the
+    // message, under whatever they wrote while they had it.
+    const was = cleanText_(moved.status);
+    moved.status = 'New';
 
     const targetSheet = getOrCreateSheet_(targetTab, LEAD_COLUMNS);
     // The presenter rotation runs down the destination tab by row, so the row
@@ -3367,7 +3329,8 @@ function moveOneLead_(fromTab, row, target) {
       targetSheet.getLastRow() + 1,
       member ? member.name : '');
 
-    const note = '--- ' + nowStamp_() + ' moved from ' + fromTab + ' to ' + targetTab + ' ---';
+    const note = '--- ' + nowStamp_() + ' moved from ' + fromTab + ' to ' + targetTab +
+      (was && squashKey_(was) !== squashKey_('New') ? ', was ' + was : '') + ' ---';
     moved.message = (cleanText_(moved.message) ? moved.message + '\n\n' : '') + note;
 
     const newRow = appendLead_(targetSheet, moved);
