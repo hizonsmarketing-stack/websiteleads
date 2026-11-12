@@ -1443,18 +1443,17 @@ realLog('\n--- what a move settles, and what it refuses ---');
     cellOf('Pia', tab('Pia').getLastRow(), 'Status'), 'New');
   check('the onward move is reported too', onward.to, 'Pia');
 
-  // Any status, not only Transferred. A lead arriving already blue reads as
-  // handled by somebody who has never touched it.
+  // Every other status is the caller's own record of what happened on the
+  // phone, so it travels with the lead rather than being blanked.
   const workedRow = tab('Pia').getLastRow();
   setCellOf('Pia', workedRow, 'Status', 'No Response');
   const fresh = api.moveLead('Pia', workedRow, 'Quin');
-  check('a worked lead arrives unworked too', fresh.ok, 'true');
+  check('a worked lead still moves', fresh.ok, 'true');
   const landed = tab('Quin').getLastRow();
-  check('so the row is white on the receiving tab',
-    cellOf('Quin', landed, 'Status'), 'New');
-  // What the sender knew is not lost, only moved out of the colour.
-  check('and the note says what it was',
-    /moved from Pia to Quin, was No Response/.test(String(cellOf('Quin', landed, 'Message'))), 'true');
+  check('and keeps what the sender recorded',
+    cellOf('Quin', landed, 'Status'), 'No Response');
+  check('the move is still noted on the row',
+    /moved from Pia to Quin/.test(String(cellOf('Quin', landed, 'Message'))), 'true');
 
   // Valid is the one status a caller earns rather than records, so a
   // qualified client is not handed on by a mis-drag.

@@ -1025,16 +1025,14 @@ function moveOneLead_(fromTab, row, target) {
 
     moved.assignedTo = member ? member.name : '';
 
-    // A moved lead arrives unworked, whatever it said before, so the row turns
-    // white on the receiving tab instead of carrying the sender's colour
-    // across. Only Transferred used to be reset, which left a lead that had
-    // been marked Valid or No Response arriving already green or already blue
-    // — read as handled by somebody who had never touched it.
+    // Transferred is what the sender wrote when they let go of it. To the
+    // receiver it is a lead nobody has worked, so it reads as one.
     //
-    // What the sender knew is not lost: the move writes a dated note into the
-    // message, under whatever they wrote while they had it.
-    const was = cleanText_(moved.status);
-    moved.status = 'New';
+    // Every other status is carried across untouched. Blanking them was tried
+    // and dropped: a Valid lead can no longer be moved at all, and for the
+    // rest the status is the caller's own record of what happened on the
+    // phone. Resetting it to New threw that away to fix a colour.
+    if (squashKey_(moved.status) === squashKey_('Transferred')) moved.status = 'New';
 
     const targetSheet = getOrCreateSheet_(targetTab, LEAD_COLUMNS);
     // The presenter rotation runs down the destination tab by row, so the row
@@ -1044,8 +1042,7 @@ function moveOneLead_(fromTab, row, target) {
       targetSheet.getLastRow() + 1,
       member ? member.name : '');
 
-    const note = '--- ' + nowStamp_() + ' moved from ' + fromTab + ' to ' + targetTab +
-      (was && squashKey_(was) !== squashKey_('New') ? ', was ' + was : '') + ' ---';
+    const note = '--- ' + nowStamp_() + ' moved from ' + fromTab + ' to ' + targetTab + ' ---';
     moved.message = (cleanText_(moved.message) ? moved.message + '\n\n' : '') + note;
 
     const newRow = appendLead_(targetSheet, moved);
