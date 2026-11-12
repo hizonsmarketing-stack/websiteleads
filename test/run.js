@@ -1946,6 +1946,46 @@ realLog('\n--- a hand-written summary block is not a lead ---');
     waitingNow(), before + 1);
 }
 
+realLog('\n--- a caller marking a duplicate on their own tab ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  // The automation only catches what it can match. A client who filled a form
+  // in under one email and walked up to the booth under another is two records
+  // it has no way of joining, and the caller is the one who finds out — so the
+  // word has to be theirs to pick.
+  // Setup is what puts the dropdown on a tab, so it runs first — the same
+  // order a person follows after deploying.
+  api.setupWorkbook();
+  api.resetCaches();
+  const sheet = tab('Fred');
+  const statusCol = api.fieldColumns_(sheet).byField['status'];
+  check('the Status column offers Duplicate',
+    (sheet._validation[statusCol] || []).indexOf('Duplicate') !== -1, 'true');
+  check('alongside the five it always had',
+    (sheet._validation[statusCol] || []).join(','),
+    'New,Valid,No Response,Lost,Transferred,Duplicate');
+
+  // The orange rule was already on every caller tab; only the dropdown was
+  // missing. Pinned so a row marked by hand colours the same as one the
+  // automation filed itself.
+  api.applyStatusColours_(sheet);
+  const rule = sheet.getConditionalFormatRules().filter(function (r) {
+    return /="Duplicate"/.test(String((r.getBooleanCondition().getCriteriaValues() || [])[0]));
+  })[0];
+  check('and a caller tab carries the Duplicate rule', !!rule, 'true');
+  check('in the same orange the Duplicates tab uses', rule && rule.__background, '#F9CB9C');
+
+  // And the report agrees it is a value that colours, so somebody checking a
+  // row is not told otherwise.
+  const at = sheet.getLastRow() + 1;
+  sheet.getRange(at, 2).setValue('LD-dup-by-hand');
+  sheet.getRange(at, statusCol).setValue('Duplicate');
+  const text = api.statusColourReport_(sheet).lines.join('\n');
+  check('the report counts it as colouring', /OK {2}"Duplicate"/.test(text), 'true');
+}
+
 realLog('\n--- a corporate lead is yellow, however it is written ---');
 {
   silence(quiet);
