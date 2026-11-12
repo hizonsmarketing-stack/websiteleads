@@ -10,6 +10,15 @@
 
 const INDEX_COLUMNS = ['Key', 'Lead ID', 'Tab', 'Row', 'Updated At'];
 
+/**
+ * What a match on the sender's own id is called.
+ *
+ * Named rather than written twice, because the merge has to tell this match
+ * apart from the others: it means the same delivery arrived again, not that
+ * the client did anything.
+ */
+const MATCHED_ON_EXTERNAL_ID = 'Lead ID from the source';
+
 let INDEX_CACHE_ = null;
 
 /**
@@ -104,7 +113,7 @@ function dedupeKeys_(lead) {
   // it. That costs nothing: a retry arrives within seconds of the original,
   // long before anybody rebuilds.
   if (lead.externalKey) {
-    keys.push({ key: lead.externalKey, matchedOn: 'Lead ID from the source' });
+    keys.push({ key: lead.externalKey, matchedOn: MATCHED_ON_EXTERNAL_ID });
   }
   if (fields.indexOf('email') !== -1 && lead.emailKey) {
     keys.push({ key: 'email:' + lead.emailKey, matchedOn: 'Email' });

@@ -781,6 +781,20 @@ function buildMergeUpdates_(original, incoming, matchedOn) {
     'Last Touch At': incoming.receivedAt
   };
 
+  // The client has written in again, which the row otherwise says nowhere a
+  // person would see: the touch count moves, the message grows a note, and the
+  // colour stays whatever the caller last set. Stamped with the day and the
+  // form, so somebody covering the tab can tell a fresh question from a lead
+  // that was answered weeks ago.
+  //
+  // Not for a delivery the sender repeated. Google Ads retries anything it
+  // does not get a prompt 200 for, carrying the same lead id, and that is the
+  // network talking rather than the client.
+  if (squashKey_(matchedOn) !== squashKey_(MATCHED_ON_EXTERNAL_ID)) {
+    updates['Re-inquired'] = cleanText_(incoming.receivedAt).slice(0, 10) +
+      (incoming.subSource ? ' · ' + incoming.subSource : '');
+  }
+
   const subSources = String(original.allSubSources || original.subSource || '')
     .split(/\s*\|\s*/)
     .map(function (s) { return s.trim(); })
@@ -980,6 +994,9 @@ function moveOneLead_(fromTab, row, target) {
   {
     const found = leadAtRow_(fromTab, row);
     if (!found.ok) return found;
+
+    const refusal = moveRefusal_(found.lead);
+    if (refusal) return { ok: false, problem: refusal };
     const sheet = found.sheet;
     const lead = found.lead;
     const leadId = found.leadId;
@@ -1062,6 +1079,27 @@ function moveOneLead_(fromTab, row, target) {
       eventType: cleanText_(moved.eventTypeLabel)
     };
   }
+}
+
+/**
+ * Why a lead should not be handed to somebody else, or '' when it may be.
+ *
+ * Valid means the client answered and has a real inquiry — the one status a
+ * caller earns rather than records, and the one worth protecting from a
+ * mis-drag. A qualified client changing hands should be a decision somebody
+ * took on purpose, so the status is cleared first and the move made after.
+ *
+ * Shared by the move itself and by the menu, so the dialog can say which rows
+ * it will leave before anything happens rather than reporting it afterwards.
+ *
+ * @param {!Object} lead As read from the row.
+ * @return {string}
+ */
+function moveRefusal_(lead) {
+  if (squashKey_(lead && lead.status) !== squashKey_('Valid')) return '';
+  return (cleanText_(lead.fullName) || cleanText_(lead.email) || 'That lead') +
+    ' is marked Valid. A qualified client is not moved by accident — change ' +
+    'the status first if you mean to hand them over.';
 }
 
 /**

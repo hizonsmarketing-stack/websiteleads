@@ -1443,10 +1443,10 @@ realLog('\n--- what a move settles, and what it refuses ---');
     cellOf('Pia', tab('Pia').getLastRow(), 'Status'), 'New');
   check('the onward move is reported too', onward.to, 'Pia');
 
-  // Any status, not only Transferred. A lead arriving already green or
-  // already blue reads as handled by somebody who has never touched it.
+  // Any status, not only Transferred. A lead arriving already blue reads as
+  // handled by somebody who has never touched it.
   const workedRow = tab('Pia').getLastRow();
-  setCellOf('Pia', workedRow, 'Status', 'Valid');
+  setCellOf('Pia', workedRow, 'Status', 'No Response');
   const fresh = api.moveLead('Pia', workedRow, 'Quin');
   check('a worked lead arrives unworked too', fresh.ok, 'true');
   const landed = tab('Quin').getLastRow();
@@ -1454,7 +1454,33 @@ realLog('\n--- what a move settles, and what it refuses ---');
     cellOf('Quin', landed, 'Status'), 'New');
   // What the sender knew is not lost, only moved out of the colour.
   check('and the note says what it was',
-    /moved from Pia to Quin, was Valid/.test(String(cellOf('Quin', landed, 'Message'))), 'true');
+    /moved from Pia to Quin, was No Response/.test(String(cellOf('Quin', landed, 'Message'))), 'true');
+
+  // Valid is the one status a caller earns rather than records, so a
+  // qualified client is not handed on by a mis-drag.
+  setCellOf('Quin', landed, 'Status', 'Valid');
+  const beforeQuin = rows('Quin');
+  const refusedValid = api.moveLead('Quin', landed, 'Pia');
+  check('a Valid lead is not moved', refusedValid.ok, 'false');
+  check('and the refusal says why',
+    /marked Valid/.test(String(refusedValid.problem)), 'true');
+  check('the row stays where it is', rows('Quin'), beforeQuin);
+  // Clearing the status is the way to mean it.
+  setCellOf('Quin', landed, 'Status', 'New');
+  check('clearing the status lets it move',
+    api.moveLead('Quin', landed, 'Pia').ok, 'true');
+
+  // In bulk the Valid ones are reported and the rest still go.
+  const a1 = tab('Pia').getLastRow();
+  post({ formName: 'Homepage Inquiry', name: 'Bulk Valid', email: 'bulkvalid@example.com',
+    'Type of Event': 'Corporate', 'Assigned To': 'Pia' }, { source: 'website' });
+  const a2 = tab('Pia').getLastRow();
+  setCellOf('Pia', a2, 'Status', 'Valid');
+  api.resetCaches();
+  const mixed = api.moveLeads('Pia', [a1, a2], 'Quin');
+  check('a bulk move takes the rest', mixed.moved.length, 1);
+  check('and leaves the Valid one', mixed.skipped.length, 1);
+  check('naming it', /marked Valid/.test(String(mixed.skipped[0].problem)), 'true');
 
   const piaLast = tab('Pia').getLastRow();
   const piaLastName = String(cellOf('Pia', piaLast, 'Full Name'));
@@ -1637,6 +1663,10 @@ realLog('\n--- a tab whose header row was pasted over ---');
   const source = tab('Bea');
   const pasted = source.getRange(source.getLastRow(), 1, 1, goodWidth).getValues();
   mhay.getRange(1, 1, 1, goodWidth).setValues(pasted);
+  // Measured here rather than assumed: the pasted lead may leave a trailing
+  // column empty, and what the repair restores is the width the tab actually
+  // had when the script started appending, not the width before the paste.
+  const freeWidth = mhay.getLastColumn();
   api.resetCaches();
 
   // From here the script cannot read the tab, so it appends a set of its own
@@ -1658,9 +1688,10 @@ realLog('\n--- a tab whose header row was pasted over ---');
 
   const done = api.repairTabColumns('Mhay', 'Bea', false);
   check('the repair runs', done.ok, 'true');
-  check('the appended columns are gone', mhay.getLastColumn(), goodWidth);
+  check('the appended columns are gone', mhay.getLastColumn(), freeWidth);
   check('the header row is back',
-    mhay.getRange(1, 1, 1, goodWidth).getValues()[0].join('|'), goodHeaders);
+    mhay.getRange(1, 1, 1, freeWidth).getValues()[0].join('|'),
+    goodHeaders.split('|').slice(0, freeWidth).join('|'));
 
   // The whole point: every lead readable in the columns the team looks at.
   api.resetCaches();
