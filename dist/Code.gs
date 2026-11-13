@@ -23,7 +23,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '551d48ad7dfc';
+const BUILD_ = 'f6966b109c1c';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -2387,6 +2387,7 @@ function loadTeam_() {
           .map(function (e) { return e.trim(); })
           .filter(String),
         active: /^(yes|y|true|1|on)$/i.test(cleanText_(at(row, 'Active'))),
+        away: isAwayValue_(at(row, 'Active')),
         count: Number(at(row, 'Assigned Count')) || 0,
         lastAt: cleanText_(at(row, 'Last Assigned At')),
         presenter: cleanText_(at(row, 'Presenter')),
@@ -2400,6 +2401,31 @@ function loadTeam_() {
   TEAM_CACHE_ = members;
   reconcileRosterTabs_(members);
   return members;
+}
+
+/**
+ * Whether an Active cell says "away for now" rather than "gone".
+ *
+ * Active used to be a yes/no, and "no" had to carry both meanings: somebody on
+ * a day off and somebody who had left the team. They are not the same thing
+ * and the script treated them as one — a client writing in while their caller
+ * was away could be handed to whoever was in, because as far as the roster
+ * said, that caller was never coming back.
+ *
+ * An away caller is skipped by the rotation exactly as an inactive one is, so
+ * no new lead lands on their tab. Everywhere else they are still here: the
+ * leads they already hold stay theirs, and they can still be handed one ready
+ * for their return.
+ *
+ * "no" keeps its old meaning, so a roster nobody edits behaves as it always
+ * did.
+ *
+ * @param {*} value The Active cell.
+ * @return {boolean}
+ */
+function isAwayValue_(value) {
+  return /^(off|day ?off|away|leave|on leave|vacation|vl|sl|rest ?day|rd)$/i
+    .test(cleanText_(value));
 }
 
 /**
@@ -3055,7 +3081,12 @@ function refileWithSameOwner_(sheet, entry, incoming) {
   // of both: the lead is lost to everybody, and a tab somebody retired grows
   // after they thought it was finished. Keeping it with the owner is the point
   // of this function, and it stops being the point when there is no owner.
-  if (owner && !owner.active) {
+  //
+  // Somebody on a day off is still the owner. This was the last path by which
+  // a caller could come back from a rest day to find a client of theirs on
+  // another tab — rare, because it needs the indexed row to have gone missing
+  // first, but the same loss when it happened.
+  if (owner && !owner.active && !owner.away) {
     log_('INFO', 'dedupe', 'Indexed row is gone and its salesperson has left; routing instead', {
       tab: entry.tab, salesperson: owner.name, leadId: entry.leadId
     });
@@ -3318,8 +3349,12 @@ function moveOneLead_(fromTab, row, target) {
     const lead = found.lead;
     const leadId = found.leadId;
 
-    const member = namedMember_(target) || memberByTab_(target);
-    const targetTab = (member && member.tab) || cleanText_(target);
+    // The menu lists a caller on a day off as "GWEN (day off)", so that is what
+    // somebody copying the line out of the prompt types back. The standing is a
+    // label on the list, not part of anybody's name.
+    const wanted = cleanText_(target).replace(/\s*\((?:day off|inactive)\)\s*$/i, '');
+    const member = namedMember_(wanted) || memberByTab_(wanted);
+    const targetTab = (member && member.tab) || wanted;
     if (!targetTab || leadTabNames_().indexOf(targetTab) === -1) {
       return { ok: false, problem: 'No salesperson or lead tab called "' + target + '".\n\n' +
         'Pick one of: ' + leadTabNames_().join(', ') };
@@ -4500,7 +4535,7 @@ function seedSettings_() {
 function createRosterTabs_() {
   const created = [];
   loadTeam_().forEach(function (member) {
-    if (!member.active || !member.tab) return;
+    if ((!member.active && !member.away) || !member.tab) return;
     if (getSpreadsheet_().getSheetByName(member.tab)) return;
     const sheet = getOrCreateSheet_(member.tab, LEAD_COLUMNS);
     styleLeadSheet_(sheet);
@@ -4967,8 +5002,8 @@ function buildDashboard_() {
   rows.push(['', '', '']);
   rows.push(['Leads by salesperson', 'Count', '']);
   loadTeam_().forEach(function (member) {
-    rows.push([member.name + (member.active ? '' : ' (inactive)'),
-      leadCountFormula_(member.tab), '']);
+    const standing = member.active ? '' : (member.away ? ' (day off)' : ' (inactive)');
+    rows.push([member.name + standing, leadCountFormula_(member.tab), '']);
   });
   rows.push(['', '', '']);
   rows.push(['Totals', 'Count', '']);
@@ -5488,8 +5523,11 @@ function menuMoveLead() {
     return;
   }
 
-  const people = loadTeam_().filter(function (m) { return m.active && m.tab; })
-    .map(function (m) { return m.name; });
+  // Somebody on a day off is offered too. Handing them a lead to find when
+  // they are back is a thing people do on purpose, and leaving them off the
+  // list made it look as though they had left.
+  const people = loadTeam_().filter(function (m) { return (m.active || m.away) && m.tab; })
+    .map(function (m) { return m.name + (m.active ? '' : ' (day off)'); });
   const shared = teamTabNames_();
   const nameOf = function (entry) {
     return cleanText_(entry.lead.fullName) || cleanText_(entry.lead.email) || entry.leadId;
@@ -5776,7 +5814,10 @@ function menuOpenTeamRoster() {
     'Tab Name — the tab their leads go into.\n' +
     'Event Types — comma-separated, from: ' + labels.join(', ') + '\n' +
     '   (or * for everything)\n' +
-    'Active — yes for anyone currently taking leads.\n\n' +
+    'Active — yes for anyone currently taking leads.\n' +
+    '   off — on a day off: no new leads, but the leads they hold stay\n' +
+    '   theirs and they can still be handed one.\n' +
+    '   no — left the team.\n\n' +
     'Leads are shared out evenly: whoever covers the event type and has the ' +
     'fewest so far gets the next one. Clear the Assigned Count column to ' +
     'restart the rotation.',

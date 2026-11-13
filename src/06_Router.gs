@@ -70,6 +70,7 @@ function loadTeam_() {
           .map(function (e) { return e.trim(); })
           .filter(String),
         active: /^(yes|y|true|1|on)$/i.test(cleanText_(at(row, 'Active'))),
+        away: isAwayValue_(at(row, 'Active')),
         count: Number(at(row, 'Assigned Count')) || 0,
         lastAt: cleanText_(at(row, 'Last Assigned At')),
         presenter: cleanText_(at(row, 'Presenter')),
@@ -83,6 +84,31 @@ function loadTeam_() {
   TEAM_CACHE_ = members;
   reconcileRosterTabs_(members);
   return members;
+}
+
+/**
+ * Whether an Active cell says "away for now" rather than "gone".
+ *
+ * Active used to be a yes/no, and "no" had to carry both meanings: somebody on
+ * a day off and somebody who had left the team. They are not the same thing
+ * and the script treated them as one — a client writing in while their caller
+ * was away could be handed to whoever was in, because as far as the roster
+ * said, that caller was never coming back.
+ *
+ * An away caller is skipped by the rotation exactly as an inactive one is, so
+ * no new lead lands on their tab. Everywhere else they are still here: the
+ * leads they already hold stay theirs, and they can still be handed one ready
+ * for their return.
+ *
+ * "no" keeps its old meaning, so a roster nobody edits behaves as it always
+ * did.
+ *
+ * @param {*} value The Active cell.
+ * @return {boolean}
+ */
+function isAwayValue_(value) {
+  return /^(off|day ?off|away|leave|on leave|vacation|vl|sl|rest ?day|rd)$/i
+    .test(cleanText_(value));
 }
 
 /**
@@ -738,7 +764,12 @@ function refileWithSameOwner_(sheet, entry, incoming) {
   // of both: the lead is lost to everybody, and a tab somebody retired grows
   // after they thought it was finished. Keeping it with the owner is the point
   // of this function, and it stops being the point when there is no owner.
-  if (owner && !owner.active) {
+  //
+  // Somebody on a day off is still the owner. This was the last path by which
+  // a caller could come back from a rest day to find a client of theirs on
+  // another tab — rare, because it needs the indexed row to have gone missing
+  // first, but the same loss when it happened.
+  if (owner && !owner.active && !owner.away) {
     log_('INFO', 'dedupe', 'Indexed row is gone and its salesperson has left; routing instead', {
       tab: entry.tab, salesperson: owner.name, leadId: entry.leadId
     });
@@ -1001,8 +1032,12 @@ function moveOneLead_(fromTab, row, target) {
     const lead = found.lead;
     const leadId = found.leadId;
 
-    const member = namedMember_(target) || memberByTab_(target);
-    const targetTab = (member && member.tab) || cleanText_(target);
+    // The menu lists a caller on a day off as "GWEN (day off)", so that is what
+    // somebody copying the line out of the prompt types back. The standing is a
+    // label on the list, not part of anybody's name.
+    const wanted = cleanText_(target).replace(/\s*\((?:day off|inactive)\)\s*$/i, '');
+    const member = namedMember_(wanted) || memberByTab_(wanted);
+    const targetTab = (member && member.tab) || wanted;
     if (!targetTab || leadTabNames_().indexOf(targetTab) === -1) {
       return { ok: false, problem: 'No salesperson or lead tab called "' + target + '".\n\n' +
         'Pick one of: ' + leadTabNames_().join(', ') };

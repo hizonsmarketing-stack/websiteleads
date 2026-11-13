@@ -1951,6 +1951,83 @@ realLog('\n--- a salesperson who has left stops receiving ---');
   api.resetCaches();
 }
 
+realLog('\n--- a day off is not the same as leaving ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  tab('_Team').appendRow(['Winnie', 'Winnie', 'Private Event', '', 'yes', 0, '', '', '']);
+  tab('_Team').appendRow(['Dexter', 'Dexter', 'Private Event', '', 'yes', 0, '', '', '']);
+  api.resetCaches();
+  api.setupWorkbook();
+
+  const send = function (extra) {
+    api.resetCaches();
+    return post(Object.assign({ formName: 'Homepage Inquiry',
+      'Type of Event': 'Private Event' }, extra), { source: 'website' });
+  };
+  const standing = function (who, value) {
+    const team = tab('_Team');
+    for (let r = 2; r <= team.getLastRow(); r++) {
+      if (String(team.getRange(r, 1).getValue()) === who) team.getRange(r, 5).setValue(value);
+    }
+    api.resetCaches();
+  };
+
+  send({ name: 'Rebecca Mae', email: 'rebecca-off@example.com', 'Assigned To': 'Winnie' });
+  check('the client starts on their caller\'s tab', rows('Winnie'), 1);
+
+  standing('Winnie', 'off');
+
+  // Off is not a spelling of yes: no new lead lands on a tab nobody is at.
+  const rota = [send({ name: 'O1', email: 'o1off@example.com' }).tab,
+                send({ name: 'O2', email: 'o2off@example.com' }).tab];
+  check('a caller on a day off is skipped by the rotation', rota.indexOf('Winnie'), -1);
+  check('and the roster says they are away rather than gone',
+    api.loadTeam_().filter(function (m) { return m.name === 'Winnie'; })[0].away, 'true');
+
+  // The real one. Google Ads re-delivers the same lead while its caller is
+  // off; under the old reading of Active that was enough to hand it to
+  // whoever was in, and the caller came back to find it gone.
+  const again = send({ name: 'Rebecca Mae', email: 'rebecca-off@example.com',
+    message: 'same lead, delivered again' });
+  check('a lead that arrives again stays with the caller who is off', again.tab, 'Winnie');
+  check('and nothing is written onto anybody else\'s tab', rows('Winnie'), 1);
+
+  // And with the indexed row gone, which is the one path that still routed
+  // away. A day off is not a reason to give the client to somebody else.
+  tab('Winnie').deleteRow(tab('Winnie').getLastRow());
+  api.resetCaches();
+  const refiled = send({ name: 'Rebecca Mae', email: 'rebecca-off@example.com',
+    message: 'third delivery' });
+  check('a refile keeps the client with the caller who is off', refiled.tab, 'Winnie');
+
+  // Contrast: "no" still means gone, and still routes away.
+  standing('Winnie', 'no');
+  tab('Winnie').deleteRow(tab('Winnie').getLastRow());
+  api.resetCaches();
+  const left = send({ name: 'Rebecca Mae', email: 'rebecca-off@example.com',
+    message: 'fourth delivery' });
+  check('but a caller who has left does not keep it', left.tab === 'Winnie', 'false');
+
+  // Handing a lead to somebody who is off, ready for their return — including
+  // when the standing label is typed back from the prompt's own list.
+  standing('Winnie', 'day off');
+  const held = send({ name: 'For Her Return', email: 'return@example.com' });
+  const mv = api.moveLead(held.tab, tab(held.tab).getLastRow(), 'Winnie (day off)');
+  check('a lead can be moved to a caller on a day off', mv.ok, 'true');
+  check('the standing label is not taken for part of the name', mv.to, 'Winnie');
+
+  // Every other spelling the team is likely to type.
+  ['OFF', 'Day Off', 'away', 'on leave', 'VL', 'rest day'].forEach(function (word) {
+    standing('Winnie', word);
+    const m = api.loadTeam_().filter(function (one) { return one.name === 'Winnie'; })[0];
+    check('"' + word + '" reads as a day off', m.away && !m.active, 'true');
+  });
+  standing('Winnie', 'no');
+  standing('Dexter', 'no');
+}
+
 realLog('\n--- a caller tab that somebody renames ---');
 {
   silence(quiet);

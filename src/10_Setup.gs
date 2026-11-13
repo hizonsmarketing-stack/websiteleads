@@ -269,7 +269,7 @@ function seedSettings_() {
 function createRosterTabs_() {
   const created = [];
   loadTeam_().forEach(function (member) {
-    if (!member.active || !member.tab) return;
+    if ((!member.active && !member.away) || !member.tab) return;
     if (getSpreadsheet_().getSheetByName(member.tab)) return;
     const sheet = getOrCreateSheet_(member.tab, LEAD_COLUMNS);
     styleLeadSheet_(sheet);
@@ -736,8 +736,8 @@ function buildDashboard_() {
   rows.push(['', '', '']);
   rows.push(['Leads by salesperson', 'Count', '']);
   loadTeam_().forEach(function (member) {
-    rows.push([member.name + (member.active ? '' : ' (inactive)'),
-      leadCountFormula_(member.tab), '']);
+    const standing = member.active ? '' : (member.away ? ' (day off)' : ' (inactive)');
+    rows.push([member.name + standing, leadCountFormula_(member.tab), '']);
   });
   rows.push(['', '', '']);
   rows.push(['Totals', 'Count', '']);
