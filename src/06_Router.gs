@@ -70,6 +70,7 @@ function loadTeam_() {
           .map(function (e) { return e.trim(); })
           .filter(String),
         active: /^(yes|y|true|1|on)$/i.test(cleanText_(at(row, 'Active'))),
+        dayOff: /^(yes|y|true|1|on|off|day ?off)$/i.test(cleanText_(at(row, 'Day Off'))),
         count: Number(at(row, 'Assigned Count')) || 0,
         lastAt: cleanText_(at(row, 'Last Assigned At')),
         presenter: cleanText_(at(row, 'Presenter')),
@@ -141,11 +142,14 @@ function reconcileRosterTabs_(members) {
   });
 }
 
-/** @return {!Array<!Object>} Active roster members who cover an event type. */
+/**
+ * @return {!Array<!Object>} Roster members taking leads today who cover an
+ *     event type: on the team, and not away for the day.
+ */
 function membersFor_(eventTypeLabel) {
   const wanted = squashKey_(eventTypeLabel);
   return loadTeam_().filter(function (member) {
-    if (!member.active || !member.tab) return false;
+    if (!member.active || member.dayOff || !member.tab) return false;
     return member.eventTypes.some(function (label) {
       return label === '*' || squashKey_(label) === wanted;
     });
@@ -175,9 +179,11 @@ function pickAssignee_(lead) {
   // say who had a lead, even after they leave — but the work goes to somebody
   // who is here.
   const named = namedMember_(lead.assignedTo);
-  if (named && named.active) return named;
+  if (named && named.active && !named.dayOff) return named;
   if (named) {
-    log_('INFO', 'router', 'Named salesperson is no longer active; routing instead', {
+    log_('INFO', 'router', named.dayOff
+      ? 'Named salesperson is on a day off; routing instead'
+      : 'Named salesperson is no longer active; routing instead', {
       named: named.name, lead: lead.leadId
     });
   }
@@ -234,7 +240,7 @@ function fewestSoFar_(candidates) {
  */
 function nextInRosterOrder_(candidates, eventTypeLabel) {
   const roster = loadTeam_().filter(function (member) {
-    return member.active && member.tab;
+    return member.active && !member.dayOff && member.tab;
   });
   if (!roster.length) return candidates[0];
 

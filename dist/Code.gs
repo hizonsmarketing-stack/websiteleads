@@ -23,7 +23,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '551d48ad7dfc';
+const BUILD_ = '5186a064b17f';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -113,7 +113,13 @@ const TEAM_COLUMNS = [
   // Written by the script, not by hand. Sheets keeps a tab's id across a
   // rename, so this is what lets a tab renamed to "MIKA (off)" still be
   // recognised as MIKA's instead of being replaced by a new empty one.
-  'Sheet ID'
+  'Sheet ID',
+  // Yes while somebody is away for the day. Active answers whether they are on
+  // the team at all, which is a different question and was being made to carry
+  // both: a caller on a rest day had to be switched to "no", and "no" means
+  // gone — their leads stop being treated as theirs. This says only "not
+  // today", and does one thing: the rotation skips them.
+  'Day Off'
 ];
 
 /** Extra columns only the Duplicates tab carries, appended after LEAD_COLUMNS. */
@@ -2387,6 +2393,7 @@ function loadTeam_() {
           .map(function (e) { return e.trim(); })
           .filter(String),
         active: /^(yes|y|true|1|on)$/i.test(cleanText_(at(row, 'Active'))),
+        dayOff: /^(yes|y|true|1|on|off|day ?off)$/i.test(cleanText_(at(row, 'Day Off'))),
         count: Number(at(row, 'Assigned Count')) || 0,
         lastAt: cleanText_(at(row, 'Last Assigned At')),
         presenter: cleanText_(at(row, 'Presenter')),
@@ -2458,11 +2465,14 @@ function reconcileRosterTabs_(members) {
   });
 }
 
-/** @return {!Array<!Object>} Active roster members who cover an event type. */
+/**
+ * @return {!Array<!Object>} Roster members taking leads today who cover an
+ *     event type: on the team, and not away for the day.
+ */
 function membersFor_(eventTypeLabel) {
   const wanted = squashKey_(eventTypeLabel);
   return loadTeam_().filter(function (member) {
-    if (!member.active || !member.tab) return false;
+    if (!member.active || member.dayOff || !member.tab) return false;
     return member.eventTypes.some(function (label) {
       return label === '*' || squashKey_(label) === wanted;
     });
@@ -2492,9 +2502,11 @@ function pickAssignee_(lead) {
   // say who had a lead, even after they leave — but the work goes to somebody
   // who is here.
   const named = namedMember_(lead.assignedTo);
-  if (named && named.active) return named;
+  if (named && named.active && !named.dayOff) return named;
   if (named) {
-    log_('INFO', 'router', 'Named salesperson is no longer active; routing instead', {
+    log_('INFO', 'router', named.dayOff
+      ? 'Named salesperson is on a day off; routing instead'
+      : 'Named salesperson is no longer active; routing instead', {
       named: named.name, lead: lead.leadId
     });
   }
@@ -2551,7 +2563,7 @@ function fewestSoFar_(candidates) {
  */
 function nextInRosterOrder_(candidates, eventTypeLabel) {
   const roster = loadTeam_().filter(function (member) {
-    return member.active && member.tab;
+    return member.active && !member.dayOff && member.tab;
   });
   if (!roster.length) return candidates[0];
 
@@ -5776,7 +5788,10 @@ function menuOpenTeamRoster() {
     'Tab Name — the tab their leads go into.\n' +
     'Event Types — comma-separated, from: ' + labels.join(', ') + '\n' +
     '   (or * for everything)\n' +
-    'Active — yes for anyone currently taking leads.\n\n' +
+    'Active — yes for anyone on the team. No means they have left.\n' +
+    'Day Off — yes while somebody is away for the day. They get no new\n' +
+    '   leads; everything they already hold stays theirs. Clear it when\n' +
+    '   they are back.\n\n' +
     'Leads are shared out evenly: whoever covers the event type and has the ' +
     'fewest so far gets the next one. Clear the Assigned Count column to ' +
     'restart the rotation.',
