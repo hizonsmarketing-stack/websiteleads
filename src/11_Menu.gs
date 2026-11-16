@@ -313,11 +313,8 @@ function menuMoveLead() {
     return;
   }
 
-  // Somebody on a day off is offered too. Handing them a lead to find when
-  // they are back is a thing people do on purpose, and leaving them off the
-  // list made it look as though they had left.
-  const people = loadTeam_().filter(function (m) { return (m.active || m.away) && m.tab; })
-    .map(function (m) { return m.name + (m.active ? '' : ' (day off)'); });
+  const people = loadTeam_().filter(function (m) { return m.active && m.tab; })
+    .map(function (m) { return m.name; });
   const shared = teamTabNames_();
   const nameOf = function (entry) {
     return cleanText_(entry.lead.fullName) || cleanText_(entry.lead.email) || entry.leadId;
@@ -604,10 +601,10 @@ function menuOpenTeamRoster() {
     'Tab Name — the tab their leads go into.\n' +
     'Event Types — comma-separated, from: ' + labels.join(', ') + '\n' +
     '   (or * for everything)\n' +
-    'Active — yes for anyone currently taking leads.\n' +
-    '   off — on a day off: no new leads, but the leads they hold stay\n' +
-    '   theirs and they can still be handed one.\n' +
-    '   no — left the team.\n\n' +
+    'Active — yes for anyone on the team. No means they have left.\n' +
+    'Day Off — yes while somebody is away for the day. They get no new\n' +
+    '   leads; everything they already hold stays theirs. Clear it when\n' +
+    '   they are back.\n\n' +
     'Leads are shared out evenly: whoever covers the event type and has the ' +
     'fewest so far gets the next one. Clear the Assigned Count column to ' +
     'restart the rotation.',

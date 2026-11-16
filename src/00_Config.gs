@@ -82,7 +82,13 @@ const TEAM_COLUMNS = [
   // Written by the script, not by hand. Sheets keeps a tab's id across a
   // rename, so this is what lets a tab renamed to "MIKA (off)" still be
   // recognised as MIKA's instead of being replaced by a new empty one.
-  'Sheet ID'
+  'Sheet ID',
+  // Yes while somebody is away for the day. Active answers whether they are on
+  // the team at all, which is a different question and was being made to carry
+  // both: a caller on a rest day had to be switched to "no", and "no" means
+  // gone — their leads stop being treated as theirs. This says only "not
+  // today", and does one thing: the rotation skips them.
+  'Day Off'
 ];
 
 /** Extra columns only the Duplicates tab carries, appended after LEAD_COLUMNS. */
