@@ -18,7 +18,7 @@ const book = installFakes(global);
 const dir = process.argv[2] || path.join(__dirname, '..', 'src');
 const src = fs.readdirSync(dir).filter(f => f.endsWith('.gs')).sort()
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
-eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; FIELD_COLUMNS_CACHE_ = {}; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, deleteLeads, repairTabColumns, LEAD_COLUMNS, pendingNotifyRows_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS };');
+eval(src + '\n;global.__api = { setupWorkbook, doPost, importFairWorksheet, rebuildIndex, runSelfTest, resetCaches: function () { SETTINGS_CACHE_ = null; INDEX_CACHE_ = null; TEAM_CACHE_ = null; FIELD_COLUMNS_CACHE_ = {}; }, migrateExistingTab, fieldColumns_, COLUMN_TO_FIELD, sendDigestNow, buildDigest_, doGet, moveLead, moveLeads, deleteLeads, repairTabColumns, LEAD_COLUMNS, pendingNotifyRows_, statusColourReport_, applyStatusColours_, loadTeam_, storeRaw_, housekeeping_, leadCountFormula_, buildDashboard_, readLeadRow_, WEEK_BUCKETS, FAIR_CHUNK_ROWS, intakeBatch_ };');
 
 const api = global.__api;
 
@@ -804,27 +804,39 @@ realLog('\n--- a fair too big for one run stops and carries on ---');
     fairDate: '2026-08-20', defaultEventType: 'Wedding'
   });
   check('it stops instead of being killed', first.stoppedEarly, 'true');
-  check('one chunk got through', first.total, 100);
-  check('and it says how many are left', first.remaining, 150);
-  check('and which row to carry on from', first.nextRow, 101);
-  check('the leads it did import are real', first.created, 100);
+  // One chunk, whatever a chunk is set to. Asserted against the constant
+  // rather than a number typed here: this block is about stopping and
+  // resuming, and it should not have to be rewritten to tune the batch size.
+  check('one chunk got through', first.total, api.FAIR_CHUNK_ROWS);
+  check('and it says how many are left', first.remaining, 250 - api.FAIR_CHUNK_ROWS);
+  check('and which row to carry on from', first.nextRow, api.FAIR_CHUNK_ROWS + 1);
+  check('the leads it did import are real', first.created, api.FAIR_CHUNK_ROWS);
 
   const second = api.importFairWorksheet({
     sheetName: 'Huge Organiser Export', fairName: 'Endless Expo 2026',
     fairDate: '2026-08-20', defaultEventType: 'Wedding', startRow: first.nextRow
   });
-  check('carrying on picks up where it stopped', second.startRow, 101);
-  check('and takes the next chunk', second.total, 100);
+  check('carrying on picks up where it stopped', second.startRow, first.nextRow);
+  check('and takes the next chunk', second.total, api.FAIR_CHUNK_ROWS);
   check('nothing is imported twice', second.merged, 0);
-  check('so they are all new leads', second.created, 100);
+  check('so they are all new leads', second.created, api.FAIR_CHUNK_ROWS);
 
-  const third = api.importFairWorksheet({
-    sheetName: 'Huge Organiser Export', fairName: 'Endless Expo 2026',
-    fairDate: '2026-08-20', defaultEventType: 'Wedding', startRow: second.nextRow
-  });
-  check('the last stretch finishes', third.stoppedEarly, 'false');
-  check('and it is the remainder', third.total, 50);
-  check('every row landed exactly once', first.created + second.created + third.created, 250);
+  // Then pressing Continue until it is done, which is what a person does.
+  let run = second;
+  let runs = 2;
+  let created = first.created + second.created;
+  while (run.stoppedEarly) {
+    run = api.importFairWorksheet({
+      sheetName: 'Huge Organiser Export', fairName: 'Endless Expo 2026',
+      fairDate: '2026-08-20', defaultEventType: 'Wedding', startRow: run.nextRow
+    });
+    created += run.created;
+    runs++;
+    if (runs > 40) break;
+  }
+  check('the last stretch finishes', run.stoppedEarly, 'false');
+  check('and it took the expected number of goes', runs, Math.ceil(250 / api.FAIR_CHUNK_ROWS));
+  check('every row landed exactly once', created, 250);
   check('none of it was filed as a duplicate', rows('Duplicates'), dupesBefore);
 
   setSetting('Import Time Budget (seconds)', '240');
@@ -849,6 +861,145 @@ realLog('\n--- a fair too big for one run stops and carries on ---');
   check('a worksheet inside the budget runs straight through',
     budgeted.stoppedEarly, 'false');
   check('and reports no resume point', budgeted.nextRow, 0);
+}
+
+realLog('\n--- an import that loses the lock keeps its place ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  const sheet = book.insertSheet('Lock Trouble Export');
+  const data = [['Name', 'Email Address', 'Contact No.']];
+  for (let i = 1; i <= 60; i++) {
+    data.push(['Locked Guest ' + i, 'locked' + i + '@example.com', '']);
+  }
+  sheet.getRange(1, 1, data.length, 3).setValues(data);
+
+  const importIt = function (startRow) {
+    return api.importFairWorksheet({
+      sheetName: 'Lock Trouble Export', fairName: 'Lock Trouble Expo 2026',
+      fairDate: '2026-09-04', defaultEventType: 'Wedding', startRow: startRow || 1
+    });
+  };
+
+  // A busy moment: the first two attempts at a batch cannot get the lock, the
+  // third can. The import should not notice beyond a line in the log.
+  global.__slept = [];
+  global.__lockFailures = 2;
+  const rode = importIt();
+  check('a batch that loses the lock twice is tried again', rode.stoppedEarly, 'false');
+  check('and the import finishes', rode.created, 60);
+  check('having waited between attempts', global.__slept.length, 2);
+  check('each wait longer than the last', global.__slept[1] > global.__slept[0], 'true');
+
+  // Now a queue that does not clear. Every attempt fails, which before this
+  // threw the error out of the import and lost the resume point with it.
+  const held = rows('All Leads');
+  global.__lockFailures = 99;
+  let thrown = '';
+  let stopped = null;
+  try {
+    stopped = importIt();
+  } catch (err) {
+    thrown = String(err && err.message || err);
+  }
+  global.__lockFailures = 0;
+  check('an import that cannot get the lock at all does not throw', thrown, '');
+  check('it stops the way running out of time stops', stopped.stoppedEarly, 'true');
+  check('and says it was not the clock', stopped.stoppedBy, 'error');
+  check('carrying the message a person can read',
+    /Lock timeout/.test(String(stopped.problem)), 'true');
+  check('with a row to carry on from', stopped.nextRow, 1);
+  check('and nothing half-written', rows('All Leads'), held);
+
+  // The same, partway through: what landed stays landed and the resume point
+  // is the row after it. Its own worksheet, because the rows above are already
+  // imported and a second pass over them would merge rather than create —
+  // which is correct, and would make "one chunk lands" read zero.
+  const fresh = book.insertSheet('Lock Trouble Two');
+  const freshData = [['Name', 'Email Address', 'Contact No.']];
+  for (let i = 1; i <= 60; i++) {
+    freshData.push(['Partway Guest ' + i, 'partway' + i + '@example.com', '']);
+  }
+  fresh.getRange(1, 1, freshData.length, 3).setValues(freshData);
+  const importFresh = function (startRow) {
+    return api.importFairWorksheet({
+      sheetName: 'Lock Trouble Two', fairName: 'Lock Trouble Expo 2026',
+      fairDate: '2026-09-04', defaultEventType: 'Wedding', startRow: startRow || 1
+    });
+  };
+
+  global.__lockFailures = 0;
+  setSetting('Import Time Budget (seconds)', '0');
+  api.resetCaches();
+  const partial = importFresh();
+  check('one chunk lands', partial.created, api.FAIR_CHUNK_ROWS);
+  global.__lockFailures = 99;
+  const refused = importFresh(partial.nextRow);
+  global.__lockFailures = 0;
+  check('and a refused continuation keeps that place',
+    refused.nextRow, partial.nextRow);
+  check('without undoing the chunk before it', refused.created, 0);
+  setSetting('Import Time Budget (seconds)', '240');
+  api.resetCaches();
+
+  // Finishing it off, to show the resume point was the right one.
+  let run = refused;
+  let guard = 0;
+  while (run.stoppedEarly && guard++ < 40) run = importFresh(run.nextRow);
+  check('and the rest imports from there', run.stoppedEarly, 'false');
+  const landed = {};
+  for (let r = 2; r <= tab('All Leads').getLastRow(); r++) {
+    const name = String(cellOf('All Leads', r, 'Full Name'));
+    if (/^(Locked|Partway) Guest /.test(name)) landed[name] = (landed[name] || 0) + 1;
+  }
+  const names = Object.keys(landed);
+  check('both worksheets are there in full', names.length, 120);
+  check('and every row exactly once',
+    names.filter(function (n) { return landed[n] !== 1; }).join(', ') || 'none', 'none');
+}
+
+realLog('\n--- a worksheet imported twice is not a client coming back ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  const sheet = book.insertSheet('Twice Export');
+  sheet.getRange(1, 1, 4, 3).setValues([
+    ['Name', 'Email Address', 'Contact No.'],
+    ['Twice One', 'twice1@example.com', ''],
+    ['Twice Two', 'twice2@example.com', ''],
+    ['Twice Three', 'twice3@example.com', '']
+  ]);
+
+  const importIt = function (date) {
+    return api.importFairWorksheet({
+      sheetName: 'Twice Export', fairName: 'Twice Expo 2026',
+      fairDate: date, defaultEventType: 'Wedding', startRow: 1
+    });
+  };
+
+  const first = importIt('2026-09-10');
+  check('the worksheet imports', first.created, 3);
+  const where = first.results[0];
+  check('and nothing is flagged yet',
+    cellOf(where.tab, where.row, 'Re-inquired'), '');
+
+  // Somebody re-runs it — recovering a stopped import, or just unsure whether
+  // it went through. The touch count moves, because something did arrive.
+  const over = importIt('2026-09-10');
+  check('re-running it creates nothing', over.created, 0);
+  check('every row merges', over.merged, 3);
+  check('the touch is counted', Number(cellOf(where.tab, where.row, 'Touches')), 2);
+  // But the flag a caller reads as "ring this client back" stays clear.
+  check('and no client is flagged as having come back',
+    cellOf(where.tab, where.row, 'Re-inquired'), '');
+
+  // The same fair on a later day is a real return, and is flagged.
+  const later = importIt('2026-11-20');
+  check('the same form on another day still merges', later.merged, 3);
+  check('and that one is flagged',
+    /2026-11-20/.test(String(cellOf(where.tab, where.row, 'Re-inquired'))), 'true');
 }
 
 realLog('\n--- the same client, on forms that ask for different things ---');

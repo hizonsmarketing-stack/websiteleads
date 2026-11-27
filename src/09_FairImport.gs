@@ -15,8 +15,26 @@
  * wrote already indexed, and carrying on cannot duplicate them.
  */
 
-/** Rows pushed through intake in one batch, and so one index flush. */
-const FAIR_CHUNK_ROWS = 100;
+/**
+ * Rows pushed through intake in one batch, and so one index flush.
+ *
+ * A batch holds the script lock from its first row to its last, and a lead
+ * costs about seven round trips to Google's servers — so a hundred of them
+ * held the lock for one to two and a half minutes. Every inbound webhook in
+ * that window waits on a 120-second lease and then fails, which is how an
+ * import came to break the very thing it was feeding; Google Ads then retries
+ * what it could not deliver, and those retries queue on the lock too. The
+ * import's own next batch has to compete with that queue, and a 197-row import
+ * lost: it wrote 100 leads and then threw a lock timeout.
+ *
+ * Twenty-five holds the lock for something like twenty seconds. The lock is
+ * free between batches, so a webhook waits for the batch in progress rather
+ * than for the import.
+ */
+const FAIR_CHUNK_ROWS = 25;
+
+/** How many times a batch that could not get the lock is tried again. */
+const FAIR_CHUNK_RETRIES = 2;
 
 /**
  * Imports every row of a worksheet as Exhibit leads.
@@ -89,7 +107,8 @@ function importFairWorksheet(options) {
 
   const summary = {
     total: 0, created: 0, merged: 0, skipped: 0, byTab: {}, results: [],
-    startRow: startRow, stoppedEarly: false, remaining: 0, nextRow: 0
+    startRow: startRow, stoppedEarly: false, remaining: 0, nextRow: 0,
+    stoppedBy: '', problem: ''
   };
 
   for (let done = 0; done < pending.length; done += FAIR_CHUNK_ROWS) {
@@ -101,10 +120,42 @@ function importFairWorksheet(options) {
       summary.nextRow = startRow + done;
       break;
     }
-    mergeIntakeSummary_(
-      summary,
-      intakeBatch_(pending.slice(done, done + FAIR_CHUNK_ROWS), 'fair-import',
-        { deferNotices: true }));
+
+    let batch = null;
+    let lastError = null;
+    for (let attempt = 0; attempt <= FAIR_CHUNK_RETRIES; attempt++) {
+      try {
+        batch = intakeBatch_(pending.slice(done, done + FAIR_CHUNK_ROWS), 'fair-import',
+          { deferNotices: true });
+        break;
+      } catch (err) {
+        // Nearly always the lock: a queue of webhooks got there first. Worth
+        // waiting out rather than ending the import, because the queue is
+        // short and the alternative is a person re-running two hundred rows.
+        lastError = err;
+        log_('WARN', 'fair-import', 'A batch could not run; trying again', {
+          nextRow: startRow + done, attempt: attempt + 1,
+          error: String(err && err.message || err)
+        });
+        if (attempt < FAIR_CHUNK_RETRIES) Utilities.sleep(2000 * (attempt + 1));
+      }
+    }
+
+    // Still no. Stop the way a run out of time stops, rather than throwing:
+    // every lead written so far is already on its tab and in the index, and
+    // what the person needs is the row to carry on from. Thrown, that number
+    // went with it and the only way forward was to re-run the whole sheet —
+    // which merges rather than duplicates, but marks every lead already
+    // imported as a client who had written in again.
+    if (!batch) {
+      summary.stoppedEarly = true;
+      summary.stoppedBy = 'error';
+      summary.problem = String(lastError && lastError.message || lastError);
+      summary.remaining = pending.length - done;
+      summary.nextRow = startRow + done;
+      break;
+    }
+    mergeIntakeSummary_(summary, batch);
   }
 
   // Held back until the whole run is done, so a caller hears once about an
@@ -117,7 +168,9 @@ function importFairWorksheet(options) {
   log_('INFO', 'fair-import', 'Imported "' + summary.fairName + '"', {
     headerRow: table.headerRow, mapped: summary.mapped, created: summary.created,
     merged: summary.merged, skipped: summary.skipped,
-    startRow: startRow, stoppedEarly: summary.stoppedEarly, remaining: summary.remaining
+    startRow: startRow, stoppedEarly: summary.stoppedEarly,
+    remaining: summary.remaining, nextRow: summary.nextRow,
+    stoppedBy: summary.stoppedBy, problem: summary.problem
   });
   return summary;
 }

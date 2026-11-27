@@ -23,7 +23,7 @@
  */
 
 /** Which build this is: a hash of src/. Written by tools/bundle.js. */
-const BUILD_ = '5186a064b17f';
+const BUILD_ = '2e7294ec5bea';
 
 // ==========================================================================
 // src/00_Config.gs
@@ -3119,7 +3119,8 @@ function buildMergeUpdates_(original, incoming, matchedOn) {
   // Not for a delivery the sender repeated. Google Ads retries anything it
   // does not get a prompt 200 for, carrying the same lead id, and that is the
   // network talking rather than the client.
-  if (squashKey_(matchedOn) !== squashKey_(MATCHED_ON_EXTERNAL_ID)) {
+  if (squashKey_(matchedOn) !== squashKey_(MATCHED_ON_EXTERNAL_ID) &&
+      !isSameApproach_(original, incoming)) {
     updates['Re-inquired'] = cleanText_(incoming.receivedAt).slice(0, 10) +
       (incoming.subSource ? ' · ' + incoming.subSource : '');
   }
@@ -3164,6 +3165,49 @@ function buildMergeUpdates_(original, incoming, matchedOn) {
   }
 
   return updates;
+}
+
+/**
+ * Whether this is the same approach arriving twice rather than a client who
+ * has come back.
+ *
+ * A fair import that stops halfway has to be resumed, and whoever resumes it
+ * cannot always tell where. The safe mistake is to overlap a few rows, because
+ * the index merges them instead of writing them twice — but each merge was
+ * also stamping Re-inquired, so recovering an import lit up rows for clients
+ * who had not written in at all, and callers rang people who had never asked
+ * them to. The same held for the whole worksheet being re-run.
+ *
+ * Same form and same day is one approach: a worksheet imported twice, a form
+ * double-submitted, a delivery repeated. The touch count still moves, because
+ * something did arrive. What does not move is the flag a person reads as "ring
+ * this client back".
+ *
+ * The same form on a later day is a real return and is stamped as one: a
+ * client filling in the venue list again in March after January is exactly
+ * what the column is for.
+ *
+ * @param {!Object} original As read from the sheet.
+ * @param {!Object} incoming
+ * @return {boolean}
+ */
+function isSameApproach_(original, incoming) {
+  const sub = cleanText_(incoming.subSource);
+  if (!sub) return false;
+
+  const known = String(original.allSubSources || original.subSource || '')
+    .split(/\s*\|\s*/)
+    .map(function (one) { return one.trim(); })
+    .filter(String)
+    .some(function (one) { return squashKey_(one) === squashKey_(sub); });
+  if (!known) return false;
+
+  // Last Touch At is written when the lead is created as well as on every
+  // merge, so a row that has only ever been seen once still has a day to
+  // compare against.
+  const day = cleanText_(incoming.receivedAt).slice(0, 10);
+  const seen = cleanText_(original.lastTouchAt).slice(0, 10);
+  return !!day && day === seen;
 }
 
 /** Applies the same updates to the lead's row in All Leads, when present. */
@@ -4011,8 +4055,26 @@ function isTestWebhookUrl_(url) {
  * wrote already indexed, and carrying on cannot duplicate them.
  */
 
-/** Rows pushed through intake in one batch, and so one index flush. */
-const FAIR_CHUNK_ROWS = 100;
+/**
+ * Rows pushed through intake in one batch, and so one index flush.
+ *
+ * A batch holds the script lock from its first row to its last, and a lead
+ * costs about seven round trips to Google's servers — so a hundred of them
+ * held the lock for one to two and a half minutes. Every inbound webhook in
+ * that window waits on a 120-second lease and then fails, which is how an
+ * import came to break the very thing it was feeding; Google Ads then retries
+ * what it could not deliver, and those retries queue on the lock too. The
+ * import's own next batch has to compete with that queue, and a 197-row import
+ * lost: it wrote 100 leads and then threw a lock timeout.
+ *
+ * Twenty-five holds the lock for something like twenty seconds. The lock is
+ * free between batches, so a webhook waits for the batch in progress rather
+ * than for the import.
+ */
+const FAIR_CHUNK_ROWS = 25;
+
+/** How many times a batch that could not get the lock is tried again. */
+const FAIR_CHUNK_RETRIES = 2;
 
 /**
  * Imports every row of a worksheet as Exhibit leads.
@@ -4085,7 +4147,8 @@ function importFairWorksheet(options) {
 
   const summary = {
     total: 0, created: 0, merged: 0, skipped: 0, byTab: {}, results: [],
-    startRow: startRow, stoppedEarly: false, remaining: 0, nextRow: 0
+    startRow: startRow, stoppedEarly: false, remaining: 0, nextRow: 0,
+    stoppedBy: '', problem: ''
   };
 
   for (let done = 0; done < pending.length; done += FAIR_CHUNK_ROWS) {
@@ -4097,10 +4160,42 @@ function importFairWorksheet(options) {
       summary.nextRow = startRow + done;
       break;
     }
-    mergeIntakeSummary_(
-      summary,
-      intakeBatch_(pending.slice(done, done + FAIR_CHUNK_ROWS), 'fair-import',
-        { deferNotices: true }));
+
+    let batch = null;
+    let lastError = null;
+    for (let attempt = 0; attempt <= FAIR_CHUNK_RETRIES; attempt++) {
+      try {
+        batch = intakeBatch_(pending.slice(done, done + FAIR_CHUNK_ROWS), 'fair-import',
+          { deferNotices: true });
+        break;
+      } catch (err) {
+        // Nearly always the lock: a queue of webhooks got there first. Worth
+        // waiting out rather than ending the import, because the queue is
+        // short and the alternative is a person re-running two hundred rows.
+        lastError = err;
+        log_('WARN', 'fair-import', 'A batch could not run; trying again', {
+          nextRow: startRow + done, attempt: attempt + 1,
+          error: String(err && err.message || err)
+        });
+        if (attempt < FAIR_CHUNK_RETRIES) Utilities.sleep(2000 * (attempt + 1));
+      }
+    }
+
+    // Still no. Stop the way a run out of time stops, rather than throwing:
+    // every lead written so far is already on its tab and in the index, and
+    // what the person needs is the row to carry on from. Thrown, that number
+    // went with it and the only way forward was to re-run the whole sheet —
+    // which merges rather than duplicates, but marks every lead already
+    // imported as a client who had written in again.
+    if (!batch) {
+      summary.stoppedEarly = true;
+      summary.stoppedBy = 'error';
+      summary.problem = String(lastError && lastError.message || lastError);
+      summary.remaining = pending.length - done;
+      summary.nextRow = startRow + done;
+      break;
+    }
+    mergeIntakeSummary_(summary, batch);
   }
 
   // Held back until the whole run is done, so a caller hears once about an
@@ -4113,7 +4208,9 @@ function importFairWorksheet(options) {
   log_('INFO', 'fair-import', 'Imported "' + summary.fairName + '"', {
     headerRow: table.headerRow, mapped: summary.mapped, created: summary.created,
     merged: summary.merged, skipped: summary.skipped,
-    startRow: startRow, stoppedEarly: summary.stoppedEarly, remaining: summary.remaining
+    startRow: startRow, stoppedEarly: summary.stoppedEarly,
+    remaining: summary.remaining, nextRow: summary.nextRow,
+    stoppedBy: summary.stoppedBy, problem: summary.problem
   });
   return summary;
 }
@@ -5908,9 +6005,18 @@ function runFairImport(form) {
   ];
   if (summary.stoppedEarly) {
     parts.push('');
-    parts.push('Stopped at the time limit with ' + summary.remaining + ' rows to go. ' +
-      'Everything imported so far is saved and will not be brought in twice. ' +
-      'Press Continue to carry on.');
+    // Which of the two it was matters to the person reading it: a time limit
+    // is the import being big, and anything else is worth knowing about even
+    // though the remedy — press Continue — is the same.
+    parts.push(summary.stoppedBy === 'error'
+      ? 'Stopped early with ' + summary.remaining + ' rows to go:\n' +
+        summary.problem + '\n\n' +
+        'Usually a busy moment on the spreadsheet; it was tried three times. ' +
+        'Everything imported so far is saved and will not be brought in twice. ' +
+        'Press Continue to carry on from row ' + summary.nextRow + '.'
+      : 'Stopped at the time limit with ' + summary.remaining + ' rows to go. ' +
+        'Everything imported so far is saved and will not be brought in twice. ' +
+        'Press Continue to carry on.');
   }
   return {
     summary: parts.join('\n'),
