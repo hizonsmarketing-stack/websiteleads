@@ -721,9 +721,18 @@ function runFairImport(form) {
   ];
   if (summary.stoppedEarly) {
     parts.push('');
-    parts.push('Stopped at the time limit with ' + summary.remaining + ' rows to go. ' +
-      'Everything imported so far is saved and will not be brought in twice. ' +
-      'Press Continue to carry on.');
+    // Which of the two it was matters to the person reading it: a time limit
+    // is the import being big, and anything else is worth knowing about even
+    // though the remedy — press Continue — is the same.
+    parts.push(summary.stoppedBy === 'error'
+      ? 'Stopped early with ' + summary.remaining + ' rows to go:\n' +
+        summary.problem + '\n\n' +
+        'Usually a busy moment on the spreadsheet; it was tried three times. ' +
+        'Everything imported so far is saved and will not be brought in twice. ' +
+        'Press Continue to carry on from row ' + summary.nextRow + '.'
+      : 'Stopped at the time limit with ' + summary.remaining + ' rows to go. ' +
+        'Everything imported so far is saved and will not be brought in twice. ' +
+        'Press Continue to carry on.');
   }
   return {
     summary: parts.join('\n'),

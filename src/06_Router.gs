@@ -796,7 +796,8 @@ function buildMergeUpdates_(original, incoming, matchedOn) {
   // Not for a delivery the sender repeated. Google Ads retries anything it
   // does not get a prompt 200 for, carrying the same lead id, and that is the
   // network talking rather than the client.
-  if (squashKey_(matchedOn) !== squashKey_(MATCHED_ON_EXTERNAL_ID)) {
+  if (squashKey_(matchedOn) !== squashKey_(MATCHED_ON_EXTERNAL_ID) &&
+      !isSameApproach_(original, incoming)) {
     updates['Re-inquired'] = cleanText_(incoming.receivedAt).slice(0, 10) +
       (incoming.subSource ? ' · ' + incoming.subSource : '');
   }
@@ -841,6 +842,49 @@ function buildMergeUpdates_(original, incoming, matchedOn) {
   }
 
   return updates;
+}
+
+/**
+ * Whether this is the same approach arriving twice rather than a client who
+ * has come back.
+ *
+ * A fair import that stops halfway has to be resumed, and whoever resumes it
+ * cannot always tell where. The safe mistake is to overlap a few rows, because
+ * the index merges them instead of writing them twice — but each merge was
+ * also stamping Re-inquired, so recovering an import lit up rows for clients
+ * who had not written in at all, and callers rang people who had never asked
+ * them to. The same held for the whole worksheet being re-run.
+ *
+ * Same form and same day is one approach: a worksheet imported twice, a form
+ * double-submitted, a delivery repeated. The touch count still moves, because
+ * something did arrive. What does not move is the flag a person reads as "ring
+ * this client back".
+ *
+ * The same form on a later day is a real return and is stamped as one: a
+ * client filling in the venue list again in March after January is exactly
+ * what the column is for.
+ *
+ * @param {!Object} original As read from the sheet.
+ * @param {!Object} incoming
+ * @return {boolean}
+ */
+function isSameApproach_(original, incoming) {
+  const sub = cleanText_(incoming.subSource);
+  if (!sub) return false;
+
+  const known = String(original.allSubSources || original.subSource || '')
+    .split(/\s*\|\s*/)
+    .map(function (one) { return one.trim(); })
+    .filter(String)
+    .some(function (one) { return squashKey_(one) === squashKey_(sub); });
+  if (!known) return false;
+
+  // Last Touch At is written when the lead is created as well as on every
+  // merge, so a row that has only ever been seen once still has a day to
+  // compare against.
+  const day = cleanText_(incoming.receivedAt).slice(0, 10);
+  const seen = cleanText_(original.lastTouchAt).slice(0, 10);
+  return !!day && day === seen;
 }
 
 /** Applies the same updates to the lead's row in All Leads, when present. */

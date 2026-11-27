@@ -176,7 +176,10 @@ function installFakes(global, options) {
         .replace('HH', pad(H, 2)).replace('mm', pad(M, 2)).replace('ss', pad(S, 2));
     },
     getUuid: () => Math.random().toString(16).slice(2).padEnd(32, '0'),
-    formatString: (fmt, n) => pad(n, 6)
+    formatString: (fmt, n) => pad(n, 6),
+    // Returns at once. The retry path is about what it does between attempts,
+    // not about waiting, and a real pause would only slow the suite down.
+    sleep: (ms) => { global.__slept = (global.__slept || []).concat([ms]); }
   };
   const RealDate = Date;
   global.Date = class extends RealDate {
@@ -225,10 +228,23 @@ function installFakes(global, options) {
       deleteProperty: k => { delete props[k]; }
     })
   };
+  // __lockFailures makes the next N waitLock calls fail the way Apps Script
+  // fails them, so the retry and give-up paths can be exercised. The message is
+  // the one LockService itself throws, because that string reaches the person.
+  global.__lockFailures = 0;
+  const fakeLock = () => ({
+    waitLock() {
+      if (global.__lockFailures > 0) {
+        global.__lockFailures--;
+        throw new Error('Lock timeout: another process was holding the lock for too long.');
+      }
+    },
+    releaseLock() {}
+  });
   global.LockService = {
     // Both, so a switch between them cannot pass here and fail in Apps Script.
-    getDocumentLock: () => ({ waitLock() {}, releaseLock() {} }),
-    getScriptLock: () => ({ waitLock() {}, releaseLock() {} })
+    getDocumentLock: fakeLock,
+    getScriptLock: fakeLock
   };
   global.MailApp = { sendEmail: m => global.__mails.push(m) };
   global.ContentService = {
