@@ -300,7 +300,7 @@ function menuMoveLead() {
     }
     // Said before the move rather than after, so the count in the prompt is
     // the number that will really go.
-    const refusal = moveRefusal_(found.lead);
+    const refusal = moveRefusal_(found.lead, sheet.getName());
     if (refusal) {
       blocked.push({ row: row, problem: refusal });
       return;

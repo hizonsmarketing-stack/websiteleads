@@ -301,6 +301,76 @@ function leadToRow_(sheet, lead) {
 }
 
 /**
+ * The cells on a row that belong to the team rather than to the automation.
+ *
+ * A lead object only ever holds the canonical fields, so everything else a tab
+ * carries — CLIENT NOTES, 1st Reachout, whatever a caller added — is invisible
+ * to it. Reading a row into a lead and writing it out again therefore dropped
+ * those cells, which is what made a move quietly destroy a caller's call
+ * history.
+ *
+ * Keyed by the header exactly as the sheet spells it, so the receiving tab can
+ * be matched on the same words.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} row
+ * @return {!Object<string,*>} Header -> value, for cells holding something.
+ */
+function ownColumnCells_(sheet, row) {
+  const bindings = fieldColumns_(sheet);
+  if (!bindings.headers.length) return {};
+  const values = sheet.getRange(row, 1, 1, bindings.headers.length).getValues()[0];
+  const out = {};
+  bindings.headers.forEach(function (header, i) {
+    if (bindings.byColumn[i] || !header) return;
+    const value = values[i];
+    if (value === '' || value === null || value === undefined) return;
+    if (out[header] === undefined) out[header] = value;
+  });
+  return out;
+}
+
+/**
+ * Renders a lead into a row for this sheet, keeping the team's own cells.
+ *
+ * The extra cells are laid into the row before it is written rather than
+ * patched in afterwards, so carrying them costs nothing: one appendRow either
+ * way, which matters on a bulk move of a hundred leads.
+ *
+ * A column the receiving tab does not have cannot be written anywhere, and is
+ * returned instead of being dropped — the move puts it in the note, so the
+ * worst case is a caller reading it in the message rather than in the column
+ * they expected.
+ *
+ * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {!Object} lead
+ * @param {!Object<string,*>} own Header -> value, from ownColumnCells_.
+ * @return {{row: !Array<*>, unplaced: !Object<string,*>}}
+ */
+function leadToRowKeeping_(sheet, lead, own) {
+  const bindings = fieldColumns_(sheet);
+  const row = leadToRow_(sheet, lead);
+  const unplaced = {};
+
+  const bySquashed = {};
+  Object.keys(own || {}).forEach(function (header) {
+    bySquashed[squashKey_(header)] = header;
+    unplaced[header] = own[header];
+  });
+
+  bindings.headers.forEach(function (header, i) {
+    // A cell a canonical field owns is the lead's to write, not the sender's.
+    if (bindings.byColumn[i] || !header) return;
+    const original = bySquashed[squashKey_(header)];
+    if (original === undefined || unplaced[original] === undefined) return;
+    row[i] = unplaced[original];
+    delete unplaced[original];
+  });
+
+  return { row: row, unplaced: unplaced };
+}
+
+/**
  * Appends a lead to a sheet and returns the row number written.
  * @param {!GoogleAppsScript.Spreadsheet.Sheet} sheet
  * @param {!Object} lead

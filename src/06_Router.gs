@@ -1045,7 +1045,7 @@ function moveOneLead_(fromTab, row, target) {
     const found = leadAtRow_(fromTab, row);
     if (!found.ok) return found;
 
-    const refusal = moveRefusal_(found.lead);
+    const refusal = moveRefusal_(found.lead, fromTab);
     if (refusal) return { ok: false, problem: refusal };
     const sheet = found.sheet;
     const lead = found.lead;
@@ -1063,6 +1063,12 @@ function moveOneLead_(fromTab, row, target) {
 
     const moved = Object.assign({}, lead);
     const giver = memberByTab_(fromTab);
+
+    // Read before the row goes. A lead object holds only the canonical
+    // fields, so without this the caller's own columns — CLIENT NOTES, the
+    // Reachout log — were rebuilt as blanks on the receiving tab and their
+    // call history was gone.
+    const own = ownColumnCells_(sheet, row);
 
     // Coming out of Unassigned, a receiver who only ever handles one event type
     // settles what the lead is. Anyone covering several leaves it open, because
@@ -1092,10 +1098,25 @@ function moveOneLead_(fromTab, row, target) {
       targetSheet.getLastRow() + 1,
       member ? member.name : '');
 
-    const note = '--- ' + nowStamp_() + ' moved from ' + fromTab + ' to ' + targetTab + ' ---';
+    // Laid into the row before it is written, so the receiving tab's own
+    // columns are filled in the same append. Anything it has no column for
+    // goes into the note: not where the caller would look for it, but not
+    // lost either, which is what the alternative was.
+    const carried = leadToRowKeeping_(targetSheet, moved, own);
+    const orphans = Object.keys(carried.unplaced);
+
+    const note = '--- ' + nowStamp_() + ' moved from ' + fromTab + ' to ' + targetTab +
+      (orphans.length
+        ? ', ' + targetTab + ' has no column for:\n' + orphans.map(function (header) {
+            return '  ' + header + ': ' + cleanText_(carried.unplaced[header]);
+          }).join('\n')
+        : '') + ' ---';
     moved.message = (cleanText_(moved.message) ? moved.message + '\n\n' : '') + note;
 
-    const newRow = appendLead_(targetSheet, moved);
+    // Rendered once more now the message is final. The bindings are cached,
+    // so this is array work and no second read of the sheet.
+    targetSheet.appendRow(leadToRowKeeping_(targetSheet, moved, own).row);
+    const newRow = targetSheet.getLastRow();
     sheet.deleteRow(row);
     shiftIndexRowsAfterDelete_(fromTab, row);
     moveIndexEntries_(leadId, targetTab, newRow);
@@ -1136,17 +1157,26 @@ function moveOneLead_(fromTab, row, target) {
  * mis-drag. A qualified client changing hands should be a decision somebody
  * took on purpose, so the status is cleared first and the move made after.
  *
+ * Only on a tab that belongs to somebody. On Unassigned and the shared
+ * event-type tabs there is no caller to take the lead away from: that is the
+ * holding pen, and marking a lead Valid there is what happens when somebody
+ * rings it and qualifies it before it is handed out. Refusing the move then
+ * pinned the lead in the pen with no way out but to undo the status — which
+ * was the opposite of the point, and on the one tab the team shares out from.
+ *
  * Shared by the move itself and by the menu, so the dialog can say which rows
  * it will leave before anything happens rather than reporting it afterwards.
  *
  * @param {!Object} lead As read from the row.
+ * @param {string} fromTab The tab it would be leaving.
  * @return {string}
  */
-function moveRefusal_(lead) {
+function moveRefusal_(lead, fromTab) {
   if (squashKey_(lead && lead.status) !== squashKey_('Valid')) return '';
+  if (!memberByTab_(fromTab)) return '';
   return (cleanText_(lead.fullName) || cleanText_(lead.email) || 'That lead') +
-    ' is marked Valid. A qualified client is not moved by accident — change ' +
-    'the status first if you mean to hand them over.';
+    ' is marked Valid. A qualified client is not moved off ' + fromTab +
+    ' by accident — change the status first if you mean to hand them over.';
 }
 
 /**

@@ -2209,6 +2209,154 @@ realLog('\n--- a day off stops new leads and nothing else ---');
   api.resetCaches();
 }
 
+realLog('\n--- a move keeps the columns the team added themselves ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  tab('_Team').appendRow(['Marisol', 'Marisol', 'Debut', '', 'yes', 0, '', '', '', '', '']);
+  tab('_Team').appendRow(['Teodoro', 'Teodoro', 'Debut', '', 'yes', 0, '', '', '', '', '']);
+  tab('_Team').appendRow(['Perla', 'Perla', 'Debut', '', 'yes', 0, '', '', '', '', '']);
+  api.resetCaches();
+  api.setupWorkbook();
+
+  const send = function (extra) {
+    api.resetCaches();
+    return post(Object.assign({ formName: 'Homepage Inquiry',
+      'Type of Event': 'Debut' }, extra), { source: 'website' });
+  };
+  // The columns a caller adds to their own tab, which the automation knows
+  // nothing about.
+  const addOwn = function (name, headers) {
+    const sheet = tab(name);
+    sheet.getRange(1, sheet.getLastColumn() + 1, 1, headers.length).setValues([headers]);
+    api.resetCaches();
+  };
+  const own = function (name, row, header) {
+    const sheet = tab(name);
+    const squash = function (t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, ''); };
+    const col = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+      .map(squash).indexOf(squash(header)) + 1;
+    if (!col) throw new Error('no column "' + header + '" on ' + name);
+    return sheet.getRange(row, col).getValue();
+  };
+  const setOwn = function (name, row, header, value) {
+    const sheet = tab(name);
+    const squash = function (t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, ''); };
+    const col = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+      .map(squash).indexOf(squash(header)) + 1;
+    if (!col) throw new Error('no column "' + header + '" on ' + name);
+    sheet.getRange(row, col).setValue(value);
+  };
+
+  send({ name: 'Carry One', email: 'carry1@example.com' });
+  send({ name: 'Carry Two', email: 'carry2@example.com' });
+  send({ name: 'Carry Three', email: 'carry3@example.com' });
+  const theirs = ['CLIENT NOTES', '1st Reachout', '2nd Reachout', '3rd Reachout'];
+  addOwn('Marisol', theirs);
+  addOwn('Teodoro', theirs);
+
+  const start = send({ name: 'Rosa Delgado', email: 'rosa-carry@example.com',
+    'Assigned To': 'Marisol' });
+  check('the client starts with the caller named on the record', start.tab, 'Marisol');
+  const row = tab('Marisol').getLastRow();
+  setCellOf('Marisol', row, 'Status', 'NR');
+  setOwn('Marisol', row, 'CLIENT NOTES', 'prefers Viber, evenings');
+  setOwn('Marisol', row, '1st Reachout', '11-05 called, no answer');
+  setOwn('Marisol', row, '2nd Reachout', '11-07 texted');
+
+  const mv = api.moveLead('Marisol', row, 'Teodoro');
+  check('the lead moves', mv.ok, 'true');
+  // The bug this closes: these three came out blank, so a caller received a
+  // client with no record of having been rung twice already.
+  check('the notes come with it',
+    own('Teodoro', mv.row, 'CLIENT NOTES'), 'prefers Viber, evenings');
+  check('and the first reachout',
+    own('Teodoro', mv.row, '1st Reachout'), '11-05 called, no answer');
+  check('and the second',
+    own('Teodoro', mv.row, '2nd Reachout'), '11-07 texted');
+  check('one that was empty stays empty', own('Teodoro', mv.row, '3rd Reachout'), '');
+  check('the canonical columns are still right',
+    cellOf('Teodoro', mv.row, 'Full Name'), 'Rosa Delgado');
+  check('including the status the caller recorded',
+    cellOf('Teodoro', mv.row, 'Status'), 'NR');
+  check('and the move is noted',
+    /moved from Marisol to Teodoro/.test(String(cellOf('Teodoro', mv.row, 'Message'))), 'true');
+
+  // A receiving tab without those columns cannot be written to, so the values
+  // go into the note rather than nowhere.
+  const onward = api.moveLead('Teodoro', mv.row, 'Perla');
+  check('it moves on to a tab laid out differently', onward.ok, 'true');
+  const message = String(cellOf('Perla', onward.row, 'Message'));
+  check('and says the tab has no column for them',
+    /Perla has no column for/.test(message), 'true');
+  check('naming each one', /CLIENT NOTES: prefers Viber, evenings/.test(message), 'true');
+  check('and the reachouts too', /1st Reachout: 11-05 called, no answer/.test(message), 'true');
+
+  // Bulk, which is how a caller's tab is actually emptied.
+  const bulkRows = [];
+  ['Bulk Carry A', 'Bulk Carry B'].forEach(function (name, i) {
+    send({ name: name, email: 'bulkcarry' + i + '@example.com', 'Assigned To': 'Marisol' });
+    const at = tab('Marisol').getLastRow();
+    setOwn('Marisol', at, 'CLIENT NOTES', 'note for ' + name);
+    bulkRows.push(at);
+  });
+  const bulk = api.moveLeads('Marisol', bulkRows, 'Teodoro');
+  check('a bulk move carries them as well', bulk.moved.length, 2);
+  const carried = bulk.moved.map(function (one) {
+    return String(own('Teodoro', one.row, 'CLIENT NOTES'));
+  }).sort();
+  check('each with its own note', carried.join(' | '),
+    'note for Bulk Carry A | note for Bulk Carry B');
+}
+
+realLog('\n--- Valid protects a caller, not the holding pen ---');
+{
+  silence(quiet);
+  api.resetCaches();
+
+  tab('_Team').appendRow(['Celestino', 'Celestino', 'Private Event', '', 'yes', 0, '', '', '', '', '']);
+  api.resetCaches();
+  api.setupWorkbook();
+
+  // The thing the team does every day: a lead with no event type waits in the
+  // holding pen, somebody rings it, qualifies it, and then it is handed out.
+  const stray = post({ formName: 'Homepage Inquiry', name: 'Pen Lead',
+    email: 'holdingpen@example.com' }, { source: 'website' });
+  check('it waits in the holding pen', stray.tab, 'Unassigned');
+  const penRow = tab('Unassigned').getLastRow();
+  setCellOf('Unassigned', penRow, 'Status', 'Valid');
+
+  const out = api.moveLead('Unassigned', penRow, 'Celestino');
+  check('a qualified lead can still be handed out of Unassigned', out.ok, 'true');
+  check('to the caller who was picked', out.to, 'Celestino');
+  check('keeping the status that was earned',
+    cellOf('Celestino', out.row, 'Status'), 'Valid');
+
+  // Same for a shared event-type tab, which is also nobody's. Parked there on
+  // purpose rather than by coverage, because who covers Corporate depends on
+  // the roster the blocks above left behind.
+  // Cleared first: it arrived from the pen still marked Valid, and off a
+  // caller's own tab that is refused — which is the rule working.
+  const parkRow = tab('Celestino').getLastRow();
+  setCellOf('Celestino', parkRow, 'Status', 'New');
+  const parked = api.moveLead('Celestino', parkRow, 'Corporate');
+  check('a lead can be parked on a shared tab', parked.ok, 'true');
+  setCellOf('Corporate', parked.row, 'Status', 'Valid');
+  const fromShared = api.moveLead('Corporate', parked.row, 'Celestino');
+  check('and a qualified one can be handed out of there too', fromShared.ok, 'true');
+
+  // But off a caller's own tab it is still refused, which is the whole point.
+  const held = tab('Celestino').getLastRow();
+  setCellOf('Celestino', held, 'Status', 'Valid');
+  const before = rows('Celestino');
+  const refused = api.moveLead('Celestino', held, 'Unassigned');
+  check('a Valid lead is still not taken off its caller', refused.ok, 'false');
+  check('and the refusal names the tab',
+    /off Celestino/.test(String(refused.problem)), 'true');
+  check('the row stays where it is', rows('Celestino'), before);
+}
+
 realLog('\n--- a caller tab that somebody renames ---');
 {
   silence(quiet);
